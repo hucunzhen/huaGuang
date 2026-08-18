@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:HuaGuang.Monitor.Controls"
+             xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
+             x:Class="HuaGuang.Monitor.Views.DashboardPage"
+             x:DataType="vm:DashboardViewModel"
+             Title="监控"
+             BackgroundColor="#0B1522">
+
+    <Grid RowDefinitions="Auto,*,Auto" Padding="10" RowSpacing="8">
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+            <VerticalStackLayout VerticalOptions="Center" Spacing="1">
+                <Label Text="华光工业监控" TextColor="White" FontSize="20" FontAttributes="Bold" />
+                <Label Text="{Binding DeviceId, StringFormat='设备 {0}'}" TextColor="#8AA0B5" FontSize="12" />
+                <Label Text="{Binding ModeText}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="TailTruncation" />
+            </VerticalStackLayout>
+
+            <Border Grid.Column="1" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8" VerticalOptions="Center">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <HorizontalStackLayout Spacing="8">
+                    <BoxView WidthRequest="8" HeightRequest="8" CornerRadius="4" VerticalOptions="Center"
+                             Color="{Binding PlcConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
+                    <VerticalStackLayout Spacing="0">
+                        <Label Text="PLC" TextColor="#8AA0B5" FontSize="11" />
+                        <Label Text="{Binding PlcConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White" FontSize="13" />
+                    </VerticalStackLayout>
+                </HorizontalStackLayout>
+            </Border>
+
+            <Border Grid.Column="2" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8" VerticalOptions="Center">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <HorizontalStackLayout Spacing="8">
+                    <BoxView WidthRequest="8" HeightRequest="8" CornerRadius="4" VerticalOptions="Center"
+                             Color="{Binding MqttConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
+                    <VerticalStackLayout Spacing="0">
+                        <Label Text="MQTT" TextColor="#8AA0B5" FontSize="11" />
+                        <Label Text="{Binding MqttConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White" FontSize="13" />
+                    </VerticalStackLayout>
+                </HorizontalStackLayout>
+            </Border>
+
+            <Button Grid.Column="3"
+                    Text="{Binding ToggleText}"
+                    Command="{Binding ToggleCommand}"
+                    VerticalOptions="Center"
+                    MinimumWidthRequest="108" />
+        </Grid>
+
+        <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="6">
+            <VerticalStackLayout Spacing="2">
+                <Label Text="{Binding TopicPreview, StringFormat='发布主题：{0}'}" TextColor="#8AA0B5" FontSize="12" LineBreakMode="TailTruncation" />
+                <Label Text="{Binding LastError}" TextColor="#FF6B6B" FontSize="12"
+                       IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
+            </VerticalStackLayout>
+
+            <controls:FitGrid Grid.Row="1" ItemsSource="{Binding Tags}">
+                <controls:FitGrid.ItemTemplate>
+                    <DataTemplate x:DataType="vm:TagRowViewModel">
+                        <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid RowDefinitions="Auto,*,Auto" RowSpacing="2">
+                                <Label Text="{Binding Name}"
+                                       TextColor="#C9D6E2"
+                                       FontSize="12"
+                                       LineBreakMode="TailTruncation"
+                                       MaxLines="1" />
+                                <HorizontalStackLayout Grid.Row="1" Spacing="4" VerticalOptions="Center">
+                                    <Label Text="{Binding DisplayValue}"
+                                           TextColor="#2EC4B6"
+                                           FontSize="22"
+                                           FontAttributes="Bold"
+                                           LineBreakMode="TailTruncation"
+                                           VerticalOptions="Center" />
+                                    <Label Text="{Binding Unit}"
+                                           TextColor="#8AA0B5"
+                                           FontSize="11"
+                                           VerticalOptions="End"
+                                           Margin="0,0,0,2" />
+                                </HorizontalStackLayout>
+                                <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                    <Label Text="{Binding AddressText}" TextColor="#6E8499" FontSize="10" LineBreakMode="TailTruncation" />
+                                    <HorizontalStackLayout Grid.Column="1" Spacing="4">
+                                        <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center" Color="{Binding QualityColor}" />
+                                        <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5" FontSize="10" />
+                                    </HorizontalStackLayout>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </controls:FitGrid.ItemTemplate>
+                <controls:FitGrid.EmptyView>
+                    <Label Text="还没有启用的点位，请到“点位”页添加。" TextColor="#8AA0B5" />
+                </controls:FitGrid.EmptyView>
+            </controls:FitGrid>
+        </Grid>
+
+        <Border Grid.Row="2" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#101C28" Padding="8,6">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="8" />
+            </Border.StrokeShape>
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                <Label Text="最近报文" TextColor="#8AA0B5" FontSize="11" VerticalOptions="Center" />
+                <Label Grid.Column="1"
+                       Text="{Binding LastPayload}"
+                       TextColor="#C9D6E2"
+                       FontSize="11"
+                       LineBreakMode="TailTruncation"
+                       MaxLines="1"
+                       VerticalOptions="Center" />
+            </Grid>
+        </Border>
+    </Grid>
+</ContentPage>

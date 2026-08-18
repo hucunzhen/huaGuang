@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
+             x:Class="HuaGuang.Monitor.Views.SettingsPage"
+             x:DataType="vm:SettingsViewModel"
+             Title="设置"
+             BackgroundColor="#0B1522">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16" Spacing="14">
+            <Label Text="采集" TextColor="White" FontSize="18" FontAttributes="Bold" />
+            <Label Text="产线（华光数据地址规划）" TextColor="#8AA0B5" FontSize="12" />
+            <Picker ItemsSource="{Binding LineNames}" SelectedItem="{Binding SelectedLineName}" />
+            <Button Text="载入该产线点表和 PLC IP" Command="{Binding ApplyLineCommand}" />
+            <Label Text="设备编号" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding DeviceId}" Placeholder="LINE-01" />
+            <Label Text="扫描周期（毫秒）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding ScanIntervalMs}" Keyboard="Numeric" />
+            <HorizontalStackLayout Spacing="10">
+                <CheckBox IsChecked="{Binding UseSimulator}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="使用模拟数据（无 PLC 时先勾选，可验证 MQTT）" TextColor="White" VerticalOptions="Center" LineBreakMode="WordWrap" />
+            </HorizontalStackLayout>
+
+            <Label Text="PLC · 信捷 XD5E-60T10" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
+            <Label Text="以太网 Modbus TCP 从站。请在 XDPpro 中开启 Modbus TCP Server，端口 502，站号与下面一致。X/Y 为八进制：X7 下一个是 X10。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            <Label Text="IP 地址" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding PlcHost}" Placeholder="192.168.6.10" />
+            <Label Text="端口（默认 502）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding PlcPort}" Keyboard="Numeric" />
+            <Label Text="站号" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding Station}" Keyboard="Numeric" />
+            <Label Text="超时（毫秒）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding PlcTimeoutMs}" Keyboard="Numeric" />
+
+            <Label Text="MQTT" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
+            <Label Text="Broker 地址" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttHost}" Placeholder="127.0.0.1" />
+            <Label Text="端口（默认 1883）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttPort}" Keyboard="Numeric" />
+            <Label Text="ClientId（可空，自动生成）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttClientId}" />
+            <Label Text="用户名" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttUsername}" />
+            <Label Text="密码" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttPassword}" IsPassword="True" />
+            <Label Text="主题，可用 {deviceId}" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttTopic}" />
+            <Label Text="QoS（0 / 1 / 2）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttQos}" Keyboard="Numeric" />
+            <HorizontalStackLayout Spacing="10">
+                <CheckBox IsChecked="{Binding MqttUseTls}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="启用 TLS" TextColor="White" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+
+            <Button Text="保存设置" Command="{Binding SaveCommand}" />
+            <Label Text="{Binding StatusMessage}" TextColor="#2EC4B6" FontSize="13" />
+            <Label Text="胶辊型号、胶水型号、门幅、厚度为手动填写，未列入采集。华迪无“上展开转速率”。REAL 按 D 双字、CDAB 读取。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

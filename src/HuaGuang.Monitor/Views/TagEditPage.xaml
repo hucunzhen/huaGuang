@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
+             x:Class="HuaGuang.Monitor.Views.TagEditPage"
+             x:DataType="vm:TagEditViewModel"
+             Title="{Binding Title}"
+             BackgroundColor="#0B1522">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16" Spacing="12">
+            <Label Text="名称" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding Name}" Placeholder="温度" />
+            <Label Text="单位" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding Unit}" Placeholder="℃" />
+            <HorizontalStackLayout Spacing="10">
+                <CheckBox IsChecked="{Binding Enabled}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="启用采集" TextColor="White" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+            <Label Text="信捷地址（XD5E）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding XinjeAddress}" Placeholder="D100 / M0 / X20 / Y0" />
+            <Label Text="{Binding ResolvedHint}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="WordWrap" />
+            <Label Text="数据类型（M/X/Y 会自动按位读取）" TextColor="#8AA0B5" FontSize="12" />
+            <Picker ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataTypeName}" />
+            <Label Text="字节序（32 位）" TextColor="#8AA0B5" FontSize="12" />
+            <Picker ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrderName}" />
+            <Label Text="比例 Scale" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding Scale}" Keyboard="Numeric" />
+            <Label Text="偏移 Offset" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding Offset}" Keyboard="Numeric" />
+            <Button Text="保存点位" Command="{Binding SaveCommand}" />
+            <Label Text="{Binding StatusMessage}" TextColor="#FF6B6B" FontSize="13" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="HuaGuang.Monitor.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:views="clr-namespace:HuaGuang.Monitor.Views"
+    Title="华光工业监控"
+    FlyoutBehavior="Disabled"
+    Shell.BackgroundColor="#0B1522"
+    Shell.ForegroundColor="White"
+    Shell.TitleColor="White"
+    Shell.TabBarBackgroundColor="#101C28"
+    Shell.TabBarForegroundColor="#2EC4B6"
+    Shell.TabBarTitleColor="#2EC4B6"
+    Shell.TabBarUnselectedColor="#8AA0B5">
+
+    <TabBar>
+        <ShellContent
+            Title="监控"
+            ContentTemplate="{DataTemplate views:DashboardPage}"
+            Route="dashboard" />
+        <ShellContent
+            Title="点位"
+            ContentTemplate="{DataTemplate views:TagsPage}"
+            Route="tags" />
+        <ShellContent
+            Title="设置"
+            ContentTemplate="{DataTemplate views:SettingsPage}"
+            Route="settings" />
+    </TabBar>
+</Shell>

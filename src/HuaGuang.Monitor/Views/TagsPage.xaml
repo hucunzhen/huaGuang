@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:HuaGuang.Monitor.Controls"
+             xmlns:models="clr-namespace:HuaGuang.Monitor.Models"
+             xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
+             x:Class="HuaGuang.Monitor.Views.TagsPage"
+             x:Name="ThisPage"
+             x:DataType="vm:TagsViewModel"
+             Title="点位"
+             BackgroundColor="#0B1522">
+
+    <Grid RowDefinitions="Auto,*,Auto" Padding="10" RowSpacing="8">
+        <Grid ColumnDefinitions="*,Auto">
+            <Label Text="采集点位" TextColor="White" FontSize="20" FontAttributes="Bold" VerticalOptions="Center" />
+            <Button Grid.Column="1"
+                    Text="新增"
+                    Command="{Binding AddCommand}"
+                    Padding="14,8"
+                    MinimumHeightRequest="36" />
+        </Grid>
+
+        <controls:FitGrid Grid.Row="1" ItemsSource="{Binding Tags}">
+            <controls:FitGrid.ItemTemplate>
+                <DataTemplate x:DataType="models:PlcTag">
+                    <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="2">
+                            <Label Text="{Binding Name}" TextColor="White" FontSize="13" FontAttributes="Bold" LineBreakMode="TailTruncation" MaxLines="1" />
+                            <Label Grid.Row="1" Text="{Binding DisplayAddress}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="TailTruncation" />
+                            <HorizontalStackLayout Grid.Row="2" Spacing="8" VerticalOptions="Start">
+                                <Label Text="{Binding DataType}" TextColor="#8AA0B5" FontSize="11" />
+                                <Label Text="{Binding Unit}" TextColor="#8AA0B5" FontSize="11" LineBreakMode="TailTruncation" />
+                            </HorizontalStackLayout>
+                            <Grid Grid.Row="3" ColumnDefinitions="*,*" ColumnSpacing="6">
+                                <Button Text="编辑"
+                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.EditCommand}"
+                                        CommandParameter="{Binding .}"
+                                        Padding="6,2"
+                                        FontSize="12"
+                                        MinimumHeightRequest="28"
+                                        MinimumWidthRequest="0" />
+                                <Button Grid.Column="1"
+                                        Text="删除"
+                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.DeleteCommand}"
+                                        CommandParameter="{Binding .}"
+                                        BackgroundColor="#5A2430"
+                                        Padding="6,2"
+                                        FontSize="12"
+                                        MinimumHeightRequest="28"
+                                        MinimumWidthRequest="0" />
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </controls:FitGrid.ItemTemplate>
+            <controls:FitGrid.EmptyView>
+                <Label Text="还没有点位，点右上角新增。" TextColor="#8AA0B5" />
+            </controls:FitGrid.EmptyView>
+        </controls:FitGrid>
+
+        <Label Grid.Row="2" Text="{Binding StatusMessage}" TextColor="#2EC4B6" FontSize="13" />
+    </Grid>
+</ContentPage>
