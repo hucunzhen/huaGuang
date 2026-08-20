@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<Project>
+
+  <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' and '$(Configuration)' == 'Release'">
+
+    <BuildInstallerOnPublish Condition="'$(BuildInstallerOnPublish)' == ''">true</BuildInstallerOnPublish>
+
+    <InstallerIssFile>$(MSBuildProjectDirectory)\..\..\installer\IndustrialMonitor.iss</InstallerIssFile>
+
+    <InstallerOutputDir>$(MSBuildProjectDirectory)\..\..\installer\output</InstallerOutputDir>
+
+    <ResolveInnoSetupScript>$(MSBuildProjectDirectory)\..\..\scripts\Resolve-InnoSetup.ps1</ResolveInnoSetupScript>
+
+  </PropertyGroup>
+
+
+
+  <Target Name="BuildWindowsInstaller"
+
+          AfterTargets="Publish"
+
+          Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'
+
+                       and '$(Configuration)' == 'Release'
+
+                       and '$(BuildInstallerOnPublish)' == 'true'">
+
+
+
+    <PropertyGroup>
+
+      <_PublishDir Condition="'$(PublishDir)' != ''">$(PublishDir)</_PublishDir>
+
+      <_PublishDir Condition="'$(_PublishDir)' == ''">$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\win-x64\publish\</_PublishDir>
+
+      <_PublishFullDir>$([System.IO.Path]::GetFullPath('$(_PublishDir)'))</_PublishFullDir>
+
+    </PropertyGroup>
+
+
+
+    <Error Condition="!Exists('$(_PublishFullDir)\HuaGuang.Monitor.exe')"
+
+           Text="Publish output not found at $(_PublishFullDir). Cannot build installer." />
+
+
+
+    <Error Condition="!Exists('$(InstallerIssFile)')"
+
+           Text="Installer script not found: $(InstallerIssFile)" />
+
+
+
+    <Exec Condition="Exists('$(ResolveInnoSetupScript)')"
+
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ResolveInnoSetupScript)&quot; -CompilerPath &quot;$(InnoSetupCompiler)&quot;"
+
+          ConsoleToMSBuild="true"
+
+          IgnoreExitCode="true">
+
+      <Output TaskParameter="ConsoleOutput" PropertyName="_IsccPath" />
+
+    </Exec>
+
+
+
+    <PropertyGroup>
+
+      <_IsccPath Condition="'$(_IsccPath)' != ''">$(_IsccPath.Trim())</_IsccPath>
+
+    </PropertyGroup>
+
+
+
+    <Warning Condition="'$(_IsccPath)' == ''"
+
+             Text="Inno Setup (ISCC.exe) not found. Skipping installer. Typical path: $(LOCALAPPDATA)\Programs\Inno Setup 6\ISCC.exe — or set InnoSetupCompiler / INNO_SETUP_ISCC." />
+
+
+
+    <MakeDir Directories="$(InstallerOutputDir)" Condition="'$(_IsccPath)' != ''" />
+
+
+
+    <Exec Condition="'$(_IsccPath)' != ''"
+
+          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishFullDir)&quot; &quot;$(InstallerIssFile)&quot;"
+
+          WorkingDirectory="$(MSBuildProjectDirectory)\..\..\installer" />
+
+
+
+    <Message Condition="'$(_IsccPath)' != ''"
+
+             Importance="high"
+
+             Text="Windows installer ready: $(InstallerOutputDir)\IndustrialMonitor-Setup.exe (ISCC: $(_IsccPath))" />
+
+  </Target>
+
+</Project>
+

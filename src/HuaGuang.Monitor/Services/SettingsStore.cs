@@ -40,6 +40,7 @@ public sealed class SettingsStore
             await using var stream = File.OpenRead(_filePath);
             var loaded = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions).ConfigureAwait(false);
             Current = loaded ?? CreateDefault();
+            SubscribeTopicHelper.Migrate(Current);
             if (Current.AddressCatalogVersion < LineCatalog.Version || Current.Tags.Count == 0)
             {
                 LineCatalog.Apply(Current, Current.LineName);

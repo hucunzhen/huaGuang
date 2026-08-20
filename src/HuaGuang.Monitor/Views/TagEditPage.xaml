@@ -10,24 +10,49 @@
     <ScrollView>
         <VerticalStackLayout Padding="16" Spacing="12">
             <Label Text="名称" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding Name}" Placeholder="温度" />
+            <Entry Text="{Binding Name}" Placeholder="胶辊型号 / 温度 / 门幅" />
             <Label Text="单位" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding Unit}" Placeholder="℃" />
+            <Entry Text="{Binding Unit}" Placeholder="℃ / mm / 留空" />
             <HorizontalStackLayout Spacing="10">
                 <CheckBox IsChecked="{Binding Enabled}" Color="#2EC4B6" VerticalOptions="Center" />
-                <Label Text="启用采集" TextColor="White" VerticalOptions="Center" />
+                <Label Text="启用" TextColor="White" VerticalOptions="Center" />
             </HorizontalStackLayout>
-            <Label Text="信捷地址（XD5E）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding XinjeAddress}" Placeholder="D100 / M0 / X20 / Y0" />
-            <Label Text="{Binding ResolvedHint}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="WordWrap" />
-            <Label Text="数据类型（M/X/Y 会自动按位读取）" TextColor="#8AA0B5" FontSize="12" />
-            <Picker ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataTypeName}" />
-            <Label Text="字节序（32 位）" TextColor="#8AA0B5" FontSize="12" />
-            <Picker ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrderName}" />
-            <Label Text="比例 Scale" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding Scale}" Keyboard="Numeric" />
-            <Label Text="偏移 Offset" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding Offset}" Keyboard="Numeric" />
+
+            <Label Text="数据来源" TextColor="#8AA0B5" FontSize="12" />
+            <Picker ItemsSource="{Binding SourceTypes}" SelectedItem="{Binding SelectedSourceType}" />
+            <Label Text="手动输入：不参与 PLC 读取，值随 MQTT 一起发布（如胶辊型号、门幅）。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding IsManualSource}" />
+
+            <Label Text="手动值" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsManualSource}" />
+            <Entry Text="{Binding ManualValue}" Placeholder="例如：A型 / 1200 / 0.12"
+                   IsVisible="{Binding IsManualSource}" />
+
+            <Label Text="数据类型" TextColor="#8AA0B5" FontSize="12"
+                   IsVisible="{Binding IsManualSource}" />
+            <Picker ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataTypeName}"
+                    IsVisible="{Binding IsManualSource}" />
+
+            <Label Text="信捷地址（XD5E）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Entry Text="{Binding XinjeAddress}" Placeholder="D100 / M0 / X20 / Y0" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="{Binding ResolvedHint}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding IsPlcSource}" />
+            <Label Text="数据类型（M/X/Y 会自动按位读取）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Picker ItemsSource="{Binding PlcDataTypes}" SelectedItem="{Binding DataTypeName}" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="字节序（32 位）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Picker ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrderName}" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="比例 Scale" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Entry Text="{Binding Scale}" Keyboard="Numeric" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="偏移 Offset" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Entry Text="{Binding Offset}" Keyboard="Numeric" IsVisible="{Binding IsPlcSource}" />
+
+            <Label Text="显示精度（小数位）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding ShowPrecision}" />
+            <Entry Text="{Binding DisplayPrecision}" Keyboard="Numeric" Placeholder="留空=全局默认"
+                   IsVisible="{Binding ShowPrecision}" />
+            <Label Text="0–4。留空则使用「设置」里的全局默认精度；影响监控显示与 MQTT 发布。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding ShowPrecision}" />
+
             <Button Text="保存点位" Command="{Binding SaveCommand}" />
             <Label Text="{Binding StatusMessage}" TextColor="#FF6B6B" FontSize="13" />
         </VerticalStackLayout>

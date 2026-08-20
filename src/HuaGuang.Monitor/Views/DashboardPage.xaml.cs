@@ -14,12 +14,13 @@ public partial class DashboardPage : ContentPage
         BindingContext = viewModel;
     }
 
-    protected override void OnAppearing()
+    protected override async void OnAppearing()
     {
         base.OnAppearing();
         if (BindingContext is DashboardViewModel viewModel)
         {
             viewModel.Reload();
+            await viewModel.TryAutoStartAsync();
         }
     }
 }

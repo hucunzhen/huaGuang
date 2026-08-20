@@ -1,0 +1,27 @@
+{
+  "deviceId": "先河热熔胶复合机",
+  "lineName": "先河热熔胶复合机",
+  "addressCatalogVersion": 2,
+  "scanIntervalMs": 1000,
+  "temperaturePublishThresholdC": 0,
+  "temperaturePrecision": 1,
+  "useSimulator": true,
+  "plc": {
+    "model": "XD5E-60T10",
+    "host": "192.168.6.10",
+    "port": 502,
+    "station": 1,
+    "timeoutMs": 2000
+  },
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "clientId": "monitor-test-publisher",
+    "username": "",
+    "password": "",
+    "useTls": false,
+    "qos": 0,
+    "topic": "monitor/{deviceId}/telemetry"
+  },
+  "tags": []
+}

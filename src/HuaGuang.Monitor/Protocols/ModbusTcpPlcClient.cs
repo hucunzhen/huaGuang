@@ -103,7 +103,7 @@ public sealed class ModbusTcpPlcClient : IPlcClient
             }
         }
 
-        if (table is ModbusTable.Coil or ModbusTable.DiscreteInput || dataType == TagDataType.Bool)
+        if (table is ModbusTable.Coil or ModbusTable.DiscreteInput)
         {
             var coils = table == ModbusTable.DiscreteInput
                 ? master.ReadInputs(station, address, 1)
@@ -117,6 +117,11 @@ public sealed class ModbusTcpPlcClient : IPlcClient
             : master.ReadHoldingRegisters(station, address, count);
 
         var raw = RegisterConverter.ToValue(registers, dataType, tag.ByteOrder);
+        if (dataType == TagDataType.Bool)
+        {
+            return raw;
+        }
+
         return RegisterConverter.ApplyScale(raw, tag);
     }
 

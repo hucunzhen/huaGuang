@@ -7,7 +7,7 @@
              x:Class="HuaGuang.Monitor.Views.TagsPage"
              x:Name="ThisPage"
              x:DataType="vm:TagsViewModel"
-             Title="点位"
+             Shell.NavBarIsVisible="False"
              BackgroundColor="#0B1522">
 
     <Grid RowDefinitions="Auto,*,Auto" Padding="10" RowSpacing="8">

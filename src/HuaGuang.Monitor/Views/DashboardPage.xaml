@@ -5,18 +5,19 @@
              xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
              x:Class="HuaGuang.Monitor.Views.DashboardPage"
              x:DataType="vm:DashboardViewModel"
-             Title="监控"
+             Shell.NavBarIsVisible="False"
              BackgroundColor="#0B1522">
 
     <Grid RowDefinitions="Auto,*,Auto" Padding="10" RowSpacing="8">
         <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
             <VerticalStackLayout VerticalOptions="Center" Spacing="1">
-                <Label Text="华光工业监控" TextColor="White" FontSize="20" FontAttributes="Bold" />
+                <Label Text="工业监控" TextColor="White" FontSize="20" FontAttributes="Bold" />
                 <Label Text="{Binding DeviceId, StringFormat='设备 {0}'}" TextColor="#8AA0B5" FontSize="12" />
                 <Label Text="{Binding ModeText}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="TailTruncation" />
             </VerticalStackLayout>
 
-            <Border Grid.Column="1" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8" VerticalOptions="Center">
+            <Border Grid.Column="1" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8" VerticalOptions="Center"
+                    IsVisible="{Binding IsAcquisitionMode}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="8" />
                 </Border.StrokeShape>
@@ -51,14 +52,30 @@
                     MinimumWidthRequest="108" />
         </Grid>
 
-        <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="6">
-            <VerticalStackLayout Spacing="2">
-                <Label Text="{Binding TopicPreview, StringFormat='发布主题：{0}'}" TextColor="#8AA0B5" FontSize="12" LineBreakMode="TailTruncation" />
+        <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="6">
+            <VerticalStackLayout Spacing="4" IsVisible="{Binding IsSubscribeMode}">
+                <Label Text="主题筛选" TextColor="#8AA0B5" FontSize="12" />
+                <Picker ItemsSource="{Binding TopicFilters}" SelectedItem="{Binding SelectedTopicFilter}" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <Entry Text="{Binding NewSubscribeTopic}" Placeholder="monitor/+/telemetry" />
+                    <Button Grid.Column="1" Text="添加主题" Command="{Binding AddSubscribeTopicCommand}" MinimumWidthRequest="88" />
+                </Grid>
+            </VerticalStackLayout>
+            <VerticalStackLayout Grid.Row="1" Spacing="4" IsVisible="{Binding ShowRemoteDevicePicker}">
+                <Label Text="远程设备" TextColor="#8AA0B5" FontSize="12" />
+                <Picker ItemsSource="{Binding RemoteDeviceItems}"
+                        ItemDisplayBinding="{Binding Label}"
+                        SelectedItem="{Binding SelectedRemoteDeviceItem}" />
+            </VerticalStackLayout>
+            <VerticalStackLayout Grid.Row="2" Spacing="2">
+                <Label Text="{Binding TopicPreview, StringFormat='{0}'}" TextColor="#8AA0B5" FontSize="12" LineBreakMode="TailTruncation" />
+                <Label Text="{Binding PublishNote}" TextColor="#FFB347" FontSize="12"
+                       IsVisible="{Binding PublishNote, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
                 <Label Text="{Binding LastError}" TextColor="#FF6B6B" FontSize="12"
                        IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
             </VerticalStackLayout>
 
-            <controls:FitGrid Grid.Row="1" ItemsSource="{Binding Tags}">
+            <controls:FitGrid Grid.Row="4" ItemsSource="{Binding Tags}">
                 <controls:FitGrid.ItemTemplate>
                     <DataTemplate x:DataType="vm:TagRowViewModel">
                         <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8">
@@ -96,7 +113,7 @@
                     </DataTemplate>
                 </controls:FitGrid.ItemTemplate>
                 <controls:FitGrid.EmptyView>
-                    <Label Text="还没有启用的点位，请到“点位”页添加。" TextColor="#8AA0B5" />
+                    <Label Text="{Binding EmptyTagsHint}" TextColor="#8AA0B5" />
                 </controls:FitGrid.EmptyView>
             </controls:FitGrid>
         </Grid>

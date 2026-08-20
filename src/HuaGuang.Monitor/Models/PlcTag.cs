@@ -7,14 +7,26 @@ public sealed class PlcTag
     public string Unit { get; set; } = string.Empty;
     public string XinjeAddress { get; set; } = "D0";
     public bool Enabled { get; set; } = true;
+    public TagSource Source { get; set; } = TagSource.Plc;
+    public string ManualValue { get; set; } = string.Empty;
     public ModbusTable Table { get; set; } = ModbusTable.HoldingRegister;
     public ushort Address { get; set; }
     public TagDataType DataType { get; set; } = TagDataType.Float32;
     public ByteOrder ByteOrder { get; set; } = ByteOrder.CDAB;
     public double Scale { get; set; } = 1;
     public double Offset { get; set; }
+    /// <summary>显示与 MQTT 小数位数（0–4）。null 表示使用设置里的全局默认。</summary>
+    public int? DisplayPrecision { get; set; }
 
-    public string DisplayAddress => string.IsNullOrWhiteSpace(XinjeAddress)
-        ? $"{Table}:{Address}"
-        : XinjeAddress;
+    public string DisplayAddress => Source == TagSource.Manual
+        ? "手动输入"
+        : string.IsNullOrWhiteSpace(XinjeAddress)
+            ? $"{Table}:{Address}"
+            : XinjeAddress;
+
+    public bool IsManual => Source == TagSource.Manual;
+
+    public bool IsTemperature =>
+        Unit.Contains('℃', StringComparison.Ordinal) ||
+        Name.Contains("温度", StringComparison.Ordinal);
 }

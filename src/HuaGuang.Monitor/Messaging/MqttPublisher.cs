@@ -29,29 +29,8 @@ public sealed class MqttPublisher : IMqttPublisher
             return Task.CompletedTask;
         };
 
-        var clientId = string.IsNullOrWhiteSpace(settings.ClientId)
-            ? $"huaguang-{Guid.NewGuid():N}"[..20]
-            : settings.ClientId;
-
-        var options = new MqttClientOptionsBuilder()
-            .WithTcpServer(settings.Host, settings.Port)
-            .WithClientId(clientId)
-            .WithCleanSession()
-            .WithTimeout(TimeSpan.FromSeconds(5))
-            .WithKeepAlivePeriod(TimeSpan.FromSeconds(30))
-            .WithProtocolVersion(MQTTnet.Formatter.MqttProtocolVersion.V311);
-
-        if (!string.IsNullOrWhiteSpace(settings.Username))
-        {
-            options.WithCredentials(settings.Username, settings.Password);
-        }
-
-        if (settings.UseTls)
-        {
-            options.WithTlsOptions(tls => tls.UseTls());
-        }
-
-        await client.ConnectAsync(options.Build(), cancellationToken).ConfigureAwait(false);
+        var options = MqttConnectionFactory.BuildOptions(settings, "pub");
+        await client.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
         _client = client;
     }
 

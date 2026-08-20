@@ -4,35 +4,81 @@
              xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
              x:Class="HuaGuang.Monitor.Views.SettingsPage"
              x:DataType="vm:SettingsViewModel"
-             Title="设置"
+             Shell.NavBarIsVisible="False"
              BackgroundColor="#0B1522">
 
     <ScrollView>
         <VerticalStackLayout Padding="16" Spacing="14">
             <Label Text="采集" TextColor="White" FontSize="18" FontAttributes="Bold" />
-            <Label Text="产线（华光数据地址规划）" TextColor="#8AA0B5" FontSize="12" />
-            <Picker ItemsSource="{Binding LineNames}" SelectedItem="{Binding SelectedLineName}" />
-            <Button Text="载入该产线点表和 PLC IP" Command="{Binding ApplyLineCommand}" />
-            <Label Text="设备编号" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding DeviceId}" Placeholder="LINE-01" />
-            <Label Text="扫描周期（毫秒）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding ScanIntervalMs}" Keyboard="Numeric" />
-            <HorizontalStackLayout Spacing="10">
+            <Label Text="运行模式" TextColor="#8AA0B5" FontSize="12" />
+            <Picker ItemsSource="{Binding OperationModes}" SelectedItem="{Binding SelectedOperationMode}" />
+            <Label Text="采集模式：读 PLC 并发布 MQTT。订阅模式：连接 Broker 查看局域网内其他设备遥测。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            <Label Text="订阅主题（支持 + / #，可添加多个）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsSubscribeSettings}" />
+            <CollectionView ItemsSource="{Binding SubscribeTopics}" IsVisible="{Binding IsSubscribeSettings}">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <Grid ColumnDefinitions="*,Auto" Padding="0,4">
+                            <Label Text="{Binding .}" TextColor="White" FontSize="14" VerticalOptions="Center" LineBreakMode="TailTruncation" />
+                            <Button Grid.Column="1"
+                                    Text="删除"
+                                    Command="{Binding Source={RelativeSource AncestorType={x:Type vm:SettingsViewModel}}, Path=RemoveSubscribeTopicCommand}"
+                                    CommandParameter="{Binding .}"
+                                    BackgroundColor="#3A1F1F"
+                                    TextColor="#FF6B6B"
+                                    Padding="12,6" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+                <CollectionView.EmptyView>
+                    <Label Text="尚未添加订阅主题，请在下框输入后点「添加」。" TextColor="#8AA0B5" FontSize="12" />
+                </CollectionView.EmptyView>
+            </CollectionView>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding IsSubscribeSettings}">
+                <Entry Text="{Binding NewSubscribeTopic}" Placeholder="monitor/+/telemetry" />
+                <Button Grid.Column="1" Text="添加" Command="{Binding AddSubscribeTopicCommand}" />
+            </Grid>
+            <Label Text="首页可切换「全部」或单个主题查看设备；运行中也可在首页直接添加主题。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsSubscribeSettings}" />
+            <Label Text="产线（数据地址规划）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Picker ItemsSource="{Binding LineNames}" SelectedItem="{Binding SelectedLineName}" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Button Text="载入该产线点表和 PLC IP" Command="{Binding ApplyLineCommand}" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="设备编号" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding DeviceId}" Placeholder="LINE-01" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="扫描周期（毫秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding ScanIntervalMs}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="温度发布阈值（℃）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding TemperaturePublishThresholdC}" Keyboard="Numeric" Placeholder="0" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="0 = 每次扫描都发布；大于 0 时，任一温度点位（单位 ℃ 或名称含“温度”）变化达到该值才发布 MQTT。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="温度精度（小数位）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding TemperaturePrecision}" Keyboard="Numeric" Placeholder="1" />
+            <Label Text="全局默认精度（0–4）。各点位可在「点位 → 编辑」单独设置；未设置时使用此值。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            <HorizontalStackLayout Spacing="10" IsVisible="{Binding IsAcquisitionSettings}">
                 <CheckBox IsChecked="{Binding UseSimulator}" Color="#2EC4B6" VerticalOptions="Center" />
                 <Label Text="使用模拟数据（无 PLC 时先勾选，可验证 MQTT）" TextColor="White" VerticalOptions="Center" LineBreakMode="WordWrap" />
             </HorizontalStackLayout>
+            <HorizontalStackLayout Spacing="10" IsVisible="{Binding StartupSupported}">
+                <CheckBox IsChecked="{Binding StartWithWindows}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="开机自动启动（Windows 登录后运行本程序）" TextColor="White" VerticalOptions="Center" LineBreakMode="WordWrap" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Spacing="10">
+                <CheckBox IsChecked="{Binding AutoStartAcquisition}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="启动后自动运行（采集或订阅，取决于运行模式）" TextColor="White" VerticalOptions="Center" LineBreakMode="WordWrap" />
+            </HorizontalStackLayout>
 
-            <Label Text="PLC · 信捷 XD5E-60T10" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
+            <Label Text="PLC · 信捷 XD5E-60T10" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="以太网 Modbus TCP 从站。请在 XDPpro 中开启 Modbus TCP Server，端口 502，站号与下面一致。X/Y 为八进制：X7 下一个是 X10。"
-                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
-            <Label Text="IP 地址" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding PlcHost}" Placeholder="192.168.6.10" />
-            <Label Text="端口（默认 502）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding PlcPort}" Keyboard="Numeric" />
-            <Label Text="站号" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding Station}" Keyboard="Numeric" />
-            <Label Text="超时（毫秒）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding PlcTimeoutMs}" Keyboard="Numeric" />
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="IP 地址" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding PlcHost}" Placeholder="192.168.6.10" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="端口（默认 502）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding PlcPort}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="站号" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding Station}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="超时（毫秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding PlcTimeoutMs}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
 
             <Label Text="MQTT" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
             <Label Text="Broker 地址" TextColor="#8AA0B5" FontSize="12" />
@@ -45,8 +91,8 @@
             <Entry Text="{Binding MqttUsername}" />
             <Label Text="密码" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttPassword}" IsPassword="True" />
-            <Label Text="主题，可用 {deviceId}" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttTopic}" />
+            <Label Text="发布主题，可用 {deviceId}" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding MqttTopic}" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="QoS（0 / 1 / 2）" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttQos}" Keyboard="Numeric" />
             <HorizontalStackLayout Spacing="10">
@@ -56,8 +102,8 @@
 
             <Button Text="保存设置" Command="{Binding SaveCommand}" />
             <Label Text="{Binding StatusMessage}" TextColor="#2EC4B6" FontSize="13" />
-            <Label Text="胶辊型号、胶水型号、门幅、厚度为手动填写，未列入采集。华迪无“上展开转速率”。REAL 按 D 双字、CDAB 读取。"
-                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            <Label Text="默认点表含胶辊型号、胶水型号、门幅、厚度（手动输入）。华迪无“上展开转速率”。REAL 按 D 双字、CDAB 读取。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
         </VerticalStackLayout>
     </ScrollView>
 </ContentPage>

@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<title>工业监控 — 设计手册</title>
+<style>
+@page { margin: 18mm 16mm; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #1a1a1a;
+  line-height: 1.6;
+  font-size: 11pt;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px;
+}
+h1 { color: #0B1522; border-bottom: 3px solid #2EC4B6; padding-bottom: 8px; font-size: 24pt; }
+h2 { color: #0F2740; margin-top: 28px; font-size: 16pt; page-break-after: avoid; }
+h3 { color: #1F3A52; margin-top: 20px; font-size: 13pt; page-break-after: avoid; }
+h4 { color: #1F3A52; margin-top: 16px; font-size: 12pt; }
+p, li { margin: 6px 0; }
+blockquote {
+  border-left: 4px solid #2EC4B6;
+  margin: 12px 0;
+  padding: 8px 14px;
+  background: #f4f8fb;
+  color: #334;
+}
+code {
+  background: #eef2f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: Consolas, monospace;
+  font-size: 10pt;
+}
+pre {
+  background: #0B1522;
+  color: #C9D6E2;
+  padding: 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 9pt;
+  page-break-inside: avoid;
+}
+pre code { background: transparent; color: inherit; padding: 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 18px;
+  font-size: 10pt;
+  page-break-inside: avoid;
+}
+th, td {
+  border: 1px solid #cfd8e3;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #101C28; color: #fff; }
+tr:nth-child(even) td { background: #f7fafc; }
+figure {
+  margin: 16px 0 24px;
+  page-break-inside: avoid;
+  text-align: center;
+}
+figure img {
+  max-width: 100%;
+  border: 1px solid #d0d8e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.08);
+}
+figcaption {
+  margin-top: 8px;
+  color: #667;
+  font-size: 10pt;
+}
+hr { border: none; border-top: 1px solid #dde4ea; margin: 24px 0; }
+ul, ol { padding-left: 22px; }
+</style>
+</head>
+<body>
+<h1>工业监控 — 设计手册</h1>
+<blockquote>版本 1.0 · 平台：Windows 10/11 工控机、Android 11 工业平板</blockquote>
+<blockquote>技术栈：.NET 10 MAUI · 信捷 XD5E-60T10 · Modbus TCP · MQTT</blockquote>
+<blockquote>PDF 版：[DESIGN.pdf](DESIGN.pdf)（运行 <code>python ../scripts/export-design-pdf.py</code> 重新生成）</blockquote>
+<hr/>
+<h2>1. 产品概述</h2>
+<p><strong>工业监控</strong> 是一套面向热熔胶复合产线的现场采集终端，按设定周期从信捷 PLC 读取机台点位，经阈值与精度处理后，以 JSON 通过 MQTT 上报。</p>
+<table><thead><tr>
+<th>项目</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td>应用名称</td>
+<td>工业监控</td>
+</tr>
+<tr>
+<td>包名 / ID</td>
+<td><code>com.industrial.monitor</code></td>
+</tr>
+<tr>
+<td>默认产线</td>
+<td>先河热熔胶复合机（<code>192.168.6.10</code>）</td>
+</tr>
+<tr>
+<td>可选产线</td>
+<td>华迪热熔胶复合机（<code>192.168.6.20</code>）</td>
+</tr>
+<tr>
+<td>PLC 型号</td>
+<td>信捷 XD5E-60T10，Modbus TCP 502</td>
+</tr>
+</tbody></table>
+<hr/>
+<h2>2. 系统架构</h2>
+<figure><img src="images/04-architecture.png" alt="系统架构"/><figcaption>系统架构</figcaption></figure>
+<pre><code>┌─────────────┐    Modbus TCP     ┌──────────────────┐    MQTT JSON    ┌─────────────┐
+│  XD5E-60T10 │ ────────────────► │  工业监控 App  │ ──────────────► │ MQTT Broker │
+│  PLC :502   │    周期轮询        │  (Win / Android)  │   按阈值发布     │  / 云端     │
+└─────────────┘                   └──────────────────┘                 └─────────────┘
+                                         │
+                    ┌────────────────────┼────────────────────┐
+                    ▼                    ▼                    ▼
+              DashboardPage          TagsPage           SettingsPage
+              实时监控               点位管理              参数配置</code></pre>
+<h3>2.1 核心模块</h3>
+<table><thead><tr>
+<th>模块</th>
+<th>职责</th>
+</tr></thead><tbody>
+<tr>
+<td><code>AcquisitionService</code></td>
+<td>轮询 PLC、模拟数据、阈值判断、MQTT 发布</td>
+</tr>
+<tr>
+<td><code>ModbusTcpPlcClient</code></td>
+<td>信捷地址映射与 Modbus 读寄存器</td>
+</tr>
+<tr>
+<td><code>MqttPublisher</code></td>
+<td>MQTT 连接与 JSON 报文发布</td>
+</tr>
+<tr>
+<td><code>SettingsStore</code></td>
+<td>本地 <code>settings.json</code> 持久化</td>
+</tr>
+<tr>
+<td><code>LineCatalog</code></td>
+<td>产线数据地址规划点表</td>
+</tr>
+</tbody></table>
+<h3>2.2 数据流</h3>
+<ol>
+<li>按 <strong>扫描周期</strong>（默认 1000 ms）读取所有启用点位</li>
+<li>温度点位按 <strong>精度</strong> 四舍五入</li>
+<li>若 <strong>温度发布阈值</strong> &gt; 0，仅当任一温度变化 ≥ 阈值时才发布；否则每次扫描都发布</li>
+<li>监控页 <strong>始终刷新</strong> 显示，与是否发布 MQTT 无关</li>
+</ol>
+<hr/>
+<h2>3. 视觉设计规范（Windows）</h2>
+<h3>3.1 设计语言</h3>
+<p>深色工业风，高对比度数值、低干扰背景，适配工控机长时间运行。</p>
+<h3>3.2 色彩</h3>
+<table><thead><tr>
+<th>用途</th>
+<th>色值</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td>页面背景</td>
+<td><code>#0B1522</code></td>
+<td>主背景</td>
+</tr>
+<tr>
+<td>卡片背景</td>
+<td><code>#152536</code></td>
+<td>点位卡片、状态块</td>
+</tr>
+<tr>
+<td>卡片边框</td>
+<td><code>#1F3A52</code></td>
+<td>1 px 描边</td>
+</tr>
+<tr>
+<td>Tab 栏背景</td>
+<td><code>#101C28</code></td>
+<td>底部导航</td>
+</tr>
+<tr>
+<td>主强调色</td>
+<td><code>#2EC4B6</code></td>
+<td>数值、选中 Tab、按钮</td>
+</tr>
+<tr>
+<td>主文字</td>
+<td><code>#FFFFFF</code></td>
+<td>标题</td>
+</tr>
+<tr>
+<td>次级文字</td>
+<td><code>#8AA0B5</code></td>
+<td>标签、说明</td>
+</tr>
+<tr>
+<td>数值辅助</td>
+<td><code>#C9D6E2</code></td>
+<td>报文、点名</td>
+</tr>
+<tr>
+<td>成功 / 已连接</td>
+<td><code>#3DDC97</code></td>
+<td>状态点</td>
+</tr>
+<tr>
+<td>警告</td>
+<td><code>#FFB347</code></td>
+<td>未发布提示</td>
+</tr>
+<tr>
+<td>错误</td>
+<td><code>#FF6B6B</code></td>
+<td>异常信息</td>
+</tr>
+<tr>
+<td>删除按钮</td>
+<td><code>#5A2430</code></td>
+<td>危险操作</td>
+</tr>
+</tbody></table>
+<h3>3.3 字体与圆角</h3>
+<table><thead><tr>
+<th>元素</th>
+<th>规格</th>
+</tr></thead><tbody>
+<tr>
+<td>页面标题</td>
+<td>20 pt，Bold，White</td>
+</tr>
+<tr>
+<td>区块标题</td>
+<td>18 pt，Bold</td>
+</tr>
+<tr>
+<td>实时数值</td>
+<td>22 pt，Bold，<code>#2EC4B6</code></td>
+</tr>
+<tr>
+<td>卡片圆角</td>
+<td>8 px</td>
+</tr>
+<tr>
+<td>状态点</td>
+<td>7–8 px 圆形</td>
+</tr>
+</tbody></table>
+<h3>3.4 导航结构</h3>
+<p>底部 <strong>TabBar</strong> 三页，<strong>无顶部 Shell 标题栏</strong>（<code>Shell.NavBarIsVisible=False</code>），内容区自带标题。</p>
+<table><thead><tr>
+<th>Tab</th>
+<th>路由</th>
+<th>功能</th>
+</tr></thead><tbody>
+<tr>
+<td>监控</td>
+<td><code>dashboard</code></td>
+<td>实时数据、启停采集、连接状态</td>
+</tr>
+<tr>
+<td>点位</td>
+<td><code>tags</code></td>
+<td>点位列表、增删改</td>
+</tr>
+<tr>
+<td>设置</td>
+<td><code>settings</code></td>
+<td>产线、PLC、MQTT、阈值与精度</td>
+</tr>
+</tbody></table>
+<hr/>
+<h2>4. 界面设计（Windows）</h2>
+<h3>4.1 监控页</h3>
+<figure><img src="images/01-dashboard.png" alt="监控页"/><figcaption>监控页</figcaption></figure>
+<p><strong>布局（上 → 下）</strong></p>
+<table><thead><tr>
+<th>区域</th>
+<th>内容</th>
+</tr></thead><tbody>
+<tr>
+<td>顶栏</td>
+<td>应用名、设备 ID、运行模式；PLC / MQTT 状态卡片；<strong>启动采集 / 停止采集</strong></td>
+</tr>
+<tr>
+<td>信息条</td>
+<td>MQTT 发布主题；橙色「未发布」提示；红色错误信息</td>
+</tr>
+<tr>
+<td>主区域</td>
+<td>自适应网格卡片，展示各点位实时值、单位、地址、质量、更新时间</td>
+</tr>
+<tr>
+<td>底栏</td>
+<td>最近 MQTT 报文摘要（单行截断）</td>
+</tr>
+</tbody></table>
+<p><strong>状态指示</strong></p>
+<ul>
+<li>绿点 +「已连接」：PLC / MQTT 正常</li>
+<li>灰点 +「未连接」：未连或模拟模式下未建立连接</li>
+</ul>
+<p><strong>交互</strong></p>
+<ul>
+<li>「启动采集」：开始轮询并按规则发布 MQTT</li>
+<li>「停止采集」：断开 PLC / MQTT，停止轮询</li>
+</ul>
+<hr/>
+<h3>4.2 点位页</h3>
+<figure><img src="images/02-tags.png" alt="点位页"/><figcaption>点位页</figcaption></figure>
+<p><strong>布局</strong></p>
+<table><thead><tr>
+<th>区域</th>
+<th>内容</th>
+</tr></thead><tbody>
+<tr>
+<td>顶栏</td>
+<td>标题「采集点位」+ <strong>新增</strong> 按钮</td>
+</tr>
+<tr>
+<td>主区域</td>
+<td>点位卡片网格：名称、信捷地址、数据类型、单位</td>
+</tr>
+<tr>
+<td>卡片操作</td>
+<td><strong>编辑</strong> / <strong>删除</strong>（删除为红色按钮）</td>
+</tr>
+</tbody></table>
+<p><strong>点位编辑页</strong>（从本页跳入）</p>
+<ul>
+<li>信捷地址：<code>D100</code>、<code>M0</code>、<code>X20</code>（八进制）、<code>Y0</code></li>
+<li>浮点占两个 D，默认字节序 <strong>CDAB</strong></li>
+<li>Scale / Offset 工程量换算</li>
+</ul>
+<blockquote>产线切换时在「设置」页载入点表，会覆盖当前点位列表。</blockquote>
+<hr/>
+<h3>4.3 设置页</h3>
+<figure><img src="images/03-settings.png" alt="设置页"/><figcaption>设置页</figcaption></figure>
+<p><strong>分组字段</strong></p>
+<h4>采集</h4>
+<table><thead><tr>
+<th>字段</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td>产线</td>
+<td>先河 / 华迪，载入对应 IP 与点表</td>
+</tr>
+<tr>
+<td>设备编号</td>
+<td>MQTT <code>{deviceId}</code> 替换用</td>
+</tr>
+<tr>
+<td>扫描周期</td>
+<td>200–60000 ms</td>
+</tr>
+<tr>
+<td>温度发布阈值</td>
+<td><code>0</code> = 每次都发；<code>&gt;0</code> = 任一温度变化达该 ℃ 才发</td>
+</tr>
+<tr>
+<td>温度精度</td>
+<td>0–4 位小数，影响显示与 MQTT</td>
+</tr>
+<tr>
+<td>使用模拟数据</td>
+<td>无 PLC 时生成波形数据，可验证 MQTT</td>
+</tr>
+</tbody></table>
+<h4>PLC（信捷 XD5E-60T10）</h4>
+<table><thead><tr>
+<th>字段</th>
+<th>默认</th>
+</tr></thead><tbody>
+<tr>
+<td>IP</td>
+<td><code>192.168.6.10</code> / <code>192.168.6.20</code></td>
+</tr>
+<tr>
+<td>端口</td>
+<td>502</td>
+</tr>
+<tr>
+<td>站号</td>
+<td>1</td>
+</tr>
+<tr>
+<td>超时</td>
+<td>2000 ms</td>
+</tr>
+</tbody></table>
+<h4>MQTT</h4>
+<table><thead><tr>
+<th>字段</th>
+<th>默认</th>
+</tr></thead><tbody>
+<tr>
+<td>Broker</td>
+<td><code>127.0.0.1:1883</code></td>
+</tr>
+<tr>
+<td>主题</td>
+<td><code>monitor/{deviceId}/telemetry</code></td>
+</tr>
+<tr>
+<td>QoS</td>
+<td>0</td>
+</tr>
+</tbody></table>
+<blockquote><strong>保存前须停止采集。</strong></blockquote>
+<hr/>
+<h2>5. MQTT 报文格式</h2>
+<pre><code class="language-json">{
+  &quot;deviceId&quot;: &quot;先河热熔胶复合机&quot;,
+  &quot;timestamp&quot;: &quot;2026-08-19T05:30:00Z&quot;,
+  &quot;simulator&quot;: false,
+  &quot;plcHost&quot;: &quot;192.168.6.10&quot;,
+  &quot;quality&quot;: &quot;Good&quot;,
+  &quot;tags&quot;: {
+    &quot;热溶胶盘温度（热熔胶机1）&quot;: 180.5,
+    &quot;胶管温度（热熔胶机1）&quot;: 175.2,
+    &quot;车速&quot;: 45.2
+  }
+}</code></pre>
+<table><thead><tr>
+<th>字段</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td><code>quality</code></td>
+<td><code>Good</code> 全部成功；<code>Uncertain</code> 部分点位失败</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td>键为点位名称，温度为精度处理后数值</td>
+</tr>
+</tbody></table>
+<hr/>
+<h2>6. 默认点表（节选）</h2>
+<p>来源：产线数据地址规划 — 仅「机台获取」REAL 点位。</p>
+<table><thead><tr>
+<th>名称</th>
+<th>地址</th>
+<th>单位</th>
+</tr></thead><tbody>
+<tr>
+<td>运行状态</td>
+<td>D1000</td>
+<td>—</td>
+</tr>
+<tr>
+<td>热溶胶盘温度（热熔胶机1）</td>
+<td>D6000</td>
+<td>℃</td>
+</tr>
+<tr>
+<td>胶管温度（热熔胶机1）</td>
+<td>D6002</td>
+<td>℃</td>
+</tr>
+<tr>
+<td>油温机温度</td>
+<td>D6200</td>
+<td>℃</td>
+</tr>
+<tr>
+<td>车速</td>
+<td>D1030</td>
+<td>—</td>
+</tr>
+<tr>
+<td>卷曲张力</td>
+<td>D1090</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<p>胶辊型号、胶水型号、门幅、厚度为 <strong>手动填写</strong>，不采集。华迪产线无「上展开转速率」。</p>
+<hr/>
+<h2>7. 部署与运行（Windows）</h2>
+<table><thead><tr>
+<th>场景</th>
+<th>方式</th>
+</tr></thead><tbody>
+<tr>
+<td>开发调试</td>
+<td>Visual Studio F5，<code>net10.0-windows10.0.19041.0</code></td>
+</tr>
+<tr>
+<td>现场工控机</td>
+<td><code>publish-windows.ps1</code> 自包含发布，拷贝 <code>publish</code> 目录</td>
+</tr>
+<tr>
+<td>无 PLC 联调</td>
+<td>勾选模拟数据 + 本地 Mosquitto（<code>start-test-mqtt.ps1</code>）</td>
+</tr>
+</tbody></table>
+<p><strong>运行环境</strong></p>
+<ul>
+<li>Windows 10 1809+ x64</li>
+<li>Debug 需安装 [Windows App Runtime 1.7](https://aka.ms/windowsappsdk/1.7/latest/windowsappruntimeinstall-x64.exe)</li>
+<li>Release 自包含，工控机无需预装 .NET</li>
+</ul>
+<hr/>
+<h2>8. 文件与目录</h2>
+<pre><code>huaGuang/
+├── docs/
+│   ├── DESIGN.md          ← 本设计手册
+│   └── images/            ← 界面与架构图
+├── src/HuaGuang.Monitor/  ← MAUI 主工程
+├── scripts/               ← 编译、发布、测试脚本
+└── test/                  ← MQTT 与示例配置</code></pre>
+<hr/>
+<h2>9. 修订记录</h2>
+<table><thead><tr>
+<th>版本</th>
+<th>日期</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td>1.0</td>
+<td>2026-08-19</td>
+<td>初版：三 Tab 界面、温度阈值/精度、Windows 界面说明</td>
+</tr>
+</tbody></table>
+</body>
+</html>

@@ -1,5 +1,17 @@
 namespace HuaGuang.Monitor.Models;
 
+public enum AppOperationMode
+{
+    Acquisition,
+    Subscribe
+}
+
+public enum TagSource
+{
+    Plc,
+    Manual
+}
+
 public enum TagDataType
 {
     Bool,
@@ -7,7 +19,8 @@ public enum TagDataType
     UInt16,
     Int32,
     UInt32,
-    Float32
+    Float32,
+    String
 }
 
 public enum ModbusTable

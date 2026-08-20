@@ -4,12 +4,11 @@ using HuaGuang.Monitor.Protocols;
 namespace HuaGuang.Monitor.Services;
 
 /// <summary>
-/// 来自《华光数据地址规划.xlsx》：只收录“机台获取”的 REAL 点位。
-/// 胶辊型号、胶水型号、门幅、厚度为手动填写，不从 PLC 采集。
+/// 来自产线数据地址规划：PLC 点位为机台获取；胶辊型号、胶水型号、门幅、厚度为手动填写。
 /// </summary>
 public static class LineCatalog
 {
-    public const int Version = 2;
+    public const int Version = 4;
 
     public static IReadOnlyList<string> LineNames { get; } =
     [
@@ -46,7 +45,7 @@ public static class LineCatalog
     {
         var tags = new List<PlcTag>
         {
-            Real("运行状态", "D1000"),
+            Bool("运行状态", "D1000"),
             Real("热溶胶盘温度（热熔胶机1）", "D6000", "℃"),
             Real("胶管温度（热熔胶机1）", "D6002", "℃"),
             Real("胶枪温度（热熔胶机1）", "D6004", "℃"),
@@ -73,8 +72,20 @@ public static class LineCatalog
         tags.Add(Real("当前工作胶盘温度", "D6100", "℃"));
         tags.Add(Real("当前工作胶管温度", "D6120", "℃"));
         tags.Add(Real("当前工作胶枪温度", "D6140", "℃"));
+
+        tags.Add(ManualString("胶辊型号"));
+        tags.Add(ManualString("胶水型号"));
+        tags.Add(ManualReal("门幅", "mm"));
+        tags.Add(ManualReal("厚度", "mm"));
         return tags;
     }
+
+    static PlcTag Bool(string name, string address) => new()
+    {
+        Name = name,
+        XinjeAddress = address,
+        DataType = TagDataType.Bool
+    };
 
     static PlcTag Real(string name, string address, string unit = "") => new()
     {
@@ -85,6 +96,23 @@ public static class LineCatalog
         ByteOrder = ByteOrder.CDAB
     };
 
+    static PlcTag ManualString(string name, string defaultValue = "") => new()
+    {
+        Name = name,
+        Source = TagSource.Manual,
+        DataType = TagDataType.String,
+        ManualValue = defaultValue
+    };
+
+    static PlcTag ManualReal(string name, string unit = "", string defaultValue = "") => new()
+    {
+        Name = name,
+        Unit = unit,
+        Source = TagSource.Manual,
+        DataType = TagDataType.Float32,
+        ManualValue = defaultValue
+    };
+
     static PlcTag CloneAndResolve(PlcTag source)
     {
         var tag = new PlcTag
@@ -93,9 +121,17 @@ public static class LineCatalog
             Unit = source.Unit,
             XinjeAddress = source.XinjeAddress,
             DataType = source.DataType,
-            ByteOrder = source.ByteOrder
+            ByteOrder = source.ByteOrder,
+            Source = source.Source,
+            ManualValue = source.ManualValue,
+            DisplayPrecision = source.DisplayPrecision
         };
-        XinjeXd5eMapper.ApplyTo(tag);
+
+        if (tag.Source != TagSource.Manual)
+        {
+            XinjeXd5eMapper.ApplyTo(tag);
+        }
+
         return tag;
     }
 }

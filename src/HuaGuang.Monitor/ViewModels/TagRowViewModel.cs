@@ -1,16 +1,22 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using HuaGuang.Monitor.Models;
+using HuaGuang.Monitor.Services;
 
 namespace HuaGuang.Monitor.ViewModels;
 
 public partial class TagRowViewModel : ObservableObject
 {
-    public TagRowViewModel(PlcTag tag)
+    readonly PlcTag _tag;
+    readonly int _globalPrecision = 1;
+
+    public TagRowViewModel(PlcTag tag, int globalPrecision = 1, string? addressOverride = null)
     {
+        _tag = tag;
+        _globalPrecision = globalPrecision;
         Id = tag.Id;
         Name = tag.Name;
         Unit = tag.Unit;
-        AddressText = tag.DisplayAddress;
+        AddressText = addressOverride ?? tag.DisplayAddress;
     }
 
     public string Id { get; }
@@ -29,14 +35,7 @@ public partial class TagRowViewModel : ObservableObject
     [ObservableProperty]
     string updatedAt = "—";
 
-    public string DisplayValue => Value switch
-    {
-        null => "—",
-        bool flag => flag ? "开" : "关",
-        double number => number.ToString("0.####"),
-        float number => number.ToString("0.####"),
-        _ => Value.ToString() ?? "—"
-    };
+    public string DisplayValue => ValueFormatting.FormatDisplay(_tag, Value, _globalPrecision);
 
     public Color QualityColor => Quality switch
     {

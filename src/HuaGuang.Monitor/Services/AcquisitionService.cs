@@ -18,8 +18,10 @@ public sealed class AcquisitionService : IDisposable
     readonly IPlcClient _plc;
     readonly IMqttPublisher _mqtt;
     readonly SemaphoreSlim _gate = new(1, 1);
+    readonly Dictionary<string, double> _lastPublishedTemperatures = new(StringComparer.Ordinal);
     CancellationTokenSource? _cts;
     Task? _loop;
+    bool _initialPublishDone;
 
     public AcquisitionService(SettingsStore settingsStore, IPlcClient plc, IMqttPublisher mqtt)
     {
@@ -34,6 +36,7 @@ public sealed class AcquisitionService : IDisposable
     public bool MqttConnected => _mqtt.IsConnected;
     public string LastError { get; private set; } = string.Empty;
     public string LastPayload { get; private set; } = string.Empty;
+    public string LastPublishNote { get; private set; } = string.Empty;
     public DateTimeOffset? LastPublishTime { get; private set; }
 
     AppSettings CurrentSettings => _settingsStore.Current;
@@ -54,6 +57,8 @@ public sealed class AcquisitionService : IDisposable
             _cts = new CancellationTokenSource();
             IsRunning = true;
             LastError = string.Empty;
+            LastPublishNote = string.Empty;
+            ResetPublishBaseline();
             _loop = Task.Run(() => RunAsync(_cts.Token));
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -89,6 +94,7 @@ public sealed class AcquisitionService : IDisposable
             _cts?.Dispose();
             _cts = null;
             _loop = null;
+            ResetPublishBaseline();
             await _plc.DisconnectAsync().ConfigureAwait(false);
             await _mqtt.DisconnectAsync().ConfigureAwait(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
@@ -108,24 +114,30 @@ public sealed class AcquisitionService : IDisposable
             {
                 await EnsurePlcAsync(settings, cancellationToken).ConfigureAwait(false);
 
+                var enabledTags = settings.Tags.Where(t => t.Enabled).ToList();
                 var snapshots = new List<TagSnapshot>();
                 var values = new Dictionary<string, object?>();
                 var allGood = true;
 
-                foreach (var tag in settings.Tags.Where(t => t.Enabled))
+                foreach (var tag in enabledTags)
                 {
                     try
                     {
                         object value;
-                        if (settings.UseSimulator)
+                        if (tag.IsManual)
                         {
-                            value = Simulate(tag);
+                            value = ValueFormatting.ResolveManualValue(tag);
+                        }
+                        else if (settings.UseSimulator)
+                        {
+                            value = Simulate(tag, settings.TemperaturePrecision);
                         }
                         else
                         {
                             value = await _plc.ReadAsync(tag, cancellationToken).ConfigureAwait(false);
                         }
 
+                        value = ValueFormatting.ApplyTemperaturePrecision(tag, value, settings.TemperaturePrecision);
                         snapshots.Add(new TagSnapshot
                         {
                             TagId = tag.Id,
@@ -162,23 +174,32 @@ public sealed class AcquisitionService : IDisposable
                     await EnsureMqttAsync(settings, cancellationToken).ConfigureAwait(false);
                     if (_mqtt.IsConnected && values.Count > 0)
                     {
-                        var payload = JsonSerializer.Serialize(new
+                        if (ShouldPublish(settings, enabledTags, values))
                         {
-                            deviceId = settings.DeviceId,
-                            timestamp = DateTimeOffset.UtcNow,
-                            simulator = settings.UseSimulator,
-                            plcHost = settings.Plc.Host,
-                            quality = allGood ? "Good" : "Uncertain",
-                            tags = values
-                        }, PayloadJson);
+                            var payload = JsonSerializer.Serialize(new
+                            {
+                                deviceId = settings.DeviceId,
+                                timestamp = DateTimeOffset.UtcNow,
+                                simulator = settings.UseSimulator,
+                                plcHost = settings.Plc.Host,
+                                quality = allGood ? "Good" : "Uncertain",
+                                tags = values
+                            }, PayloadJson);
 
-                        var topic = settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase);
-                        await _mqtt.PublishAsync(topic, payload, settings.Mqtt.Qos, cancellationToken).ConfigureAwait(false);
-                        LastPayload = payload;
-                        LastPublishTime = DateTimeOffset.Now;
-                        if (allGood)
+                            var topic = settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase);
+                            await _mqtt.PublishAsync(topic, payload, settings.Mqtt.Qos, cancellationToken).ConfigureAwait(false);
+                            LastPayload = payload;
+                            LastPublishTime = DateTimeOffset.Now;
+                            LastPublishNote = string.Empty;
+                            UpdatePublishedTemperatures(enabledTags, values);
+                            if (allGood)
+                            {
+                                LastError = string.Empty;
+                            }
+                        }
+                        else
                         {
-                            LastError = string.Empty;
+                            LastPublishNote = BuildSkipNote(settings.TemperaturePublishThresholdC);
                         }
                     }
                 }
@@ -218,6 +239,11 @@ public sealed class AcquisitionService : IDisposable
             return;
         }
 
+        if (!settings.Tags.Any(t => t.Enabled && !t.IsManual))
+        {
+            return;
+        }
+
         await _plc.ConnectAsync(settings.Plc, cancellationToken).ConfigureAwait(false);
     }
 
@@ -231,8 +257,71 @@ public sealed class AcquisitionService : IDisposable
         await _mqtt.ConnectAsync(settings.Mqtt, cancellationToken).ConfigureAwait(false);
     }
 
-    static object Simulate(PlcTag tag)
+    void ResetPublishBaseline()
     {
+        _initialPublishDone = false;
+        _lastPublishedTemperatures.Clear();
+    }
+
+    bool ShouldPublish(AppSettings settings, IReadOnlyList<PlcTag> enabledTags, IReadOnlyDictionary<string, object?> values)
+    {
+        var threshold = settings.TemperaturePublishThresholdC;
+        if (threshold <= 0)
+        {
+            return true;
+        }
+
+        if (!_initialPublishDone)
+        {
+            return true;
+        }
+
+        foreach (var tag in enabledTags.Where(t => t.IsTemperature && !t.IsManual))
+        {
+            if (!values.TryGetValue(tag.Name, out var value) || !ValueFormatting.TryAsDouble(value, out var current))
+            {
+                continue;
+            }
+
+            if (!_lastPublishedTemperatures.TryGetValue(tag.Id, out var previous))
+            {
+                return true;
+            }
+
+            if (Math.Abs(current - previous) >= threshold)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void UpdatePublishedTemperatures(IReadOnlyList<PlcTag> enabledTags, IReadOnlyDictionary<string, object?> values)
+    {
+        _initialPublishDone = true;
+        foreach (var tag in enabledTags.Where(t => t.IsTemperature && !t.IsManual))
+        {
+            if (values.TryGetValue(tag.Name, out var value) && ValueFormatting.TryAsDouble(value, out var current))
+            {
+                _lastPublishedTemperatures[tag.Id] = current;
+            }
+        }
+    }
+
+    static string BuildSkipNote(double threshold) =>
+        $"未发布：温度变化未达 {threshold:G}℃ 阈值";
+
+    static bool TryAsDouble(object? value, out double number) =>
+        ValueFormatting.TryAsDouble(value, out number);
+
+    static object Simulate(PlcTag tag, int temperaturePrecision)
+    {
+        if (tag.IsManual)
+        {
+            return ValueFormatting.ResolveManualValue(tag);
+        }
+
         var wave = DateTime.UtcNow.TimeOfDay.TotalSeconds;
         var phase = tag.Address * 0.35;
         if (tag.DataType == TagDataType.Bool)
@@ -248,7 +337,7 @@ public sealed class AcquisitionService : IDisposable
             TagDataType.UInt16 => Convert.ToUInt16(Math.Clamp(scaled, 0, ushort.MaxValue)),
             TagDataType.Int32 => Convert.ToInt32(Math.Clamp(scaled * 10, int.MinValue, int.MaxValue)),
             TagDataType.UInt32 => Convert.ToUInt32(Math.Max(0, Math.Floor(wave * 3 + tag.Address))),
-            _ => Math.Round(scaled, 2)
+            _ => ValueFormatting.ApplyDisplayPrecision(tag, Math.Round(scaled, 4), temperaturePrecision)
         };
     }
 

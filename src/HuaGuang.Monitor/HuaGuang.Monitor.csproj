@@ -27,14 +27,14 @@
 		<MauiXamlInflator>SourceGen</MauiXamlInflator>
 
 		<!-- Display name -->
-		<ApplicationTitle>华光工业监控</ApplicationTitle>
+		<ApplicationTitle>工业监控</ApplicationTitle>
 
 		<!-- App Identifier -->
-		<ApplicationId>com.huaguang.monitor</ApplicationId>
+		<ApplicationId>com.industrial.monitor</ApplicationId>
 
 		<!-- Versions -->
-		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-		<ApplicationVersion>1</ApplicationVersion>
+		<ApplicationDisplayVersion>1.1</ApplicationDisplayVersion>
+		<ApplicationVersion>2</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
 		<WindowsPackageType>None</WindowsPackageType>
@@ -100,5 +100,8 @@
 		<PackageReference Include="MQTTnet" Version="5.2.0.1603" />
 		<PackageReference Include="NModbus" Version="3.0.83" />
 	</ItemGroup>
+
+	<!-- Release 发布完成后自动调用 Inno Setup 生成安装包（需本机安装 ISCC） -->
+	<Import Project="BuildInstaller.targets" Condition="$([MSBuild]::IsOSPlatform('windows'))" />
 
 </Project>

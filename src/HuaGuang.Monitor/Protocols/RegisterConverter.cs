@@ -16,6 +16,7 @@ public static class RegisterConverter
     {
         return type switch
         {
+            TagDataType.Bool => registers[0] != 0,
             TagDataType.Int16 => unchecked((short)registers[0]),
             TagDataType.UInt16 => registers[0],
             TagDataType.Int32 => unchecked((int)ToUInt32(registers, order)),

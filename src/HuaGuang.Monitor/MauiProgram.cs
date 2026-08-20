@@ -27,9 +27,15 @@ public static class MauiProgram
 #endif
 
 		builder.Services.AddSingleton<SettingsStore>();
+#if WINDOWS
+		builder.Services.AddSingleton<IStartupRegistration, Platforms.Windows.WindowsStartupRegistration>();
+#else
+		builder.Services.AddSingleton<IStartupRegistration, NoOpStartupRegistration>();
+#endif
 		builder.Services.AddSingleton<IPlcClient, ModbusTcpPlcClient>();
 		builder.Services.AddSingleton<IMqttPublisher, MqttPublisher>();
 		builder.Services.AddSingleton<AcquisitionService>();
+		builder.Services.AddSingleton<SubscriptionService>();
 		builder.Services.AddSingleton<DashboardViewModel>();
 		builder.Services.AddTransient<SettingsViewModel>();
 		builder.Services.AddTransient<TagsViewModel>();
@@ -41,7 +47,9 @@ public static class MauiProgram
 
 		var app = builder.Build();
 		Services = app.Services;
-		Services.GetRequiredService<SettingsStore>().LoadAsync().GetAwaiter().GetResult();
+		var store = Services.GetRequiredService<SettingsStore>();
+		store.LoadAsync().GetAwaiter().GetResult();
+		Services.GetRequiredService<IStartupRegistration>().Apply(store.Current.StartWithWindows);
 		return app;
 	}
 }

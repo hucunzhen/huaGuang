@@ -7,6 +7,20 @@ public sealed class AppSettings
     public int AddressCatalogVersion { get; set; }
     public int ScanIntervalMs { get; set; } = 1000;
     public bool UseSimulator { get; set; } = true;
+    /// <summary>0 = 每次扫描都发布；大于 0 时，任一温度点位变化达到该值（℃）才发布 MQTT。</summary>
+    public double TemperaturePublishThresholdC { get; set; }
+    /// <summary>全局默认显示与 MQTT 小数位数（0–4）；点位未单独设置时使用。</summary>
+    public int TemperaturePrecision { get; set; } = 1;
+    /// <summary>Windows 登录后自动启动本程序。</summary>
+    public bool StartWithWindows { get; set; } = true;
+    /// <summary>程序启动后自动开始采集。</summary>
+    public bool AutoStartAcquisition { get; set; } = true;
+    /// <summary>采集模式或订阅模式。</summary>
+    public AppOperationMode OperationMode { get; set; } = AppOperationMode.Acquisition;
+    /// <summary>订阅模式下监听的 MQTT 主题，支持 + / # 通配。</summary>
+    public List<string> SubscribeTopics { get; set; } = ["monitor/+/telemetry"];
+    /// <summary>兼容旧配置。</summary>
+    public string SubscribeTopic { get; set; } = "monitor/+/telemetry";
     public PlcSettings Plc { get; set; } = new();
     public MqttSettings Mqtt { get; set; } = new();
     public List<PlcTag> Tags { get; set; } = [];
@@ -30,5 +44,5 @@ public sealed class MqttSettings
     public string Password { get; set; } = string.Empty;
     public bool UseTls { get; set; }
     public int Qos { get; set; }
-    public string Topic { get; set; } = "huaguang/{deviceId}/telemetry";
+    public string Topic { get; set; } = "monitor/{deviceId}/telemetry";
 }
