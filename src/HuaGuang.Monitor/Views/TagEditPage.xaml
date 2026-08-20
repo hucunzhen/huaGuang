@@ -5,10 +5,11 @@
              x:Class="HuaGuang.Monitor.Views.TagEditPage"
              x:DataType="vm:TagEditViewModel"
              Title="{Binding Title}"
+             SafeAreaEdges="All"
              BackgroundColor="#0B1522">
 
     <ScrollView>
-        <VerticalStackLayout Padding="16" Spacing="12">
+        <VerticalStackLayout Padding="16,6,16,24" Spacing="12">
             <Label Text="名称" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding Name}" Placeholder="胶辊型号 / 温度 / 门幅" />
             <Label Text="单位" TextColor="#8AA0B5" FontSize="12" />

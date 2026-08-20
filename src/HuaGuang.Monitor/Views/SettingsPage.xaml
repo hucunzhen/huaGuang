@@ -5,10 +5,11 @@
              x:Class="HuaGuang.Monitor.Views.SettingsPage"
              x:DataType="vm:SettingsViewModel"
              Shell.NavBarIsVisible="False"
+             SafeAreaEdges="All"
              BackgroundColor="#0B1522">
 
     <ScrollView>
-        <VerticalStackLayout Padding="16" Spacing="14">
+        <VerticalStackLayout Padding="16,6,16,24" Spacing="14">
             <Label Text="采集" TextColor="White" FontSize="18" FontAttributes="Bold" />
             <Label Text="运行模式" TextColor="#8AA0B5" FontSize="12" />
             <Picker ItemsSource="{Binding OperationModes}" SelectedItem="{Binding SelectedOperationMode}" />

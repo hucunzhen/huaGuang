@@ -12,6 +12,14 @@
             <converters:BoolToStatusColorConverter x:Key="BoolToStatusColorConverter" />
             <converters:BoolToConnectedTextConverter x:Key="BoolToConnectedTextConverter" />
             <converters:IsNotNullOrEmptyConverter x:Key="IsNotNullOrEmptyConverter" />
+            <converters:InverseBoolConverter x:Key="InverseBoolConverter" />
+            <converters:AndBoolConverter x:Key="AndBoolConverter" />
+            <converters:BoolToPassIconConverter x:Key="BoolToPassIconConverter" />
+            <converters:OrientationDoubleConverter x:Key="InfoMaxHeightConverter" PortraitValue="200" LandscapeValue="96" />
+            <converters:OrientationThicknessConverter x:Key="PagePaddingConverter"
+                                                       PortraitValue="10,6,10,8"
+                                                       LandscapeValue="10,4,10,4" />
+            <converters:OrientationDoubleConverter x:Key="RowSpacingConverter" PortraitValue="8" LandscapeValue="4" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

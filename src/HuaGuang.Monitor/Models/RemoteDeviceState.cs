@@ -10,7 +10,6 @@ public sealed class RemoteDeviceState
     public string PlcHost { get; set; } = string.Empty;
     public bool Simulator { get; set; }
     public Dictionary<string, object?> Tags { get; set; } = new(StringComparer.Ordinal);
-    public string LastPayload { get; set; } = string.Empty;
     public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.Now;
 
     public string DisplayLabel => $"{DeviceId} ({SourceTopic})";

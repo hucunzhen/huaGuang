@@ -8,6 +8,10 @@ namespace HuaGuang.Monitor.Services;
 
 public sealed class SubscriptionService : IAsyncDisposable
 {
+    const int MaxTrackedDevices = 64;
+    static readonly TimeSpan DeviceRetention = TimeSpan.FromMinutes(30);
+    const int MaxPayloadLength = 4096;
+
     readonly SettingsStore _settingsStore;
     readonly MqttClientFactory _factory = new();
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
@@ -79,6 +83,7 @@ public sealed class SubscriptionService : IAsyncDisposable
         {
             IsRunning = false;
             ActiveSubscribeTopics = [];
+            _devices.Clear();
             await DisconnectAsync().ConfigureAwait(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -119,6 +124,7 @@ public sealed class SubscriptionService : IAsyncDisposable
     async Task ConnectAsync(AppSettings settings, IReadOnlyList<string> topics)
     {
         await DisconnectAsync().ConfigureAwait(false);
+        _devices.Clear();
 
         var client = _factory.CreateMqttClient();
         client.ConnectedAsync += _ =>
@@ -159,6 +165,16 @@ public sealed class SubscriptionService : IAsyncDisposable
         ActiveSubscribeTopics = topics;
     }
 
+    /// <summary>Diagnostics only: inject telemetry without a live MQTT broker.</summary>
+    public void InjectTelemetry(string topic, string payload)
+    {
+        var message = new MqttApplicationMessageBuilder()
+            .WithTopic(topic)
+            .WithPayload(payload)
+            .Build();
+        HandleMessage(message);
+    }
+
     void HandleMessage(MqttApplicationMessage message)
     {
         try
@@ -189,7 +205,6 @@ public sealed class SubscriptionService : IAsyncDisposable
                     SourceTopic = message.Topic
                 };
 
-            state.LastPayload = payload;
             state.ReceivedAt = DateTimeOffset.Now;
             state.Quality = root.TryGetProperty("quality", out var qualityEl)
                 ? qualityEl.GetString() ?? "Good"
@@ -213,7 +228,8 @@ public sealed class SubscriptionService : IAsyncDisposable
             }
 
             _devices[deviceKey] = state;
-            LastPayload = payload;
+            PruneDevices();
+            LastPayload = TruncatePayload(payload);
             LastError = string.Empty;
             DevicesUpdated?.Invoke(this, EventArgs.Empty);
         }
@@ -221,6 +237,54 @@ public sealed class SubscriptionService : IAsyncDisposable
         {
             LastError = $"解析遥测失败：{ex.Message}";
             DevicesUpdated?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    static string TruncatePayload(string payload) =>
+        payload.Length <= MaxPayloadLength
+            ? payload
+            : payload[..MaxPayloadLength] + "…";
+
+    void PruneDevices()
+    {
+        if (_devices.Count == 0)
+        {
+            return;
+        }
+
+        var cutoff = DateTimeOffset.Now - DeviceRetention;
+        List<string>? staleKeys = null;
+        foreach (var pair in _devices)
+        {
+            if (pair.Value.ReceivedAt >= cutoff)
+            {
+                continue;
+            }
+
+            staleKeys ??= [];
+            staleKeys.Add(pair.Key);
+        }
+
+        if (staleKeys is not null)
+        {
+            foreach (var key in staleKeys)
+            {
+                _devices.Remove(key);
+            }
+        }
+
+        if (_devices.Count <= MaxTrackedDevices)
+        {
+            return;
+        }
+
+        foreach (var key in _devices
+                     .OrderBy(pair => pair.Value.ReceivedAt)
+                     .Take(_devices.Count - MaxTrackedDevices)
+                     .Select(pair => pair.Key)
+                     .ToList())
+        {
+            _devices.Remove(key);
         }
     }
 

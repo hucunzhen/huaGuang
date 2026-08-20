@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+<views:MonitorPageBase xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:views="clr-namespace:HuaGuang.Monitor.Views"
              xmlns:controls="clr-namespace:HuaGuang.Monitor.Controls"
              xmlns:models="clr-namespace:HuaGuang.Monitor.Models"
              xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
@@ -8,59 +9,86 @@
              x:Name="ThisPage"
              x:DataType="vm:TagsViewModel"
              Shell.NavBarIsVisible="False"
+             SafeAreaEdges="All"
              BackgroundColor="#0B1522">
 
-    <Grid RowDefinitions="Auto,*,Auto" Padding="10" RowSpacing="8">
+    <Grid RowDefinitions="Auto,*,Auto"
+          Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
+          RowSpacing="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource RowSpacingConverter}}">
         <Grid ColumnDefinitions="*,Auto">
-            <Label Text="采集点位" TextColor="White" FontSize="20" FontAttributes="Bold" VerticalOptions="Center" />
+            <Label Text="采集点位" TextColor="White" FontAttributes="Bold" VerticalOptions="Center"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
             <Button Grid.Column="1"
                     Text="新增"
                     Command="{Binding AddCommand}"
-                    Padding="14,8"
-                    MinimumHeightRequest="36" />
+                    Padding="14,6"
+                    MinimumHeightRequest="36"
+                    FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
         </Grid>
 
-        <controls:FitGrid Grid.Row="1" ItemsSource="{Binding Tags}">
+        <controls:FitGrid Grid.Row="1"
+                          ItemsSource="{Binding Tags}"
+                          PreferFill="{Binding Source={x:Reference ThisPage}, Path=IsExpandedLayout}"
+                          MinItemWidth="{Binding Source={x:Reference ThisPage}, Path=CardMinWidth}"
+                          MinItemHeight="{Binding Source={x:Reference ThisPage}, Path=CardMinHeight}"
+                          CardPadding="{Binding Source={x:Reference ThisPage}, Path=CardPadding}"
+                          BodyFontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                          SubtitleFontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}"
+                          CaptionFontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                          ButtonFontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}">
             <controls:FitGrid.ItemTemplate>
                 <DataTemplate x:DataType="models:PlcTag">
-                    <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8">
+                    <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536"
+                            Padding="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CardPadding}"
+                            MinimumHeightRequest="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=MinItemHeight}">
                         <Border.StrokeShape>
                             <RoundRectangle CornerRadius="8" />
                         </Border.StrokeShape>
-                        <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="2">
-                            <Label Text="{Binding Name}" TextColor="White" FontSize="13" FontAttributes="Bold" LineBreakMode="TailTruncation" MaxLines="1" />
-                            <Label Grid.Row="1" Text="{Binding DisplayAddress}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="TailTruncation" />
-                            <HorizontalStackLayout Grid.Row="2" Spacing="8" VerticalOptions="Start">
-                                <Label Text="{Binding DataType}" TextColor="#8AA0B5" FontSize="11" />
-                                <Label Text="{Binding Unit}" TextColor="#8AA0B5" FontSize="11" LineBreakMode="TailTruncation" />
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="{Binding Name}" TextColor="White" FontAttributes="Bold" LineBreakMode="TailTruncation" MaxLines="2"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=BodyFontSize}" />
+                            <Label Text="{Binding DisplayAddress}" TextColor="#2EC4B6" LineBreakMode="TailTruncation"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SubtitleFontSize}" />
+                            <HorizontalStackLayout Spacing="8">
+                                <Label Text="{Binding DataType}" TextColor="#8AA0B5"
+                                       FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CaptionFontSize}" />
+                                <Label Text="{Binding Unit}" TextColor="#8AA0B5" LineBreakMode="TailTruncation"
+                                       FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CaptionFontSize}" />
                             </HorizontalStackLayout>
-                            <Grid Grid.Row="3" ColumnDefinitions="*,*" ColumnSpacing="6">
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
                                 <Button Text="编辑"
-                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.EditCommand}"
+                                        Command="{Binding Source={RelativeSource AncestorType={x:Type views:TagsPage}}, Path=BindingContext.EditCommand}"
                                         CommandParameter="{Binding .}"
-                                        Padding="6,2"
-                                        FontSize="12"
-                                        MinimumHeightRequest="28"
-                                        MinimumWidthRequest="0" />
+                                        Padding="6,4"
+                                        MinimumHeightRequest="32"
+                                        MinimumWidthRequest="0"
+                                        FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=ButtonFontSize}" />
                                 <Button Grid.Column="1"
                                         Text="删除"
-                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.DeleteCommand}"
+                                        Command="{Binding Source={RelativeSource AncestorType={x:Type views:TagsPage}}, Path=BindingContext.DeleteCommand}"
                                         CommandParameter="{Binding .}"
                                         BackgroundColor="#5A2430"
-                                        Padding="6,2"
-                                        FontSize="12"
-                                        MinimumHeightRequest="28"
-                                        MinimumWidthRequest="0" />
+                                        Padding="6,4"
+                                        MinimumHeightRequest="32"
+                                        MinimumWidthRequest="0"
+                                        FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=ButtonFontSize}" />
                             </Grid>
-                        </Grid>
+                        </VerticalStackLayout>
                     </Border>
                 </DataTemplate>
             </controls:FitGrid.ItemTemplate>
             <controls:FitGrid.EmptyView>
-                <Label Text="还没有点位，点右上角新增。" TextColor="#8AA0B5" />
+                <Label Text="还没有点位，点右上角新增。" TextColor="#8AA0B5"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
             </controls:FitGrid.EmptyView>
         </controls:FitGrid>
 
-        <Label Grid.Row="2" Text="{Binding StatusMessage}" TextColor="#2EC4B6" FontSize="13" />
+        <Label Grid.Row="2"
+               Text="{Binding StatusMessage}"
+               TextColor="#2EC4B6"
+               LineBreakMode="TailTruncation"
+               MaxLines="1"
+               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+               IsVisible="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource InverseBoolConverter}}" />
     </Grid>
-</ContentPage>
+</views:MonitorPageBase>

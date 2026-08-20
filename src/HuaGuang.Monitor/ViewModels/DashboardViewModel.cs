@@ -12,6 +12,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     readonly SubscriptionService _subscription;
     readonly SettingsStore _settings;
     static bool _autoStartAttempted;
+    List<string> _cachedDeviceKeys = [];
 
     public DashboardViewModel(
         AcquisitionService acquisition,
@@ -182,6 +183,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     partial void OnSelectedTopicFilterChanged(string value) =>
         MainThread.BeginInvokeOnMainThread(() =>
         {
+            _cachedDeviceKeys = [];
             RefreshRemoteDevices();
             RebuildRemoteRows();
             PublishNote = BuildRemoteStatusNote();
@@ -215,8 +217,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     void OnSubscriptionDevicesUpdated(object? sender, EventArgs e) =>
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            RefreshRemoteDevices();
-            RebuildRemoteRows();
+            if (HasDeviceListChanged())
+            {
+                RefreshRemoteDevices();
+            }
+
+            UpdateRemoteRows();
             LastPayload = string.IsNullOrWhiteSpace(_subscription.LastPayload)
                 ? LastPayload
                 : _subscription.LastPayload;
@@ -279,10 +285,51 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var precision = _settings.Current.TemperaturePrecision;
-        foreach (var (name, value) in device.Tags.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        PopulateRemoteRows(device, OrderRemoteTags(device.Tags, _settings.Current.Tags));
+    }
+
+    void UpdateRemoteRows()
+    {
+        if (!IsSubscribeMode || SelectedRemoteDeviceItem is null)
         {
-            var tag = new PlcTag
+            if (Tags.Count > 0)
+            {
+                Tags.Clear();
+            }
+
+            return;
+        }
+
+        if (!_subscription.Devices.TryGetValue(SelectedRemoteDeviceItem.Key, out var device))
+        {
+            if (Tags.Count > 0)
+            {
+                Tags.Clear();
+            }
+
+            return;
+        }
+
+        var orderedTags = OrderRemoteTags(device.Tags, _settings.Current.Tags).ToList();
+        if (Tags.Count == orderedTags.Count &&
+            Tags.Zip(orderedTags, (row, entry) => row.Name == entry.Name).All(match => match))
+        {
+            ApplyRemoteValues(device, orderedTags);
+            return;
+        }
+
+        Tags.Clear();
+        PopulateRemoteRows(device, orderedTags);
+    }
+
+    void PopulateRemoteRows(
+        RemoteDeviceState device,
+        IEnumerable<(string Name, object? Value, PlcTag? CatalogTag)> orderedTags)
+    {
+        var precision = _settings.Current.TemperaturePrecision;
+        foreach (var (name, value, catalogTag) in orderedTags)
+        {
+            var tag = catalogTag ?? new PlcTag
             {
                 Name = name,
                 DataType = value is string ? TagDataType.String : TagDataType.Float32
@@ -290,7 +337,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             var row = new TagRowViewModel(tag, precision, device.SourceTopic);
             row.Apply(new TagSnapshot
             {
-                TagId = name,
+                TagId = tag.Id,
                 Name = name,
                 Value = value,
                 Quality = device.Quality,
@@ -298,6 +345,39 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             });
             Tags.Add(row);
         }
+    }
+
+    void ApplyRemoteValues(
+        RemoteDeviceState device,
+        IReadOnlyList<(string Name, object? Value, PlcTag? CatalogTag)> orderedTags)
+    {
+        for (var i = 0; i < orderedTags.Count; i++)
+        {
+            var (name, value, _) = orderedTags[i];
+            Tags[i].Apply(new TagSnapshot
+            {
+                TagId = Tags[i].Id,
+                Name = name,
+                Value = value,
+                Quality = device.Quality,
+                Timestamp = device.Timestamp
+            });
+        }
+    }
+
+    bool HasDeviceListChanged()
+    {
+        var keys = GetFilteredDevices()
+            .Select(device => device.DeviceKey)
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToList();
+        if (_cachedDeviceKeys.SequenceEqual(keys, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        _cachedDeviceKeys = keys;
+        return true;
     }
 
     void RefreshRemoteDevices()
@@ -383,7 +463,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 LastPayload = _subscription.LastPayload;
             }
 
+            _cachedDeviceKeys = [];
             RefreshRemoteDevices();
+            UpdateRemoteRows();
             return;
         }
 
@@ -409,6 +491,11 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
         ShowRemoteDevicePicker = false;
     }
+
+    static IEnumerable<(string Name, object? Value, PlcTag? CatalogTag)> OrderRemoteTags(
+        IReadOnlyDictionary<string, object?> remoteTags,
+        IReadOnlyList<PlcTag> catalogTags) =>
+        TagDisplayOrder.OrderRemoteTags(remoteTags, catalogTags);
 
     public void Dispose()
     {

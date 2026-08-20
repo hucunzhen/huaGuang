@@ -2,7 +2,7 @@ using HuaGuang.Monitor.ViewModels;
 
 namespace HuaGuang.Monitor.Views;
 
-public partial class TagsPage : ContentPage
+public partial class TagsPage : MonitorPageBase
 {
     public TagsPage() : this(MauiProgram.Services.GetRequiredService<TagsViewModel>())
     {

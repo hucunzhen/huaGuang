@@ -37,10 +37,12 @@ public static class MauiProgram
 		builder.Services.AddSingleton<AcquisitionService>();
 		builder.Services.AddSingleton<SubscriptionService>();
 		builder.Services.AddSingleton<DashboardViewModel>();
+		builder.Services.AddTransient<DiagnosticsViewModel>();
 		builder.Services.AddTransient<SettingsViewModel>();
 		builder.Services.AddTransient<TagsViewModel>();
 		builder.Services.AddTransient<TagEditViewModel>();
 		builder.Services.AddTransient<DashboardPage>();
+		builder.Services.AddTransient<DiagnosticsPage>();
 		builder.Services.AddTransient<SettingsPage>();
 		builder.Services.AddTransient<TagsPage>();
 		builder.Services.AddTransient<TagEditPage>();

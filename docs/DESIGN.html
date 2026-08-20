@@ -80,12 +80,16 @@ ul, ol { padding-left: 22px; }
 </head>
 <body>
 <h1>工业监控 — 设计手册</h1>
-<blockquote>版本 1.0 · 平台：Windows 10/11 工控机、Android 11 工业平板</blockquote>
+<blockquote>版本 1.1 · 平台：Windows 10/11 工控机、Android 11 工业平板</blockquote>
 <blockquote>技术栈：.NET 10 MAUI · 信捷 XD5E-60T10 · Modbus TCP · MQTT</blockquote>
 <blockquote>PDF 版：[DESIGN.pdf](DESIGN.pdf)（运行 <code>python ../scripts/export-design-pdf.py</code> 重新生成）</blockquote>
 <hr/>
 <h2>1. 产品概述</h2>
-<p><strong>工业监控</strong> 是一套面向热熔胶复合产线的现场采集终端，按设定周期从信捷 PLC 读取机台点位，经阈值与精度处理后，以 JSON 通过 MQTT 上报。</p>
+<p><strong>工业监控</strong> 是一套面向热熔胶复合产线的现场采集终端。支持两种运行方式：</p>
+<ul>
+<li><strong>采集模式</strong>：按设定周期从信捷 PLC 读取机台点位，经阈值与精度处理后，以 JSON 通过 MQTT 上报。</li>
+<li><strong>订阅模式</strong>：连接同一 MQTT Broker，订阅一个或多个主题，在局域网内查看其他采集终端的遥测数据。</li>
+</ul>
 <table><thead><tr>
 <th>项目</th>
 <th>说明</th>
@@ -130,14 +134,22 @@ ul, ol { padding-left: 22px; }
 </tr></thead><tbody>
 <tr>
 <td><code>AcquisitionService</code></td>
-<td>轮询 PLC、模拟数据、阈值判断、MQTT 发布</td>
+<td>采集模式：轮询 PLC、模拟数据、阈值判断、MQTT 发布</td>
+</tr>
+<tr>
+<td><code>SubscriptionService</code></td>
+<td>订阅模式：连接 Broker、多主题订阅、解析遥测 JSON</td>
+</tr>
+<tr>
+<td><code>SubscribeTopicHelper</code> / <code>MqttTopicMatcher</code></td>
+<td>主题列表规范化、MQTT 通配符匹配</td>
 </tr>
 <tr>
 <td><code>ModbusTcpPlcClient</code></td>
 <td>信捷地址映射与 Modbus 读寄存器</td>
 </tr>
 <tr>
-<td><code>MqttPublisher</code></td>
+<td><code>MqttPublisher</code> / <code>MqttConnectionFactory</code></td>
 <td>MQTT 连接与 JSON 报文发布</td>
 </tr>
 <tr>
@@ -148,13 +160,24 @@ ul, ol { padding-left: 22px; }
 <td><code>LineCatalog</code></td>
 <td>产线数据地址规划点表</td>
 </tr>
+<tr>
+<td><code>WindowsStartupRegistration</code></td>
+<td>Windows 开机自启注册表项</td>
+</tr>
 </tbody></table>
-<h3>2.2 数据流</h3>
+<h3>2.2 数据流（采集模式）</h3>
 <ol>
 <li>按 <strong>扫描周期</strong>（默认 1000 ms）读取所有启用点位</li>
-<li>温度点位按 <strong>精度</strong> 四舍五入</li>
+<li>温度点位按 <strong>精度</strong> 四舍五入（全局默认或点位单独设置）</li>
 <li>若 <strong>温度发布阈值</strong> &gt; 0，仅当任一温度变化 ≥ 阈值时才发布；否则每次扫描都发布</li>
 <li>监控页 <strong>始终刷新</strong> 显示，与是否发布 MQTT 无关</li>
+</ol>
+<h3>2.3 数据流（订阅模式）</h3>
+<ol>
+<li>连接 Broker，<strong>同时订阅</strong> 设置中配置的全部主题（支持 <code>+</code> / <code>#</code>）</li>
+<li>收到 JSON 遥测后按 <code>主题::deviceId</code> 区分设备并缓存</li>
+<li>首页 <strong>主题筛选</strong> 可选「全部」或某一主题，设备列表随之过滤</li>
+<li>运行中可在首页 <strong>添加主题</strong>，保存后自动重连并增订，无需停止订阅</li>
 </ol>
 <hr/>
 <h2>3. 视觉设计规范（Windows）</h2>
@@ -263,17 +286,17 @@ ul, ol { padding-left: 22px; }
 <tr>
 <td>监控</td>
 <td><code>dashboard</code></td>
-<td>实时数据、启停采集、连接状态</td>
+<td>实时数据、启停采集/订阅、连接状态、订阅主题筛选</td>
 </tr>
 <tr>
 <td>点位</td>
 <td><code>tags</code></td>
-<td>点位列表、增删改</td>
+<td>点位列表、增删改、手动值、显示精度</td>
 </tr>
 <tr>
 <td>设置</td>
 <td><code>settings</code></td>
-<td>产线、PLC、MQTT、阈值与精度</td>
+<td>运行模式、产线、PLC、MQTT、阈值与精度、开机自启</td>
 </tr>
 </tbody></table>
 <hr/>
@@ -287,15 +310,23 @@ ul, ol { padding-left: 22px; }
 </tr></thead><tbody>
 <tr>
 <td>顶栏</td>
-<td>应用名、设备 ID、运行模式；PLC / MQTT 状态卡片；<strong>启动采集 / 停止采集</strong></td>
+<td>应用名、设备 ID、运行模式；PLC / MQTT 状态卡片（采集模式显示 PLC）；<strong>启动采集 / 停止采集</strong> 或 <strong>启动订阅 / 停止订阅</strong></td>
+</tr>
+<tr>
+<td>订阅区</td>
+<td>（订阅模式）主题筛选 Picker、「全部」+ 各配置主题；添加主题输入框与按钮</td>
+</tr>
+<tr>
+<td>设备选择</td>
+<td>（订阅模式且有数据）远程设备 Picker；「全部」视图下显示 <code>设备ID (主题)</code></td>
 </tr>
 <tr>
 <td>信息条</td>
-<td>MQTT 发布主题；橙色「未发布」提示；红色错误信息</td>
+<td>发布/订阅主题摘要；橙色状态提示；红色错误信息</td>
 </tr>
 <tr>
 <td>主区域</td>
-<td>自适应网格卡片，展示各点位实时值、单位、地址、质量、更新时间</td>
+<td>自适应网格卡片，展示各点位实时值、单位、地址/来源主题、质量、更新时间</td>
 </tr>
 <tr>
 <td>底栏</td>
@@ -311,6 +342,8 @@ ul, ol { padding-left: 22px; }
 <ul>
 <li>「启动采集」：开始轮询并按规则发布 MQTT</li>
 <li>「停止采集」：断开 PLC / MQTT，停止轮询</li>
+<li>「启动订阅 / 停止订阅」：订阅模式下连接 Broker 并监听配置主题</li>
+<li>主题筛选切换不中断订阅；添加主题后若已在运行则自动刷新订阅列表</li>
 </ul>
 <hr/>
 <h3>4.2 点位页</h3>
@@ -338,6 +371,7 @@ ul, ol { padding-left: 22px; }
 <li>信捷地址：<code>D100</code>、<code>M0</code>、<code>X20</code>（八进制）、<code>Y0</code></li>
 <li>浮点占两个 D，默认字节序 <strong>CDAB</strong></li>
 <li>Scale / Offset 工程量换算</li>
+<li><strong>显示精度</strong>：0–4 位小数，留空则使用设置页全局精度</li>
 </ul>
 <blockquote>产线切换时在「设置」页载入点表，会覆盖当前点位列表。</blockquote>
 <hr/>
@@ -350,12 +384,20 @@ ul, ol { padding-left: 22px; }
 <th>说明</th>
 </tr></thead><tbody>
 <tr>
+<td>运行模式</td>
+<td><strong>采集模式</strong>（读 PLC 发 MQTT）或 <strong>订阅模式</strong>（看远程遥测）</td>
+</tr>
+<tr>
+<td>订阅主题</td>
+<td>订阅模式下可配置 <strong>多个</strong> 主题，支持 <code>+</code> / <code>#</code>；至少保留一个</td>
+</tr>
+<tr>
 <td>产线</td>
-<td>先河 / 华迪，载入对应 IP 与点表</td>
+<td>先河 / 华迪，载入对应 IP 与点表（仅采集模式）</td>
 </tr>
 <tr>
 <td>设备编号</td>
-<td>MQTT <code>{deviceId}</code> 替换用</td>
+<td>MQTT <code>{deviceId}</code> 替换用（采集模式）</td>
 </tr>
 <tr>
 <td>扫描周期</td>
@@ -367,11 +409,19 @@ ul, ol { padding-left: 22px; }
 </tr>
 <tr>
 <td>温度精度</td>
-<td>0–4 位小数，影响显示与 MQTT</td>
+<td>0–4 位小数，全局默认；各点位可单独覆盖</td>
 </tr>
 <tr>
 <td>使用模拟数据</td>
 <td>无 PLC 时生成波形数据，可验证 MQTT</td>
+</tr>
+<tr>
+<td>开机自动启动</td>
+<td>Windows 登录后运行本程序（需平台支持）</td>
+</tr>
+<tr>
+<td>启动后自动运行</td>
+<td>打开程序后自动开始采集或订阅</td>
 </tr>
 </tbody></table>
 <h4>PLC（信捷 XD5E-60T10）</h4>
@@ -414,7 +464,7 @@ ul, ol { padding-left: 22px; }
 <td>0</td>
 </tr>
 </tbody></table>
-<blockquote><strong>保存前须停止采集。</strong></blockquote>
+<blockquote><strong>保存前须停止采集/订阅</strong>（首页运行中添加主题除外，会即时重连）。</blockquote>
 <hr/>
 <h2>5. MQTT 报文格式</h2>
 <pre><code class="language-json">{
@@ -453,7 +503,7 @@ ul, ol { padding-left: 22px; }
 <tr>
 <td>运行状态</td>
 <td>D1000</td>
-<td>—</td>
+<td>开/关（Bool，0/1 启动指示灯）</td>
 </tr>
 <tr>
 <td>热溶胶盘温度（热熔胶机1）</td>
@@ -481,7 +531,34 @@ ul, ol { padding-left: 22px; }
 <td>—</td>
 </tr>
 </tbody></table>
-<p>胶辊型号、胶水型号、门幅、厚度为 <strong>手动填写</strong>，不采集。华迪产线无「上展开转速率」。</p>
+<p><strong>手动输入</strong>（不读 PLC，在点位页编辑手动值后随 MQTT 发布）：</p>
+<table><thead><tr>
+<th>名称</th>
+<th>类型</th>
+<th>单位</th>
+</tr></thead><tbody>
+<tr>
+<td>胶辊型号</td>
+<td>文本</td>
+<td>—</td>
+</tr>
+<tr>
+<td>胶水型号</td>
+<td>文本</td>
+<td>—</td>
+</tr>
+<tr>
+<td>门幅</td>
+<td>浮点</td>
+<td>mm</td>
+</tr>
+<tr>
+<td>厚度</td>
+<td>浮点</td>
+<td>mm</td>
+</tr>
+</tbody></table>
+<p>华迪产线无「上展开转速率」。</p>
 <hr/>
 <h2>7. 部署与运行（Windows）</h2>
 <table><thead><tr>
@@ -493,14 +570,31 @@ ul, ol { padding-left: 22px; }
 <td>Visual Studio F5，<code>net10.0-windows10.0.19041.0</code></td>
 </tr>
 <tr>
+<td>生成安装包</td>
+<td>VS <strong>Release 发布</strong>（自动）或 <code>build-installer.bat</code> → <code>installer/output/IndustrialMonitor-Setup.exe</code></td>
+</tr>
+<tr>
 <td>现场工控机</td>
-<td><code>publish-windows.ps1</code> 自包含发布，拷贝 <code>publish</code> 目录</td>
+<td><strong>双击安装包</strong>，向导安装到 Program Files</td>
 </tr>
 <tr>
 <td>无 PLC 联调</td>
 <td>勾选模拟数据 + 本地 Mosquitto（<code>start-test-mqtt.ps1</code>）</td>
 </tr>
 </tbody></table>
+<p><strong>安装包（推荐）</strong></p>
+<ul>
+<li>格式：Inno Setup 单文件 <code>IndustrialMonitor-Setup.exe</code></li>
+<li>现场：双击安装，可选桌面图标与开机启动，支持卸载</li>
+<li>无需命令行、无需预装 .NET（Release 自包含）</li>
+</ul>
+<p><strong>开机自动启动</strong></p>
+<ul>
+<li>安装向导中可勾选「开机自动启动」</li>
+<li>「设置 → 开机自动启动」可开关；保存后立即生效</li>
+<li>「设置 → 启动后自动采集」：程序打开后自动点「启动采集」（默认开启）</li>
+<li>默认开启；工控机重启并登录 Windows 后程序自动运行并开始采集</li>
+</ul>
 <p><strong>运行环境</strong></p>
 <ul>
 <li>Windows 10 1809+ x64</li>
@@ -510,6 +604,9 @@ ul, ol { padding-left: 22px; }
 <hr/>
 <h2>8. 文件与目录</h2>
 <pre><code>huaGuang/
+├── installer/
+│   ├── IndustrialMonitor.iss   ← Inno Setup 脚本
+│   └── output/                 ← 生成的 IndustrialMonitor-Setup.exe
 ├── docs/
 │   ├── DESIGN.md          ← 本设计手册
 │   └── images/            ← 界面与架构图
@@ -523,6 +620,11 @@ ul, ol { padding-left: 22px; }
 <th>日期</th>
 <th>说明</th>
 </tr></thead><tbody>
+<tr>
+<td>1.1</td>
+<td>2026-08-20</td>
+<td>订阅模式与多主题切换、Windows Inno 安装包、开机自启、点位显示精度、默认手动标签</td>
+</tr>
 <tr>
 <td>1.0</td>
 <td>2026-08-19</td>

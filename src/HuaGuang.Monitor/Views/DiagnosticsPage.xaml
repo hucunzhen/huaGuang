@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<views:MonitorPageBase xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:views="clr-namespace:HuaGuang.Monitor.Views"
+             xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
+             xmlns:diag="clr-namespace:HuaGuang.Monitor.Diagnostics"
+             x:Class="HuaGuang.Monitor.Views.DiagnosticsPage"
+             x:Name="ThisPage"
+             x:DataType="vm:DiagnosticsViewModel"
+             Shell.NavBarIsVisible="False"
+             SafeAreaEdges="All"
+             BackgroundColor="#0B1522">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*"
+          Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
+          RowSpacing="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource RowSpacingConverter}}">
+        <VerticalStackLayout Spacing="4">
+            <Label Text="软件自检"
+                   TextColor="White"
+                   FontAttributes="Bold"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
+            <Label Text="{Binding StatusMessage}"
+                   TextColor="#8AA0B5"
+                   LineBreakMode="WordWrap"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+            <Label Text="{Binding SummaryText}"
+                   TextColor="#2EC4B6"
+                   FontAttributes="Bold"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}" />
+        </VerticalStackLayout>
+
+        <FlexLayout Grid.Row="1"
+                    Wrap="Wrap"
+                    Direction="Row"
+                    JustifyContent="Start"
+                    AlignItems="Center">
+            <Button Text="核心测试"
+                    Command="{Binding RunCoreTestsCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,8"
+                    FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+            <Button Text="全部测试"
+                    Command="{Binding RunAllTestsCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,8"
+                    FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+            <Button Text="压力测试"
+                    Command="{Binding RunStressTestCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,8"
+                    BackgroundColor="#1F3A52"
+                    FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+            <ActivityIndicator IsRunning="{Binding IsRunning}"
+                               Color="#2EC4B6"
+                               HeightRequest="28"
+                               WidthRequest="28" />
+        </FlexLayout>
+
+        <Label Grid.Row="2"
+               Text="测试项"
+               TextColor="#8AA0B5"
+               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+
+        <CollectionView Grid.Row="3"
+                        ItemsSource="{Binding Results}"
+                        SelectionMode="None">
+            <CollectionView.ItemsLayout>
+                <LinearItemsLayout Orientation="Vertical" ItemSpacing="6" />
+            </CollectionView.ItemsLayout>
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="diag:DiagnosticResult">
+                    <Border Stroke="#1F3A52"
+                            StrokeThickness="1"
+                            BackgroundColor="#152536"
+                            Padding="10,8">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                            <Label Text="{Binding Passed, Converter={StaticResource BoolToPassIconConverter}}"
+                                   TextColor="{Binding Passed, Converter={StaticResource BoolToStatusColorConverter}}"
+                                   FontAttributes="Bold"
+                                   VerticalOptions="Center"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                            <VerticalStackLayout Grid.Column="1" Spacing="2">
+                                <Label Text="{Binding Name}"
+                                       TextColor="White"
+                                       FontAttributes="Bold"
+                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                                <Label Text="{Binding Message}"
+                                       TextColor="#8AA0B5"
+                                       LineBreakMode="WordWrap"
+                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                            </VerticalStackLayout>
+                            <Label Grid.Column="2"
+                                   Text="{Binding Duration, StringFormat='{0:mm\\:ss\\.fff}'}"
+                                   TextColor="#6E8499"
+                                   VerticalOptions="Center"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+            <CollectionView.EmptyView>
+                <Label Text="点击上方按钮开始测试。"
+                       TextColor="#8AA0B5"
+                       HorizontalOptions="Center"
+                       VerticalOptions="Center"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+            </CollectionView.EmptyView>
+        </CollectionView>
+    </Grid>
+</views:MonitorPageBase>

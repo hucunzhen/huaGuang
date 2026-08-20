@@ -188,7 +188,7 @@ public sealed class AcquisitionService : IDisposable
 
                             var topic = settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase);
                             await _mqtt.PublishAsync(topic, payload, settings.Mqtt.Qos, cancellationToken).ConfigureAwait(false);
-                            LastPayload = payload;
+                            LastPayload = TruncatePayload(payload);
                             LastPublishTime = DateTimeOffset.Now;
                             LastPublishNote = string.Empty;
                             UpdatePublishedTemperatures(enabledTags, values);
@@ -340,6 +340,11 @@ public sealed class AcquisitionService : IDisposable
             _ => ValueFormatting.ApplyDisplayPrecision(tag, Math.Round(scaled, 4), temperaturePrecision)
         };
     }
+
+    static string TruncatePayload(string payload) =>
+        payload.Length <= 4096
+            ? payload
+            : payload[..4096] + "…";
 
     public void Dispose()
     {

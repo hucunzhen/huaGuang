@@ -73,6 +73,10 @@
 	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android' and '$(Configuration)' == 'Release'">
 		<RuntimeIdentifiers>android-arm;android-arm64</RuntimeIdentifiers>
 		<AndroidPackageFormat>apk</AndroidPackageFormat>
+		<!-- 侧载请安装 *-Signed.apk；启用 v1 兼容部分工业平板 ROM。 -->
+		<AndroidSigningV1Scheme>true</AndroidSigningV1Scheme>
+		<AndroidSigningV2Scheme>true</AndroidSigningV2Scheme>
+		<AndroidSigningV3Scheme>true</AndroidSigningV3Scheme>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -91,6 +95,14 @@
 
 		<!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\HuaGuang.Monitor.Core\HuaGuang.Monitor.Core.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="HuaGuang.Monitor.Tests" />
 	</ItemGroup>
 
 	<ItemGroup>

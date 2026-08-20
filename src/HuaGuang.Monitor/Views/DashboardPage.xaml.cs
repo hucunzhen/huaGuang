@@ -2,7 +2,7 @@ using HuaGuang.Monitor.ViewModels;
 
 namespace HuaGuang.Monitor.Views;
 
-public partial class DashboardPage : ContentPage
+public partial class DashboardPage : MonitorPageBase
 {
     public DashboardPage() : this(MauiProgram.Services.GetRequiredService<DashboardViewModel>())
     {

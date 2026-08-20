@@ -37,7 +37,15 @@ Visual Studio 中也可手动指定：`工具 → 选项 → Xamarin → Android
 .\scripts\publish-android.ps1                  # Android APK（需 Android SDK）
 ```
 
-或双击 `build.bat` / `publish-windows.bat`。
+或双击 `build.bat` / `publish-windows.bat` / **`publish-android.bat`**。
+
+**Android 平板安装**
+
+1. 运行 `publish-android.bat`（或上面的 `publish-android.ps1`）
+2. 把 **`dist\IndustrialMonitor-1.1-android.apk`** 拷到平板（U 盘 / 数据线；**不要用微信传 APK**，容易损坏）
+3. 平板开启「允许安装未知来源应用」，用文件管理器打开上述 APK 安装
+
+> 务必安装 **已签名** 的安装包。`bin\...\publish\` 里带 **`-Signed`** 后缀的才是可安装文件；不带 `-Signed` 的 `.apk` 会提示「安装包似乎无效」。
 
 **生成 Windows 安装包**
 

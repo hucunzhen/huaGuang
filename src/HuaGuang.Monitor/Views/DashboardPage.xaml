@@ -1,137 +1,293 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+<views:MonitorPageBase xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:views="clr-namespace:HuaGuang.Monitor.Views"
              xmlns:controls="clr-namespace:HuaGuang.Monitor.Controls"
              xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
              x:Class="HuaGuang.Monitor.Views.DashboardPage"
+             x:Name="ThisPage"
              x:DataType="vm:DashboardViewModel"
              Shell.NavBarIsVisible="False"
+             SafeAreaEdges="All"
              BackgroundColor="#0B1522">
 
-    <Grid RowDefinitions="Auto,*,Auto" Padding="10" RowSpacing="8">
-        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
-            <VerticalStackLayout VerticalOptions="Center" Spacing="1">
-                <Label Text="工业监控" TextColor="White" FontSize="20" FontAttributes="Bold" />
-                <Label Text="{Binding DeviceId, StringFormat='设备 {0}'}" TextColor="#8AA0B5" FontSize="12" />
-                <Label Text="{Binding ModeText}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="TailTruncation" />
+    <Grid x:Name="RootGrid"
+          RowDefinitions="Auto,*,Auto"
+          Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
+          RowSpacing="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource RowSpacingConverter}}">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <VerticalStackLayout Spacing="0" VerticalOptions="Center">
+                <Label Text="工业监控" TextColor="White" FontAttributes="Bold"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
+                <Label Text="{Binding DeviceId, StringFormat='设备 {0}'}" TextColor="#8AA0B5" LineBreakMode="TailTruncation"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}" />
+                <Label Text="{Binding ModeText}" TextColor="#2EC4B6" LineBreakMode="TailTruncation" MaxLines="2"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}" />
             </VerticalStackLayout>
 
-            <Border Grid.Column="1" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8" VerticalOptions="Center"
-                    IsVisible="{Binding IsAcquisitionMode}">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
-                <HorizontalStackLayout Spacing="8">
-                    <BoxView WidthRequest="8" HeightRequest="8" CornerRadius="4" VerticalOptions="Center"
-                             Color="{Binding PlcConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
-                    <VerticalStackLayout Spacing="0">
-                        <Label Text="PLC" TextColor="#8AA0B5" FontSize="11" />
-                        <Label Text="{Binding PlcConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White" FontSize="13" />
-                    </VerticalStackLayout>
-                </HorizontalStackLayout>
-            </Border>
+            <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
+                <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8,6"
+                        IsVisible="{Binding IsAcquisitionMode}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="8" />
+                    </Border.StrokeShape>
+                    <HorizontalStackLayout Spacing="6">
+                        <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center"
+                                 Color="{Binding PlcConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
+                        <VerticalStackLayout Spacing="0">
+                            <Label Text="PLC" TextColor="#8AA0B5"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                            <Label Text="{Binding PlcConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                </Border>
 
-            <Border Grid.Column="2" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8" VerticalOptions="Center">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
-                <HorizontalStackLayout Spacing="8">
-                    <BoxView WidthRequest="8" HeightRequest="8" CornerRadius="4" VerticalOptions="Center"
-                             Color="{Binding MqttConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
-                    <VerticalStackLayout Spacing="0">
-                        <Label Text="MQTT" TextColor="#8AA0B5" FontSize="11" />
-                        <Label Text="{Binding MqttConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White" FontSize="13" />
-                    </VerticalStackLayout>
-                </HorizontalStackLayout>
-            </Border>
+                <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8,6">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="8" />
+                    </Border.StrokeShape>
+                    <HorizontalStackLayout Spacing="6">
+                        <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center"
+                                 Color="{Binding MqttConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
+                        <VerticalStackLayout Spacing="0">
+                            <Label Text="MQTT" TextColor="#8AA0B5"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                            <Label Text="{Binding MqttConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                </Border>
 
-            <Button Grid.Column="3"
-                    Text="{Binding ToggleText}"
-                    Command="{Binding ToggleCommand}"
-                    VerticalOptions="Center"
-                    MinimumWidthRequest="108" />
+                <Button Text="{Binding ToggleText}"
+                        Command="{Binding ToggleCommand}"
+                        Padding="12,8"
+                        MinimumWidthRequest="88"
+                        VerticalOptions="Center"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+            </HorizontalStackLayout>
         </Grid>
 
-        <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="6">
-            <VerticalStackLayout Spacing="4" IsVisible="{Binding IsSubscribeMode}">
-                <Label Text="主题筛选" TextColor="#8AA0B5" FontSize="12" />
-                <Picker ItemsSource="{Binding TopicFilters}" SelectedItem="{Binding SelectedTopicFilter}" />
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                    <Entry Text="{Binding NewSubscribeTopic}" Placeholder="monitor/+/telemetry" />
-                    <Button Grid.Column="1" Text="添加主题" Command="{Binding AddSubscribeTopicCommand}" MinimumWidthRequest="88" />
+        <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="4">
+            <ScrollView x:Name="InfoPortrait"
+                        IsVisible="{Binding Source={x:Reference ThisPage}, Path=ShowCompactInfoPanel, Converter={StaticResource InverseBoolConverter}}"
+                        MaximumHeightRequest="{Binding Source={x:Reference ThisPage}, Path=InfoPanelMaxHeight}">
+                <VerticalStackLayout Spacing="4">
+                    <VerticalStackLayout Spacing="4" IsVisible="{Binding IsSubscribeMode}">
+                        <Label Text="主题筛选" TextColor="#8AA0B5"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <Picker ItemsSource="{Binding TopicFilters}" SelectedItem="{Binding SelectedTopicFilter}"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Entry Text="{Binding NewSubscribeTopic}" Placeholder="monitor/+/telemetry"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                            <Button Grid.Column="1" Text="添加主题" Command="{Binding AddSubscribeTopicCommand}" MinimumWidthRequest="88"
+                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                        </Grid>
+                    </VerticalStackLayout>
+                    <VerticalStackLayout Spacing="4" IsVisible="{Binding ShowRemoteDevicePicker}">
+                        <Label Text="远程设备" TextColor="#8AA0B5"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <Picker ItemsSource="{Binding RemoteDeviceItems}"
+                                ItemDisplayBinding="{Binding Label}"
+                                SelectedItem="{Binding SelectedRemoteDeviceItem}"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                    </VerticalStackLayout>
+                    <VerticalStackLayout Spacing="2">
+                        <Label Text="{Binding TopicPreview, StringFormat='{0}'}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <Label Text="{Binding PublishNote}" TextColor="#FFB347" LineBreakMode="WordWrap"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                               IsVisible="{Binding PublishNote, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
+                        <Label Text="{Binding LastError}" TextColor="#FF6B6B" LineBreakMode="WordWrap"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                               IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </ScrollView>
+
+            <VerticalStackLayout Spacing="4"
+                                 IsVisible="{Binding Source={x:Reference ThisPage}, Path=ShowCompactInfoPanel}">
+                <Grid ColumnDefinitions="Auto,*,Auto,*,*,Auto"
+                      ColumnSpacing="8"
+                      RowSpacing="0">
+                    <Grid.IsVisible>
+                        <MultiBinding Converter="{StaticResource AndBoolConverter}">
+                            <Binding Source="{x:Reference ThisPage}" Path="IsExpandedLayout" />
+                            <Binding Path="IsSubscribeMode" />
+                        </MultiBinding>
+                    </Grid.IsVisible>
+                    <Label Text="主题" TextColor="#8AA0B5" VerticalOptions="Center"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                           IsVisible="{Binding IsSubscribeMode}" />
+                    <Picker Grid.Column="1"
+                            ItemsSource="{Binding TopicFilters}"
+                            SelectedItem="{Binding SelectedTopicFilter}"
+                            FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                            IsVisible="{Binding IsSubscribeMode}" />
+                    <Label Grid.Column="2" Text="设备" TextColor="#8AA0B5" VerticalOptions="Center"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                           IsVisible="{Binding ShowRemoteDevicePicker}" />
+                    <Picker Grid.Column="3"
+                            ItemsSource="{Binding RemoteDeviceItems}"
+                            ItemDisplayBinding="{Binding Label}"
+                            SelectedItem="{Binding SelectedRemoteDeviceItem}"
+                            FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                            IsVisible="{Binding ShowRemoteDevicePicker}" />
+                    <Entry Grid.Column="4"
+                           Text="{Binding NewSubscribeTopic}"
+                           Placeholder="monitor/+/telemetry"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                           IsVisible="{Binding IsSubscribeMode}" />
+                    <Button Grid.Column="5"
+                            Text="添加主题"
+                            Command="{Binding AddSubscribeTopicCommand}"
+                            Padding="12,6"
+                            MinimumWidthRequest="88"
+                            FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}"
+                            IsVisible="{Binding IsSubscribeMode}" />
                 </Grid>
-            </VerticalStackLayout>
-            <VerticalStackLayout Grid.Row="1" Spacing="4" IsVisible="{Binding ShowRemoteDevicePicker}">
-                <Label Text="远程设备" TextColor="#8AA0B5" FontSize="12" />
-                <Picker ItemsSource="{Binding RemoteDeviceItems}"
-                        ItemDisplayBinding="{Binding Label}"
-                        SelectedItem="{Binding SelectedRemoteDeviceItem}" />
-            </VerticalStackLayout>
-            <VerticalStackLayout Grid.Row="2" Spacing="2">
-                <Label Text="{Binding TopicPreview, StringFormat='{0}'}" TextColor="#8AA0B5" FontSize="12" LineBreakMode="TailTruncation" />
-                <Label Text="{Binding PublishNote}" TextColor="#FFB347" FontSize="12"
+
+                <Grid ColumnDefinitions="*,*"
+                      ColumnSpacing="8"
+                      RowDefinitions="Auto,Auto"
+                      RowSpacing="4">
+                    <Grid.IsVisible>
+                        <MultiBinding Converter="{StaticResource AndBoolConverter}">
+                            <Binding Source="{x:Reference ThisPage}" Path="ShowCompactInfoPanel" />
+                            <Binding Source="{x:Reference ThisPage}" Path="IsExpandedLayout" Converter="{StaticResource InverseBoolConverter}" />
+                        </MultiBinding>
+                    </Grid.IsVisible>
+                    <VerticalStackLayout Spacing="2" IsVisible="{Binding IsSubscribeMode}">
+                        <Label Text="主题" TextColor="#8AA0B5"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                        <Picker ItemsSource="{Binding TopicFilters}" SelectedItem="{Binding SelectedTopicFilter}"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                    </VerticalStackLayout>
+                    <VerticalStackLayout Grid.Column="1" Spacing="2" IsVisible="{Binding ShowRemoteDevicePicker}">
+                        <Label Text="设备" TextColor="#8AA0B5"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                        <Picker ItemsSource="{Binding RemoteDeviceItems}"
+                                ItemDisplayBinding="{Binding Label}"
+                                SelectedItem="{Binding SelectedRemoteDeviceItem}"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                    </VerticalStackLayout>
+                    <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding IsSubscribeMode}">
+                        <Entry Text="{Binding NewSubscribeTopic}" Placeholder="monitor/+/telemetry"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <Button Grid.Column="1" Text="添加" Command="{Binding AddSubscribeTopicCommand}" Padding="10,6"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                    </Grid>
+                    <Label Grid.Row="1" Grid.ColumnSpan="2"
+                           Text="{Binding TopicPreview, StringFormat='{0}'}"
+                           TextColor="#8AA0B5"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                           IsVisible="{Binding IsSubscribeMode, Converter={StaticResource InverseBoolConverter}}" />
+                </Grid>
+
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <Label Text="{Binding TopicPreview, StringFormat='{0}'}"
+                           TextColor="#8AA0B5"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1"
+                           VerticalOptions="Center"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    <Label Grid.Column="1"
+                           Text="{Binding LastError}"
+                           TextColor="#FF6B6B"
+                           LineBreakMode="TailTruncation"
+                           MaxLines="1"
+                           VerticalOptions="Center"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                           IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
+                </Grid>
+                <Label Text="{Binding PublishNote}"
+                       TextColor="#FFB347"
+                       LineBreakMode="TailTruncation"
+                       MaxLines="1"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
                        IsVisible="{Binding PublishNote, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
-                <Label Text="{Binding LastError}" TextColor="#FF6B6B" FontSize="12"
-                       IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
             </VerticalStackLayout>
 
-            <controls:FitGrid Grid.Row="4" ItemsSource="{Binding Tags}">
+            <controls:FitGrid Grid.Row="1"
+                              ItemsSource="{Binding Tags}"
+                              PreferFill="{Binding Source={x:Reference ThisPage}, Path=IsExpandedLayout}"
+                              MinItemWidth="{Binding Source={x:Reference ThisPage}, Path=CardMinWidth}"
+                              MinItemHeight="{Binding Source={x:Reference ThisPage}, Path=CardMinHeight}"
+                              CardPadding="{Binding Source={x:Reference ThisPage}, Path=CardPadding}"
+                              BodyFontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                              ValueFontSize="{Binding Source={x:Reference ThisPage}, Path=ValueFontSize}"
+                              CaptionFontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                              SmallFontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}">
                 <controls:FitGrid.ItemTemplate>
                     <DataTemplate x:DataType="vm:TagRowViewModel">
-                        <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8">
+                        <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536"
+                                Padding="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CardPadding}"
+                                MinimumHeightRequest="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=MinItemHeight}">
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
-                            <Grid RowDefinitions="Auto,*,Auto" RowSpacing="2">
+                            <VerticalStackLayout Spacing="4">
                                 <Label Text="{Binding Name}"
                                        TextColor="#C9D6E2"
-                                       FontSize="12"
                                        LineBreakMode="TailTruncation"
-                                       MaxLines="1" />
-                                <HorizontalStackLayout Grid.Row="1" Spacing="4" VerticalOptions="Center">
+                                       MaxLines="2"
+                                       FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=BodyFontSize}" />
+                                <HorizontalStackLayout Spacing="4">
                                     <Label Text="{Binding DisplayValue}"
                                            TextColor="#2EC4B6"
-                                           FontSize="22"
                                            FontAttributes="Bold"
                                            LineBreakMode="TailTruncation"
-                                           VerticalOptions="Center" />
+                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=ValueFontSize}" />
                                     <Label Text="{Binding Unit}"
                                            TextColor="#8AA0B5"
-                                           FontSize="11"
                                            VerticalOptions="End"
-                                           Margin="0,0,0,2" />
+                                           Margin="0,0,0,2"
+                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CaptionFontSize}" />
                                 </HorizontalStackLayout>
-                                <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                                    <Label Text="{Binding AddressText}" TextColor="#6E8499" FontSize="10" LineBreakMode="TailTruncation" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                    <Label Text="{Binding AddressText}" TextColor="#6E8499" LineBreakMode="TailTruncation"
+                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
                                     <HorizontalStackLayout Grid.Column="1" Spacing="4">
                                         <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center" Color="{Binding QualityColor}" />
-                                        <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5" FontSize="10" />
+                                        <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5"
+                                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
                                     </HorizontalStackLayout>
                                 </Grid>
-                            </Grid>
+                            </VerticalStackLayout>
                         </Border>
                     </DataTemplate>
                 </controls:FitGrid.ItemTemplate>
                 <controls:FitGrid.EmptyView>
-                    <Label Text="{Binding EmptyTagsHint}" TextColor="#8AA0B5" />
+                    <Label Text="{Binding EmptyTagsHint}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
                 </controls:FitGrid.EmptyView>
             </controls:FitGrid>
         </Grid>
 
-        <Border Grid.Row="2" Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#101C28" Padding="8,6">
+        <Border x:Name="PayloadFooter"
+                Grid.Row="2"
+                Stroke="#1F3A52"
+                StrokeThickness="1"
+                BackgroundColor="#101C28"
+                Padding="8,4"
+                IsVisible="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource InverseBoolConverter}}">
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="8" />
             </Border.StrokeShape>
             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
-                <Label Text="最近报文" TextColor="#8AA0B5" FontSize="11" VerticalOptions="Center" />
+                <Label Text="最近报文" TextColor="#8AA0B5" VerticalOptions="Center"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
                 <Label Grid.Column="1"
                        Text="{Binding LastPayload}"
                        TextColor="#C9D6E2"
-                       FontSize="11"
                        LineBreakMode="TailTruncation"
                        MaxLines="1"
-                       VerticalOptions="Center" />
+                       VerticalOptions="Center"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
             </Grid>
         </Border>
     </Grid>
-</ContentPage>
+</views:MonitorPageBase>

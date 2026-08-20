@@ -27,5 +27,9 @@
             Title="设置"
             ContentTemplate="{DataTemplate views:SettingsPage}"
             Route="settings" />
+        <ShellContent
+            Title="诊断"
+            ContentTemplate="{DataTemplate views:DiagnosticsPage}"
+            Route="diagnostics" />
     </TabBar>
 </Shell>
