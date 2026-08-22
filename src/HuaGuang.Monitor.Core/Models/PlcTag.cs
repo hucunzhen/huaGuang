@@ -18,6 +18,12 @@ public sealed class PlcTag
     /// <summary>显示与 MQTT 小数位数（0–4）。null 表示使用设置里的全局默认。</summary>
     public int? DisplayPrecision { get; set; }
 
+    /// <summary>MQTT 报文 tags 对象中的字段名；留空则使用点位名称。</summary>
+    public string MqttField { get; set; } = string.Empty;
+
+    /// <summary>监控页显示分组；留空则按数据类型/名称自动推断（产线 Excel「点表·显示分组」）。</summary>
+    public TagDisplayCategory? DisplayCategory { get; set; }
+
     public string DisplayAddress => Source == TagSource.Manual
         ? "手动输入"
         : string.IsNullOrWhiteSpace(XinjeAddress)

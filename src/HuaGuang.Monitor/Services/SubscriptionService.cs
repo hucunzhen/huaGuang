@@ -32,6 +32,7 @@ public sealed class SubscriptionService : IAsyncDisposable
     public IReadOnlyDictionary<string, RemoteDeviceState> Devices => _devices;
 
     public event EventHandler? DevicesUpdated;
+    public event EventHandler<RemoteTelemetryEventArgs>? TelemetryReceived;
     public event EventHandler? ConnectionChanged;
 
     public IEnumerable<RemoteDeviceState> GetDevices(string? topicFilter)
@@ -187,9 +188,10 @@ public sealed class SubscriptionService : IAsyncDisposable
 
             using var doc = JsonDocument.Parse(payload);
             var root = doc.RootElement;
-            var deviceId = root.TryGetProperty("deviceId", out var deviceEl)
-                ? deviceEl.GetString()
-                : ExtractDeviceIdFromTopic(message.Topic);
+            var settings = _settingsStore.Current;
+            var profile = settings.MqttPayload ?? new MqttPayloadProfile();
+            var parsed = MqttPayloadMapper.Parse(root, profile);
+            var deviceId = parsed.DeviceId ?? ExtractDeviceIdFromTopic(message.Topic);
             if (string.IsNullOrWhiteSpace(deviceId))
             {
                 return;
@@ -206,25 +208,15 @@ public sealed class SubscriptionService : IAsyncDisposable
                 };
 
             state.ReceivedAt = DateTimeOffset.Now;
-            state.Quality = root.TryGetProperty("quality", out var qualityEl)
-                ? qualityEl.GetString() ?? "Good"
-                : "Good";
-            state.PlcHost = root.TryGetProperty("plcHost", out var plcEl)
-                ? plcEl.GetString() ?? string.Empty
-                : string.Empty;
-            state.Simulator = root.TryGetProperty("simulator", out var simEl) && simEl.GetBoolean();
-            state.Timestamp = root.TryGetProperty("timestamp", out var tsEl) &&
-                              DateTimeOffset.TryParse(tsEl.GetString(), out var parsed)
-                ? parsed
-                : state.ReceivedAt;
+            state.Quality = parsed.Quality;
+            state.PlcHost = parsed.PlcHost;
+            state.Simulator = parsed.Simulator;
+            state.Timestamp = parsed.Timestamp;
 
             state.Tags.Clear();
-            if (root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Object)
+            foreach (var pair in parsed.Tags)
             {
-                foreach (var property in tagsEl.EnumerateObject())
-                {
-                    state.Tags[property.Name] = JsonElementToObject(property.Value);
-                }
+                state.Tags[pair.Key] = pair.Value;
             }
 
             _devices[deviceKey] = state;
@@ -232,6 +224,11 @@ public sealed class SubscriptionService : IAsyncDisposable
             LastPayload = TruncatePayload(payload);
             LastError = string.Empty;
             DevicesUpdated?.Invoke(this, EventArgs.Empty);
+            TelemetryReceived?.Invoke(this, new RemoteTelemetryEventArgs
+            {
+                Device = state,
+                PayloadJson = LastPayload
+            });
         }
         catch (Exception ex)
         {
@@ -293,18 +290,6 @@ public sealed class SubscriptionService : IAsyncDisposable
         var parts = topic.Split('/', StringSplitOptions.RemoveEmptyEntries);
         return parts.Length >= 2 ? parts[^2] : null;
     }
-
-    static object? JsonElementToObject(JsonElement element) => element.ValueKind switch
-    {
-        JsonValueKind.String => element.GetString(),
-        JsonValueKind.Number => element.TryGetInt64(out var integer) && !element.GetRawText().Contains('.')
-            ? integer
-            : element.GetDouble(),
-        JsonValueKind.True => true,
-        JsonValueKind.False => false,
-        JsonValueKind.Null => null,
-        _ => element.GetRawText()
-    };
 
     async Task DisconnectAsync()
     {

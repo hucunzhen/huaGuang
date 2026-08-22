@@ -33,6 +33,15 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         .ToArray();
     public string[] ByteOrders { get; } = Enum.GetNames<ByteOrder>();
     public string[] SourceTypes { get; } = ["PLC 采集", "手动输入"];
+    public string[] DisplayCategoryOptions { get; } =
+    [
+        "自动推断",
+        TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Switch),
+        TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Temperature),
+        TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Process),
+        TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Setting),
+        TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Other),
+    ];
 
     [ObservableProperty] string title = "新增点位";
     [ObservableProperty] string name = string.Empty;
@@ -51,6 +60,8 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     [ObservableProperty] string scale = "1";
     [ObservableProperty] string offset = "0";
     [ObservableProperty] string displayPrecision = string.Empty;
+    [ObservableProperty] string mqttField = string.Empty;
+    [ObservableProperty] string selectedDisplayCategoryOption = "自动推断";
     [ObservableProperty] string statusMessage = string.Empty;
 
     public bool IsPlcSource => SelectedSourceType == "PLC 采集";
@@ -103,6 +114,10 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 Scale = tag.Scale.ToString("0.####");
                 Offset = tag.Offset.ToString("0.####");
                 DisplayPrecision = tag.DisplayPrecision?.ToString() ?? string.Empty;
+                MqttField = tag.MqttField;
+                SelectedDisplayCategoryOption = tag.DisplayCategory is { } category
+                    ? TagDisplayCategoryHelper.ToLabel(category)
+                    : "自动推断";
                 return;
             }
         }
@@ -146,6 +161,12 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
 
         tag.DisplayPrecision = precision;
+        tag.MqttField = MqttField.Trim();
+        tag.DisplayCategory = SelectedDisplayCategoryOption == "自动推断"
+            ? null
+            : TagDisplayCategoryHelper.TryParseLabel(SelectedDisplayCategoryOption, out var category)
+                ? category
+                : TagDisplayCategoryHelper.InferCategory(tag);
 
         if (IsManualSource)
         {
@@ -202,6 +223,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
 
         await _store.SaveAsync(_store.Current);
+        LineConfigPaths.SaveCurrentLine(_store.Current);
         _dashboard.Reload();
         await Shell.Current.GoToAsync("..");
     }
@@ -221,6 +243,8 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         Scale = "1";
         Offset = "0";
         DisplayPrecision = string.Empty;
+        MqttField = string.Empty;
+        SelectedDisplayCategoryOption = "自动推断";
         StatusMessage = string.Empty;
     }
 

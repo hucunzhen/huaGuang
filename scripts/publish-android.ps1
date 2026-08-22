@@ -8,6 +8,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "src\HuaGuang.Monitor\HuaGuang.Monitor.csproj"
 $framework = "net10.0-android"
 $distDir = Join-Path $root "dist"
+$installerOutputDir = Join-Path $root "installer\output"
 
 if (-not $env:ANDROID_HOME -and -not $env:ANDROID_SDK_ROOT) {
     throw @"
@@ -17,6 +18,14 @@ or set ANDROID_HOME to your Android SDK path.
 }
 
 Write-Host "Publishing Android $Configuration APK..." -ForegroundColor Cyan
+
+$linesSrc = Join-Path $root "config\lines"
+if (Test-Path $linesSrc) {
+    $lineFiles = Get-ChildItem -Path $linesSrc -Filter "*.xlsx" -File |
+        Where-Object { $_.Name -notlike "~$*" -and $_.Name -notlike "*.new.xlsx" }
+    Write-Host "Bundling $($lineFiles.Count) line Excel file(s) from config\lines." -ForegroundColor DarkGray
+}
+
 dotnet publish $project -f $framework -c $Configuration
 if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
 
@@ -60,14 +69,18 @@ try {
 }
 
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+New-Item -ItemType Directory -Path $installerOutputDir -Force | Out-Null
 $destName = "IndustrialMonitor-$version-android.apk"
 $destPath = Join-Path $distDir $destName
+$installerDestPath = Join-Path $installerOutputDir $destName
 Copy-Item -Path $signedApk.FullName -Destination $destPath -Force
+Copy-Item -Path $signedApk.FullName -Destination $installerDestPath -Force
 
 $sizeMb = [math]::Round((Get-Item $destPath).Length / 1MB, 1)
 
 Write-Host ""
 Write-Host "Install THIS file on the tablet:" -ForegroundColor Green
+Write-Host "  $installerDestPath"
 Write-Host "  $destPath"
 Write-Host "  ($sizeMb MB, signed, arm + arm64)"
 Write-Host ""

@@ -24,6 +24,10 @@
             ContentTemplate="{DataTemplate views:TagsPage}"
             Route="tags" />
         <ShellContent
+            Title="历史"
+            ContentTemplate="{DataTemplate views:HistoryPage}"
+            Route="history" />
+        <ShellContent
             Title="设置"
             ContentTemplate="{DataTemplate views:SettingsPage}"
             Route="settings" />

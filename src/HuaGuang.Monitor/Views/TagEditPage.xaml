@@ -19,6 +19,16 @@
                 <Label Text="启用" TextColor="White" VerticalOptions="Center" />
             </HorizontalStackLayout>
 
+            <Label Text="显示分组（监控页）" TextColor="#8AA0B5" FontSize="12" />
+            <Picker ItemsSource="{Binding DisplayCategoryOptions}" SelectedItem="{Binding SelectedDisplayCategoryOption}" />
+            <Label Text="对应产线 Excel「点表·显示分组」。选「自动推断」则按类型/名称归类。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+
+            <Label Text="MQTT 字段名" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttField}" Placeholder="如 run_status、speed；留空用映射表或点位名称" />
+            <Label Text="对应产线 Excel「字段映射」表的 id 列；平铺 JSON 报文根级字段名。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+
             <Label Text="数据来源" TextColor="#8AA0B5" FontSize="12" />
             <Picker ItemsSource="{Binding SourceTypes}" SelectedItem="{Binding SelectedSourceType}" />
             <Label Text="手动输入：不参与 PLC 读取，值随 MQTT 一起发布（如胶辊型号、门幅）。"

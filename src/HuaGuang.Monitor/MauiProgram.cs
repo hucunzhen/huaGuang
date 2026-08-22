@@ -29,9 +29,18 @@ public static class MauiProgram
 		builder.Services.AddSingleton<SettingsStore>();
 #if WINDOWS
 		builder.Services.AddSingleton<IStartupRegistration, Platforms.Windows.WindowsStartupRegistration>();
+		builder.Services.AddSingleton<IPlatformFullScreenPresenter, Platforms.Windows.WindowsFullScreenPresenter>();
+#elif ANDROID
+		builder.Services.AddSingleton<IStartupRegistration, NoOpStartupRegistration>();
+		builder.Services.AddSingleton<IPlatformFullScreenPresenter, Platforms.Android.AndroidFullScreenPresenter>();
 #else
 		builder.Services.AddSingleton<IStartupRegistration, NoOpStartupRegistration>();
+		builder.Services.AddSingleton<IPlatformFullScreenPresenter, NoOpFullScreenPresenter>();
 #endif
+		builder.Services.AddSingleton<FullScreenService>();
+		builder.Services.AddSingleton(sp =>
+			new HistoryStore(Path.Combine(FileSystem.AppDataDirectory, "history.db")));
+		builder.Services.AddSingleton<HistoryRecorder>();
 		builder.Services.AddSingleton<IPlcClient, ModbusTcpPlcClient>();
 		builder.Services.AddSingleton<IMqttPublisher, MqttPublisher>();
 		builder.Services.AddSingleton<AcquisitionService>();
@@ -41,17 +50,23 @@ public static class MauiProgram
 		builder.Services.AddTransient<SettingsViewModel>();
 		builder.Services.AddTransient<TagsViewModel>();
 		builder.Services.AddTransient<TagEditViewModel>();
+		builder.Services.AddTransient<HistoryViewModel>();
+		builder.Services.AddTransient<HistoryDetailViewModel>();
 		builder.Services.AddTransient<DashboardPage>();
 		builder.Services.AddTransient<DiagnosticsPage>();
 		builder.Services.AddTransient<SettingsPage>();
 		builder.Services.AddTransient<TagsPage>();
+		builder.Services.AddTransient<HistoryPage>();
+		builder.Services.AddTransient<HistoryDetailPage>();
 		builder.Services.AddTransient<TagEditPage>();
 
 		var app = builder.Build();
 		Services = app.Services;
 		var store = Services.GetRequiredService<SettingsStore>();
 		store.LoadAsync().GetAwaiter().GetResult();
+		LineConfigPaths.EnsureDefaultExcelFiles();
 		Services.GetRequiredService<IStartupRegistration>().Apply(store.Current.StartWithWindows);
+		Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
 		return app;
 	}
 }

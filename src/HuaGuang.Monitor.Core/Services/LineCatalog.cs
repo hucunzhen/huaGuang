@@ -8,7 +8,7 @@ namespace HuaGuang.Monitor.Services;
 /// </summary>
 public static class LineCatalog
 {
-    public const int Version = 4;
+    public const int Version = 6;
 
     public static IReadOnlyList<string> LineNames { get; } =
     [
@@ -25,20 +25,31 @@ public static class LineCatalog
         settings.Plc.Model = "XD5E-60T10";
         settings.Plc.Host = line.Host;
         settings.Plc.Port = 502;
+        settings.MqttPayload = MqttFieldMappingCatalog.CreatePropertiesPayloadProfile();
+        LineMqttDefaults.ApplyBroker(settings.Mqtt);
+        settings.Mqtt.Topic = line.MqttTopic;
+        LineMqttDefaults.ApplySubscribeTopics(settings);
         settings.Tags = line.Tags.Select(CloneAndResolve).ToList();
+        MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
     }
 
     public static LineProfile Resolve(string? lineName) =>
         lineName == "华迪热熔胶复合机" ? Huadi : Xianhe;
 
+    /// <summary>Android 资源文件名仅 ASCII（aapt 不支持中文路径）。</summary>
+    public static string GetBundledAssetName(string lineName) =>
+        lineName == Huadi.Name ? "huadi" : "xianhe";
+
     public static LineProfile Xianhe { get; } = new(
         "先河热熔胶复合机",
         "192.168.6.10",
+        LineMqttDefaults.XianhePublishTopic,
         SharedTags(includeExpandRate: true));
 
     public static LineProfile Huadi { get; } = new(
         "华迪热熔胶复合机",
         "192.168.6.20",
+        LineMqttDefaults.HuadiPublishTopic,
         SharedTags(includeExpandRate: false));
 
     static List<PlcTag> SharedTags(bool includeExpandRate)
@@ -84,7 +95,8 @@ public static class LineCatalog
     {
         Name = name,
         XinjeAddress = address,
-        DataType = TagDataType.Bool
+        DataType = TagDataType.Bool,
+        DisplayCategory = TagDisplayCategory.Switch
     };
 
     static PlcTag Real(string name, string address, string unit = "") => new()
@@ -93,7 +105,11 @@ public static class LineCatalog
         Unit = unit,
         XinjeAddress = address,
         DataType = TagDataType.Float32,
-        ByteOrder = ByteOrder.CDAB
+        ByteOrder = ByteOrder.CDAB,
+        DisplayCategory = unit.Contains('℃', StringComparison.Ordinal) ||
+                         name.Contains("温度", StringComparison.Ordinal)
+            ? TagDisplayCategory.Temperature
+            : TagDisplayCategory.Process
     };
 
     static PlcTag ManualString(string name, string defaultValue = "") => new()
@@ -101,7 +117,8 @@ public static class LineCatalog
         Name = name,
         Source = TagSource.Manual,
         DataType = TagDataType.String,
-        ManualValue = defaultValue
+        ManualValue = defaultValue,
+        DisplayCategory = TagDisplayCategory.Setting
     };
 
     static PlcTag ManualReal(string name, string unit = "", string defaultValue = "") => new()
@@ -110,7 +127,8 @@ public static class LineCatalog
         Unit = unit,
         Source = TagSource.Manual,
         DataType = TagDataType.Float32,
-        ManualValue = defaultValue
+        ManualValue = defaultValue,
+        DisplayCategory = TagDisplayCategory.Setting
     };
 
     static PlcTag CloneAndResolve(PlcTag source)
@@ -124,7 +142,9 @@ public static class LineCatalog
             ByteOrder = source.ByteOrder,
             Source = source.Source,
             ManualValue = source.ManualValue,
-            DisplayPrecision = source.DisplayPrecision
+            DisplayPrecision = source.DisplayPrecision,
+            MqttField = source.MqttField,
+            DisplayCategory = source.DisplayCategory
         };
 
         if (tag.Source != TagSource.Manual)
@@ -136,4 +156,4 @@ public static class LineCatalog
     }
 }
 
-public sealed record LineProfile(string Name, string Host, IReadOnlyList<PlcTag> Tags);
+public sealed record LineProfile(string Name, string Host, string MqttTopic, IReadOnlyList<PlcTag> Tags);

@@ -21,8 +21,9 @@ function Get-IsccPath {
 }
 
 if (-not $SkipPublish) {
+    $publishScript = Join-Path $PSScriptRoot "publish-windows.ps1"
     Write-Host "Publishing Windows $Configuration ..." -ForegroundColor Cyan
-    dotnet publish $project -f $framework -c $Configuration
+    & $publishScript -Configuration $Configuration
     if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
 }
 
@@ -52,11 +53,21 @@ Then re-run: .\scripts\build-installer.ps1
 Write-Host "Using ISCC: $iscc" -ForegroundColor DarkGray
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
-Write-Host "Building installer ..." -ForegroundColor Cyan
-& $iscc "/DPublishDir=$publishDir" $iss
+$version = "1.1"
+try {
+    $csproj = [xml](Get-Content $project)
+    $verNode = $csproj.Project.PropertyGroup.ApplicationDisplayVersion |
+        Where-Object { $_ -ne $null } |
+        Select-Object -First 1
+    if ($verNode) { $version = [string]$verNode }
+} catch {
+}
+
+Write-Host "Building installer (v$version) ..." -ForegroundColor Cyan
+& $iscc "/DPublishDir=$publishDir" "/DMyAppVersion=$version" $iss
 if ($LASTEXITCODE -ne 0) { throw "Installer build failed." }
 
-$setup = Join-Path $outputDir "IndustrialMonitor-Setup.exe"
+$setup = Join-Path $outputDir "IndustrialMonitor-$version-Setup.exe"
 Write-Host ""
 Write-Host "Installer ready:" -ForegroundColor Green
 Write-Host "  $setup"

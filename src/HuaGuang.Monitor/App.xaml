@@ -15,6 +15,8 @@
             <converters:InverseBoolConverter x:Key="InverseBoolConverter" />
             <converters:AndBoolConverter x:Key="AndBoolConverter" />
             <converters:BoolToPassIconConverter x:Key="BoolToPassIconConverter" />
+            <converters:BoolToSwitchStrokeConverter x:Key="BoolToSwitchStrokeConverter" />
+            <converters:FullScreenLabelConverter x:Key="FullScreenLabelConverter" />
             <converters:OrientationDoubleConverter x:Key="InfoMaxHeightConverter" PortraitValue="200" LandscapeValue="96" />
             <converters:OrientationThicknessConverter x:Key="PagePaddingConverter"
                                                        PortraitValue="10,6,10,8"

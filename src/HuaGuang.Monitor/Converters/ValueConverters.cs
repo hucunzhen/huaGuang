@@ -71,6 +71,24 @@ public sealed class BoolToPassIconConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+public sealed class BoolToSwitchStrokeConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? 2.0 : 1.0;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+public sealed class FullScreenLabelConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? "退出全屏" : "全屏";
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
 public sealed class OrientationDoubleConverter : IValueConverter
 {
     public double PortraitValue { get; set; }

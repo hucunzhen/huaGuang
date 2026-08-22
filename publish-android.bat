@@ -7,7 +7,7 @@ echo.
 if %EXITCODE% neq 0 (
   echo [失败] 退出码 %EXITCODE%，请查看上方错误信息。
 ) else (
-  echo [完成] APK 已输出到 dist\ 目录。
+  echo [完成] APK 已输出到 installer\output\ 与 dist\ 目录。
 )
 pause
 exit /b %EXITCODE%

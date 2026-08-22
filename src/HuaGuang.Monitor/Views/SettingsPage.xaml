@@ -41,9 +41,14 @@
             </Grid>
             <Label Text="首页可切换「全部」或单个主题查看设备；运行中也可在首页直接添加主题。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsSubscribeSettings}" />
-            <Label Text="产线（数据地址规划）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="产线（Excel 配置，每条产线一个 xlsx）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Picker ItemsSource="{Binding LineNames}" SelectedItem="{Binding SelectedLineName}" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Button Text="载入该产线点表和 PLC IP" Command="{Binding ApplyLineCommand}" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="{Binding LineExcelPath}" TextColor="#6E8499" FontSize="11" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Button Text="从 Excel 载入产线" Command="{Binding LoadLineFromExcelCommand}" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Button Text="保存当前配置到 Excel" Command="{Binding SaveLineToExcelCommand}" BackgroundColor="#1F3A52" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Button Text="从其他 Excel 文件导入…" Command="{Binding ImportLineExcelFromFileCommand}" BackgroundColor="#1F3A52" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="每条产线一个 xlsx（程序目录 lines\ 或 AppData），含「配置」「MQTT报文」「字段映射」「点表」「显示分组说明」。点表列「显示分组」控制监控页分组与颜色；留空则自动推断。保存设置时同步写回；切换产线自动载入。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="设备编号" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding DeviceId}" Placeholder="LINE-01" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="扫描周期（毫秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
@@ -68,6 +73,14 @@
                 <CheckBox IsChecked="{Binding AutoStartAcquisition}" Color="#2EC4B6" VerticalOptions="Center" />
                 <Label Text="启动后自动运行（采集或订阅，取决于运行模式）" TextColor="White" VerticalOptions="Center" LineBreakMode="WordWrap" />
             </HorizontalStackLayout>
+            <Label Text="历史数据" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
+            <HorizontalStackLayout Spacing="10">
+                <CheckBox IsChecked="{Binding EnableHistoryRecording}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="记录采集/订阅数据到本地 SQLite" TextColor="White" VerticalOptions="Center" LineBreakMode="WordWrap" />
+            </HorizontalStackLayout>
+            <Label Text="保留天数（1–365）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding HistoryRetentionDays}" Keyboard="Numeric" Placeholder="14" />
+            <Label Text="超出保留期的历史记录会在启动时自动清理。" TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
 
             <Label Text="PLC · 信捷 XD5E-60T10" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="以太网 Modbus TCP 从站。请在 XDPpro 中开启 Modbus TCP Server，端口 502，站号与下面一致。X/Y 为八进制：X7 下一个是 X10。"
@@ -92,7 +105,7 @@
             <Entry Text="{Binding MqttUsername}" />
             <Label Text="密码" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttPassword}" IsPassword="True" />
-            <Label Text="发布主题，可用 {deviceId}" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="发布主题，可用 {deviceId}（设备编号来自上方「设备编号」，不必写入报文 JSON）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding MqttTopic}" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="QoS（0 / 1 / 2）" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttQos}" Keyboard="Numeric" />

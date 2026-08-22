@@ -3,102 +3,65 @@
 <Project>
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' and '$(Configuration)' == 'Release'">
-
     <BuildInstallerOnPublish Condition="'$(BuildInstallerOnPublish)' == ''">true</BuildInstallerOnPublish>
-
     <InstallerIssFile>$(MSBuildProjectDirectory)\..\..\installer\IndustrialMonitor.iss</InstallerIssFile>
-
     <InstallerOutputDir>$(MSBuildProjectDirectory)\..\..\installer\output</InstallerOutputDir>
-
     <ResolveInnoSetupScript>$(MSBuildProjectDirectory)\..\..\scripts\Resolve-InnoSetup.ps1</ResolveInnoSetupScript>
-
+    <GenerateAppIconScript>$(MSBuildProjectDirectory)\..\..\scripts\generate-appicon-ico.ps1</GenerateAppIconScript>
   </PropertyGroup>
 
-
-
   <Target Name="BuildWindowsInstaller"
-
           AfterTargets="Publish"
-
           Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'
-
                        and '$(Configuration)' == 'Release'
-
                        and '$(BuildInstallerOnPublish)' == 'true'">
 
-
-
     <PropertyGroup>
-
       <_PublishDir Condition="'$(PublishDir)' != ''">$(PublishDir)</_PublishDir>
-
       <_PublishDir Condition="'$(_PublishDir)' == ''">$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\win-x64\publish\</_PublishDir>
-
       <_PublishFullDir>$([System.IO.Path]::GetFullPath('$(_PublishDir)'))</_PublishFullDir>
-
     </PropertyGroup>
-
-
 
     <Error Condition="!Exists('$(_PublishFullDir)\HuaGuang.Monitor.exe')"
-
            Text="Publish output not found at $(_PublishFullDir). Cannot build installer." />
 
-
-
     <Error Condition="!Exists('$(InstallerIssFile)')"
-
            Text="Installer script not found: $(InstallerIssFile)" />
 
-
+    <Exec Condition="Exists('$(GenerateAppIconScript)')"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(GenerateAppIconScript)&quot;"
+          ConsoleToMSBuild="true" />
 
     <Exec Condition="Exists('$(ResolveInnoSetupScript)')"
-
           Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ResolveInnoSetupScript)&quot; -CompilerPath &quot;$(InnoSetupCompiler)&quot;"
-
           ConsoleToMSBuild="true"
-
           IgnoreExitCode="true">
-
       <Output TaskParameter="ConsoleOutput" PropertyName="_IsccPath" />
-
     </Exec>
 
-
-
     <PropertyGroup>
-
       <_IsccPath Condition="'$(_IsccPath)' != ''">$(_IsccPath.Trim())</_IsccPath>
-
     </PropertyGroup>
 
-
-
     <Warning Condition="'$(_IsccPath)' == ''"
-
              Text="Inno Setup (ISCC.exe) not found. Skipping installer. Typical path: $(LOCALAPPDATA)\Programs\Inno Setup 6\ISCC.exe — or set InnoSetupCompiler / INNO_SETUP_ISCC." />
-
-
 
     <MakeDir Directories="$(InstallerOutputDir)" Condition="'$(_IsccPath)' != ''" />
 
-
-
     <Exec Condition="'$(_IsccPath)' != ''"
+          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishFullDir)&quot; /DMyAppVersion=&quot;$(ApplicationDisplayVersion)&quot; &quot;$(InstallerIssFile)&quot;"
+          WorkingDirectory="$(MSBuildProjectDirectory)\..\..\installer"
+          IgnoreExitCode="true"
+          ConsoleToMSBuild="true">
+      <Output TaskParameter="ExitCode" PropertyName="_IsccExitCode" />
+    </Exec>
 
-          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishFullDir)&quot; &quot;$(InstallerIssFile)&quot;"
+    <Warning Condition="'$(_IsccPath)' != '' and '$(_IsccExitCode)' != '0'"
+             Text="Inno Setup failed (exit $(_IsccExitCode)). Publish output remains at $(_PublishFullDir)." />
 
-          WorkingDirectory="$(MSBuildProjectDirectory)\..\..\installer" />
-
-
-
-    <Message Condition="'$(_IsccPath)' != ''"
-
+    <Message Condition="'$(_IsccPath)' != '' and '$(_IsccExitCode)' == '0'"
              Importance="high"
-
-             Text="Windows installer ready: $(InstallerOutputDir)\IndustrialMonitor-Setup.exe (ISCC: $(_IsccPath))" />
-
+             Text="Windows installer ready: $(InstallerOutputDir)\IndustrialMonitor-$(ApplicationDisplayVersion)-Setup.exe (ISCC: $(_IsccPath))" />
   </Target>
 
 </Project>
-

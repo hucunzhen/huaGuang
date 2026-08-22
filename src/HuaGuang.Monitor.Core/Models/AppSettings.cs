@@ -1,5 +1,7 @@
 namespace HuaGuang.Monitor.Models;
 
+using HuaGuang.Monitor.Services;
+
 public sealed class AppSettings
 {
     public string DeviceId { get; set; } = "先河热熔胶复合机";
@@ -18,12 +20,21 @@ public sealed class AppSettings
     /// <summary>采集模式或订阅模式。</summary>
     public AppOperationMode OperationMode { get; set; } = AppOperationMode.Acquisition;
     /// <summary>订阅模式下监听的 MQTT 主题，支持 + / # 通配。</summary>
-    public List<string> SubscribeTopics { get; set; } = ["monitor/+/telemetry"];
+    public List<string> SubscribeTopics { get; set; } =
+    [
+        LineMqttDefaults.XianhePublishTopic,
+        LineMqttDefaults.HuadiPublishTopic
+    ];
     /// <summary>兼容旧配置。</summary>
-    public string SubscribeTopic { get; set; } = "monitor/+/telemetry";
+    public string SubscribeTopic { get; set; } = LineMqttDefaults.XianhePublishTopic;
     public PlcSettings Plc { get; set; } = new();
     public MqttSettings Mqtt { get; set; } = new();
+    public MqttPayloadProfile MqttPayload { get; set; } = new();
     public List<PlcTag> Tags { get; set; } = [];
+    /// <summary>是否记录采集/订阅数据到本地 SQLite。</summary>
+    public bool EnableHistoryRecording { get; set; } = true;
+    /// <summary>历史数据保留天数；超出后自动清理。</summary>
+    public int HistoryRetentionDays { get; set; } = 14;
 }
 
 public sealed class PlcSettings
@@ -37,12 +48,12 @@ public sealed class PlcSettings
 
 public sealed class MqttSettings
 {
-    public string Host { get; set; } = "127.0.0.1";
-    public int Port { get; set; } = 1883;
+    public string Host { get; set; } = LineMqttDefaults.Host;
+    public int Port { get; set; } = LineMqttDefaults.Port;
     public string ClientId { get; set; } = string.Empty;
-    public string Username { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
+    public string Username { get; set; } = LineMqttDefaults.Username;
+    public string Password { get; set; } = LineMqttDefaults.Password;
     public bool UseTls { get; set; }
     public int Qos { get; set; }
-    public string Topic { get; set; } = "monitor/{deviceId}/telemetry";
+    public string Topic { get; set; } = LineMqttDefaults.XianhePublishTopic;
 }

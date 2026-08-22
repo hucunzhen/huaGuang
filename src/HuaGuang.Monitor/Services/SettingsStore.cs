@@ -33,6 +33,7 @@ public sealed class SettingsStore
             if (!File.Exists(_filePath))
             {
                 Current = CreateDefault();
+                ApplyCurrentLineFromExcel();
                 await SaveAsync(Current).ConfigureAwait(false);
                 return;
             }
@@ -41,15 +42,13 @@ public sealed class SettingsStore
             var loaded = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions).ConfigureAwait(false);
             Current = loaded ?? CreateDefault();
             SubscribeTopicHelper.Migrate(Current);
-            if (Current.AddressCatalogVersion < LineCatalog.Version || Current.Tags.Count == 0)
-            {
-                LineCatalog.Apply(Current, Current.LineName);
-                await SaveAsync(Current).ConfigureAwait(false);
-            }
+            ApplyCurrentLineFromExcel();
+            await SaveAsync(Current).ConfigureAwait(false);
         }
         catch
         {
             Current = CreateDefault();
+            ApplyCurrentLineFromExcel();
         }
     }
 
@@ -64,10 +63,27 @@ public sealed class SettingsStore
         File.Delete(temp);
     }
 
+    void ApplyCurrentLineFromExcel()
+    {
+        LineConfigPaths.EnsureDefaultExcelFiles();
+        if (string.IsNullOrWhiteSpace(Current.LineName))
+        {
+            Current.LineName = LineCatalog.LineNames[0];
+        }
+
+        LineConfigPaths.SyncCurrentLine(Current);
+        if (Current.MqttPayload is not null)
+        {
+            MqttFieldMappingCatalog.NormalizeLegacyProfile(Current.MqttPayload);
+        }
+
+        LineMqttDefaults.MigrateLegacySettings(Current);
+    }
+
     public static AppSettings CreateDefault()
     {
         var settings = new AppSettings();
-        LineCatalog.Apply(settings, "先河热熔胶复合机");
+        settings.LineName = LineCatalog.LineNames[0];
         return settings;
     }
 }

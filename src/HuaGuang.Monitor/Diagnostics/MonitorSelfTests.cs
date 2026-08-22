@@ -21,6 +21,7 @@ public static class MonitorSelfTests
     [
         Run("遥测 JSON 解析", () => TestTelemetryParse(subscription)),
         Run("订阅增量更新", () => TestSubscribeUpdates(subscription)),
+        Run("多设备同时订阅", () => TestMultiDeviceSubscribe(subscription)),
         Run("设备缓存上限", () => TestDeviceCacheLimit(subscription)),
     ];
 
@@ -108,6 +109,38 @@ public static class MonitorSelfTests
         if (!device.Tags.TryGetValue("车速", out var speed) || speed is not double)
         {
             throw new InvalidOperationException("断言失败");
+        }
+    }
+
+    static void TestMultiDeviceSubscribe(SubscriptionService subscription)
+    {
+        subscription.InjectTelemetry(
+            "monitor/line-a/telemetry",
+            """
+            {
+              "deviceId": "LINE-A",
+              "timestamp": "2026-08-20T08:00:00Z",
+              "quality": "Good",
+              "tags": { "车速": 10.0 }
+            }
+            """);
+        subscription.InjectTelemetry(
+            "monitor/line-b/telemetry",
+            """
+            {
+              "deviceId": "LINE-B",
+              "timestamp": "2026-08-20T08:00:00Z",
+              "quality": "Good",
+              "tags": { "车速": 20.0 }
+            }
+            """);
+
+        var devices = subscription.Devices.Values
+            .Where(entry => entry.DeviceId is "LINE-A" or "LINE-B")
+            .ToList();
+        if (devices.Count != 2)
+        {
+            throw new InvalidOperationException($"应同时跟踪 2 台设备，实际 {devices.Count}");
         }
     }
 

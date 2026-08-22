@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
+             xmlns:services="clr-namespace:HuaGuang.Monitor.Services"
+             x:Class="HuaGuang.Monitor.Views.HistoryDetailPage"
+             x:DataType="vm:HistoryDetailViewModel"
+             Title="{Binding Title}"
+             BackgroundColor="#0B1522">
+
+    <ScrollView Padding="16">
+        <VerticalStackLayout Spacing="12">
+            <Button Text="返回" Command="{Binding GoBackCommand}" HorizontalOptions="Start" />
+
+            <VerticalStackLayout Spacing="4">
+                <Label Text="{Binding HeaderText}" TextColor="White" FontAttributes="Bold" FontSize="18" />
+                <Label Text="{Binding MetaText}" TextColor="#8AA0B5" FontSize="13" LineBreakMode="WordWrap" />
+            </VerticalStackLayout>
+
+            <CollectionView ItemsSource="{Binding Tags}" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="services:HistoryTagValueRow">
+                        <Border Margin="0,0,0,8"
+                                Stroke="#1F3A52"
+                                StrokeThickness="1"
+                                BackgroundColor="#152536"
+                                Padding="10,8">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <VerticalStackLayout Spacing="2">
+                                    <Label Text="{Binding TagName}" TextColor="White" FontAttributes="Bold" />
+                                    <Label Text="{Binding Quality}" TextColor="#8AA0B5" FontSize="12" />
+                                </VerticalStackLayout>
+                                <VerticalStackLayout Grid.Column="1" HorizontalOptions="End" Spacing="2">
+                                    <Label Text="{Binding DisplayValue}" TextColor="#2EC4B6" FontAttributes="Bold" HorizontalTextAlignment="End" />
+                                    <Label Text="{Binding Unit}" TextColor="#8AA0B5" FontSize="12" HorizontalTextAlignment="End" />
+                                </VerticalStackLayout>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <VerticalStackLayout Spacing="4" IsVisible="{Binding HasPayload}">
+                <Label Text="原始报文" TextColor="White" FontAttributes="Bold" />
+                <Border Stroke="#1F3A52" BackgroundColor="#101C28" Padding="10">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Label Text="{Binding PayloadPreview}" TextColor="#8AA0B5" FontFamily="Consolas" FontSize="12" LineBreakMode="CharacterWrap" />
+                </Border>
+            </VerticalStackLayout>
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

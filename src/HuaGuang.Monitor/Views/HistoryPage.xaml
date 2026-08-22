@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<views:MonitorPageBase xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:views="clr-namespace:HuaGuang.Monitor.Views"
+             xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
+             xmlns:services="clr-namespace:HuaGuang.Monitor.Services"
+             x:Class="HuaGuang.Monitor.Views.HistoryPage"
+             x:Name="ThisPage"
+             x:DataType="vm:HistoryViewModel"
+             Shell.NavBarIsVisible="False"
+             SafeAreaEdges="All"
+             BackgroundColor="#0B1522">
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto"
+          Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
+          RowSpacing="8">
+        <VerticalStackLayout Spacing="2">
+            <Label Text="历史数据" TextColor="White" FontAttributes="Bold"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
+            <Label Text="{Binding SummaryText}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+        </VerticalStackLayout>
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">
+            <VerticalStackLayout Spacing="2">
+                <Label Text="时间范围" TextColor="#8AA0B5" FontSize="12" />
+                <Picker ItemsSource="{Binding RangeOptions}" SelectedItem="{Binding SelectedRange}"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+            </VerticalStackLayout>
+            <VerticalStackLayout Grid.Column="1" Spacing="2">
+                <Label Text="设备" TextColor="#8AA0B5" FontSize="12" />
+                <Picker ItemsSource="{Binding DeviceOptions}" SelectedItem="{Binding SelectedDevice}"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+            </VerticalStackLayout>
+            <Button Grid.Row="1" Grid.ColumnSpan="2"
+                    Text="刷新"
+                    Command="{Binding RefreshCommand}"
+                    Padding="12,6"
+                    FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+        </Grid>
+
+        <CollectionView Grid.Row="2"
+                        ItemsSource="{Binding Samples}"
+                        SelectionMode="None">
+            <CollectionView.EmptyView>
+                <Label Text="当前筛选条件下没有历史记录。"
+                       TextColor="#8AA0B5"
+                       IsVisible="{Binding ShowEmpty}"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+            </CollectionView.EmptyView>
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="services:HistorySampleSummary">
+                    <Border Margin="0,0,0,8"
+                            Stroke="#1F3A52"
+                            StrokeThickness="1"
+                            BackgroundColor="#152536"
+                            Padding="10,8">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type views:HistoryPage}}, Path=BindingContext.OpenSampleCommand}"
+                                                  CommandParameter="{Binding .}" />
+                        </Border.GestureRecognizers>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="{Binding RecordedAtText}" TextColor="#2EC4B6" FontAttributes="Bold"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:HistoryPage}}, Path=BodyFontSize}" />
+                            <Label Text="{Binding DeviceId}" TextColor="White"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:HistoryPage}}, Path=BodyFontSize}" />
+                            <Label Text="{Binding Subtitle}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:HistoryPage}}, Path=CaptionFontSize}" />
+                        </VerticalStackLayout>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <Label Grid.Row="3"
+               Text="{Binding StatusMessage}"
+               TextColor="#FF6B6B"
+               LineBreakMode="WordWrap"
+               IsVisible="{Binding StatusMessage, Converter={StaticResource IsNotNullOrEmptyConverter}}"
+               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+    </Grid>
+</views:MonitorPageBase>

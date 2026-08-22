@@ -1,5 +1,3 @@
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using HuaGuang.Monitor.Messaging;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Protocols;
@@ -8,12 +6,6 @@ namespace HuaGuang.Monitor.Services;
 
 public sealed class AcquisitionService : IDisposable
 {
-    static readonly JsonSerializerOptions PayloadJson = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-    };
-
     readonly SettingsStore _settingsStore;
     readonly IPlcClient _plc;
     readonly IMqttPublisher _mqtt;
@@ -176,15 +168,7 @@ public sealed class AcquisitionService : IDisposable
                     {
                         if (ShouldPublish(settings, enabledTags, values))
                         {
-                            var payload = JsonSerializer.Serialize(new
-                            {
-                                deviceId = settings.DeviceId,
-                                timestamp = DateTimeOffset.UtcNow,
-                                simulator = settings.UseSimulator,
-                                plcHost = settings.Plc.Host,
-                                quality = allGood ? "Good" : "Uncertain",
-                                tags = values
-                            }, PayloadJson);
+                            var payload = MqttPayloadMapper.BuildPayload(settings, values, allGood);
 
                             var topic = settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase);
                             await _mqtt.PublishAsync(topic, payload, settings.Mqtt.Qos, cancellationToken).ConfigureAwait(false);

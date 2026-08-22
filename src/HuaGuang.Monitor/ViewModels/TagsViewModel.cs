@@ -21,37 +21,58 @@ public partial class TagsViewModel : ObservableObject
         Reload();
     }
 
-    public ObservableCollection<PlcTag> Tags { get; } = [];
+    public ObservableCollection<TagConfigGroupViewModel> TagGroups { get; } = [];
 
     [ObservableProperty]
     string statusMessage = string.Empty;
 
+    [ObservableProperty]
+    string lineSummary = string.Empty;
+
+    [ObservableProperty]
+    bool showEmptyHint;
+
     public void Reload()
     {
-        Tags.Clear();
-        foreach (var tag in _store.Current.Tags)
+        TagGroups.Clear();
+        var tags = _store.Current.Tags.Select(tag => new TagConfigViewModel(tag)).ToList();
+
+        foreach (var group in tags
+                     .GroupBy(item => item.Category)
+                     .OrderBy(g => TagDisplayCategoryHelper.GetSortOrder(g.Key)))
         {
-            Tags.Add(tag);
+            var groupViewModel = new TagConfigGroupViewModel(group.Key);
+            foreach (var item in group)
+            {
+                groupViewModel.Tags.Add(item);
+            }
+
+            TagGroups.Add(groupViewModel);
         }
+
+        var enabledCount = tags.Count(item => item.Tag.Enabled);
+        LineSummary = $"产线：{_store.Current.LineName} · {tags.Count} 个点位（{enabledCount} 启用）";
+        ShowEmptyHint = tags.Count == 0;
     }
 
     [RelayCommand]
     Task AddAsync() => Shell.Current.GoToAsync(nameof(TagEditPage));
 
     [RelayCommand]
-    Task EditAsync(PlcTag? tag)
+    Task EditAsync(TagConfigViewModel? item)
     {
-        if (tag is null)
+        if (item?.Tag is null)
         {
             return Task.CompletedTask;
         }
 
-        return Shell.Current.GoToAsync($"{nameof(TagEditPage)}?id={tag.Id}");
+        return Shell.Current.GoToAsync($"{nameof(TagEditPage)}?id={item.Tag.Id}");
     }
 
     [RelayCommand]
-    async Task DeleteAsync(PlcTag? tag)
+    async Task DeleteAsync(TagConfigViewModel? item)
     {
+        var tag = item?.Tag;
         if (tag is null)
         {
             return;
@@ -70,6 +91,7 @@ public partial class TagsViewModel : ObservableObject
         }
 
         _store.Current.Tags.RemoveAll(t => t.Id == tag.Id);
+        LineConfigPaths.SaveCurrentLine(_store.Current);
         await _store.SaveAsync(_store.Current);
         Reload();
         _dashboard.Reload();

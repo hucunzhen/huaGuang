@@ -11,11 +11,206 @@
              SafeAreaEdges="All"
              BackgroundColor="#0B1522">
 
+    <views:MonitorPageBase.Resources>
+        <DataTemplate x:Key="DashboardTagCardTemplate" x:DataType="vm:TagRowViewModel">
+            <Border Stroke="{Binding CardBorderColor}"
+                    StrokeThickness="{Binding IsBool, Converter={StaticResource BoolToSwitchStrokeConverter}}"
+                    BackgroundColor="{Binding CardBackgroundColor}"
+                    Padding="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CardPadding}"
+                    MinimumHeightRequest="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=MinItemHeight}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Border.GestureRecognizers>
+                    <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=BindingContext.EditSettingTagCommand}"
+                                          CommandParameter="{Binding .}" />
+                </Border.GestureRecognizers>
+
+                <Grid IsVisible="{Binding IsBool}" ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                    <Border WidthRequest="52"
+                            HeightRequest="52"
+                            BackgroundColor="{Binding ValueColor}"
+                            VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="26" />
+                        </Border.StrokeShape>
+                        <Label Text="{Binding BoolIndicatorText}"
+                               TextColor="White"
+                               FontAttributes="Bold"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=ValueFontSize}" />
+                    </Border>
+                    <VerticalStackLayout Grid.Column="1" Spacing="4" VerticalOptions="Center">
+                        <Label Text="{Binding Name}"
+                               TextColor="#C9D6E2"
+                               LineBreakMode="TailTruncation"
+                               MaxLines="2"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=BodyFontSize}" />
+                        <Label Text="{Binding BoolStatusText}"
+                               TextColor="{Binding ValueColor}"
+                               FontAttributes="Bold"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=ValueFontSize}" />
+                        <HorizontalStackLayout Spacing="6">
+                            <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center" Color="{Binding QualityColor}" />
+                            <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Grid>
+
+                <Grid IsVisible="{Binding IsBool, Converter={StaticResource InverseBoolConverter}}" ColumnDefinitions="4,*">
+                    <BoxView Grid.Column="0" Color="{Binding ValueColor}" WidthRequest="4" VerticalOptions="Fill" />
+                    <VerticalStackLayout Grid.Column="1" Spacing="4" Padding="4,0,0,0">
+                        <Label Text="{Binding Name}"
+                               TextColor="#C9D6E2"
+                               LineBreakMode="TailTruncation"
+                               MaxLines="2"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=BodyFontSize}" />
+                        <HorizontalStackLayout Spacing="4">
+                            <Label Text="{Binding DisplayValue}"
+                                   TextColor="{Binding ValueColor}"
+                                   FontAttributes="Bold"
+                                   LineBreakMode="TailTruncation"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=ValueFontSize}" />
+                            <Label Text="{Binding Unit}"
+                                   TextColor="#8AA0B5"
+                                   VerticalOptions="End"
+                                   Margin="0,0,0,2"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CaptionFontSize}" />
+                        </HorizontalStackLayout>
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                            <Label Text="{Binding AddressText}" TextColor="#6E8499" LineBreakMode="TailTruncation"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
+                            <Label Grid.Column="1"
+                                   Text="点击修改"
+                                   TextColor="#7B9FD4"
+                                   HorizontalOptions="End"
+                                   IsVisible="{Binding IsEditableSetting}"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
+                            <HorizontalStackLayout Grid.Column="1" Spacing="4"
+                                                   IsVisible="{Binding IsEditableSetting, Converter={StaticResource InverseBoolConverter}}">
+                                <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center" Color="{Binding QualityColor}" />
+                                <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5"
+                                       FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
+                            </HorizontalStackLayout>
+                        </Grid>
+                        <HorizontalStackLayout Spacing="4" IsVisible="{Binding IsEditableSetting}">
+                            <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center" Color="{Binding QualityColor}" />
+                            <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5"
+                                   FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DashboardSwitchChipTemplate" x:DataType="vm:TagRowViewModel">
+            <Border Stroke="{Binding CardBorderColor}"
+                    StrokeThickness="2"
+                    BackgroundColor="{Binding CardBackgroundColor}"
+                    Padding="8,6"
+                    HorizontalOptions="Fill"
+                    VerticalOptions="Fill">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <HorizontalStackLayout Spacing="8"
+                                       VerticalOptions="Center"
+                                       HorizontalOptions="Fill">
+                    <Border WidthRequest="36"
+                            HeightRequest="36"
+                            BackgroundColor="{Binding ValueColor}"
+                            VerticalOptions="Center">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="18" />
+                        </Border.StrokeShape>
+                        <Label Text="{Binding BoolIndicatorText}"
+                               TextColor="White"
+                               FontAttributes="Bold"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=BodyFontSize}" />
+                    </Border>
+                    <VerticalStackLayout Spacing="0"
+                                         VerticalOptions="Center"
+                                         HorizontalOptions="FillAndExpand">
+                        <Label Text="{Binding Name}"
+                               TextColor="#C9D6E2"
+                               LineBreakMode="TailTruncation"
+                               MaxLines="1"
+                               HorizontalOptions="Start"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=CaptionFontSize}" />
+                        <Label Text="{Binding BoolStatusText}"
+                               TextColor="{Binding ValueColor}"
+                               FontAttributes="Bold"
+                               LineBreakMode="TailTruncation"
+                               MaxLines="1"
+                               HorizontalOptions="Start"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=BodyFontSize}" />
+                    </VerticalStackLayout>
+                </HorizontalStackLayout>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="RemoteDevicePanelTemplate" x:DataType="vm:RemoteDevicePanelViewModel">
+            <VerticalStackLayout Spacing="8" Margin="0,0,0,10">
+                <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#101C28" Padding="10,8">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="8" />
+                    </Border.StrokeShape>
+                    <VerticalStackLayout Spacing="2">
+                        <Label Text="{Binding DeviceId}" TextColor="White" FontAttributes="Bold"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=BodyFontSize}" />
+                        <Label Text="{Binding StatusText}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
+                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=CaptionFontSize}" />
+                    </VerticalStackLayout>
+                </Border>
+
+                <VerticalStackLayout BindableLayout.ItemsSource="{Binding TagGroups}" Spacing="14">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate x:DataType="vm:TagGroupViewModel">
+                            <VerticalStackLayout Spacing="6">
+                                <HorizontalStackLayout Spacing="8">
+                                    <BoxView WidthRequest="4"
+                                             HeightRequest="18"
+                                             Color="{Binding AccentBrush}"
+                                             VerticalOptions="Center"
+                                             CornerRadius="2" />
+                                    <Label Text="{Binding Title}"
+                                           TextColor="{Binding AccentBrush}"
+                                           FontAttributes="Bold"
+                                           VerticalOptions="Center"
+                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=BodyFontSize}" />
+                                    <Label Text="{Binding Tags.Count, StringFormat='({0})'}"
+                                           TextColor="#8AA0B5"
+                                           VerticalOptions="Center"
+                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=CaptionFontSize}" />
+                                </HorizontalStackLayout>
+
+                                <controls:FitGrid ItemsSource="{Binding Tags}"
+                                                  PreferFill="False"
+                                                  MinItemWidth="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=CardMinWidth}"
+                                                  MinItemHeight="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=CardMinHeight}"
+                                                  CardPadding="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=CardPadding}"
+                                                  BodyFontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=BodyFontSize}"
+                                                  ValueFontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=ValueFontSize}"
+                                                  CaptionFontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=CaptionFontSize}"
+                                                  SmallFontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=SmallFontSize}"
+                                                  ItemTemplate="{StaticResource DashboardTagCardTemplate}" />
+                            </VerticalStackLayout>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+        </DataTemplate>
+    </views:MonitorPageBase.Resources>
+
     <Grid x:Name="RootGrid"
           RowDefinitions="Auto,*,Auto"
           Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
           RowSpacing="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource RowSpacingConverter}}">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
             <VerticalStackLayout Spacing="0" VerticalOptions="Center">
                 <Label Text="工业监控" TextColor="White" FontAttributes="Bold"
                        FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
@@ -25,7 +220,15 @@
                        FontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}" />
             </VerticalStackLayout>
 
-            <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
+            <controls:EqualWidthRowLayout Grid.Column="1"
+                                          ItemsSource="{Binding SwitchStatusTags}"
+                                          ItemTemplate="{StaticResource DashboardSwitchChipTemplate}"
+                                          MinimumHeightRequest="52"
+                                          HorizontalOptions="Fill"
+                                          VerticalOptions="Fill"
+                                          IsVisible="{Binding HasSwitchStatusTags}" />
+
+            <HorizontalStackLayout Grid.Column="2" Spacing="6" VerticalOptions="Center">
                 <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8,6"
                         IsVisible="{Binding IsAcquisitionMode}">
                     <Border.StrokeShape>
@@ -59,6 +262,13 @@
                     </HorizontalStackLayout>
                 </Border>
 
+                <Button Text="{Binding Source={x:Reference ThisPage}, Path=IsFullScreenMode, Converter={StaticResource FullScreenLabelConverter}}"
+                        Clicked="OnFullScreenClicked"
+                        Padding="12,8"
+                        MinimumWidthRequest="72"
+                        VerticalOptions="Center"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+
                 <Button Text="{Binding ToggleText}"
                         Command="{Binding ToggleCommand}"
                         Padding="12,8"
@@ -70,8 +280,13 @@
 
         <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="4">
             <ScrollView x:Name="InfoPortrait"
-                        IsVisible="{Binding Source={x:Reference ThisPage}, Path=ShowCompactInfoPanel, Converter={StaticResource InverseBoolConverter}}"
                         MaximumHeightRequest="{Binding Source={x:Reference ThisPage}, Path=InfoPanelMaxHeight}">
+                <ScrollView.IsVisible>
+                    <MultiBinding Converter="{StaticResource AndBoolConverter}">
+                        <Binding Source="{x:Reference ThisPage}" Path="ShowCompactInfoPanel" Converter="{StaticResource InverseBoolConverter}" />
+                        <Binding Source="{x:Reference ThisPage}" Path="IsFullScreenMode" Converter="{StaticResource InverseBoolConverter}" />
+                    </MultiBinding>
+                </ScrollView.IsVisible>
                 <VerticalStackLayout Spacing="4">
                     <VerticalStackLayout Spacing="4" IsVisible="{Binding IsSubscribeMode}">
                         <Label Text="主题筛选" TextColor="#8AA0B5"
@@ -86,7 +301,7 @@
                         </Grid>
                     </VerticalStackLayout>
                     <VerticalStackLayout Spacing="4" IsVisible="{Binding ShowRemoteDevicePicker}">
-                        <Label Text="远程设备" TextColor="#8AA0B5"
+                        <Label Text="远程设备（可选全部或单台）" TextColor="#8AA0B5"
                                FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
                         <Picker ItemsSource="{Binding RemoteDeviceItems}"
                                 ItemDisplayBinding="{Binding Label}"
@@ -106,8 +321,13 @@
                 </VerticalStackLayout>
             </ScrollView>
 
-            <VerticalStackLayout Spacing="4"
-                                 IsVisible="{Binding Source={x:Reference ThisPage}, Path=ShowCompactInfoPanel}">
+            <VerticalStackLayout Spacing="4">
+                <VerticalStackLayout.IsVisible>
+                    <MultiBinding Converter="{StaticResource AndBoolConverter}">
+                        <Binding Source="{x:Reference ThisPage}" Path="ShowCompactInfoPanel" />
+                        <Binding Source="{x:Reference ThisPage}" Path="IsFullScreenMode" Converter="{StaticResource InverseBoolConverter}" />
+                    </MultiBinding>
+                </VerticalStackLayout.IsVisible>
                 <Grid ColumnDefinitions="Auto,*,Auto,*,*,Auto"
                       ColumnSpacing="8"
                       RowSpacing="0">
@@ -165,7 +385,7 @@
                                 FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
                     </VerticalStackLayout>
                     <VerticalStackLayout Grid.Column="1" Spacing="2" IsVisible="{Binding ShowRemoteDevicePicker}">
-                        <Label Text="设备" TextColor="#8AA0B5"
+                        <Label Text="设备（全部/单台）" TextColor="#8AA0B5"
                                FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
                         <Picker ItemsSource="{Binding RemoteDeviceItems}"
                                 ItemDisplayBinding="{Binding Label}"
@@ -211,60 +431,58 @@
                        IsVisible="{Binding PublishNote, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
             </VerticalStackLayout>
 
-            <controls:FitGrid Grid.Row="1"
-                              ItemsSource="{Binding Tags}"
-                              PreferFill="{Binding Source={x:Reference ThisPage}, Path=IsExpandedLayout}"
-                              MinItemWidth="{Binding Source={x:Reference ThisPage}, Path=CardMinWidth}"
-                              MinItemHeight="{Binding Source={x:Reference ThisPage}, Path=CardMinHeight}"
-                              CardPadding="{Binding Source={x:Reference ThisPage}, Path=CardPadding}"
-                              BodyFontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
-                              ValueFontSize="{Binding Source={x:Reference ThisPage}, Path=ValueFontSize}"
-                              CaptionFontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                              SmallFontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}">
-                <controls:FitGrid.ItemTemplate>
-                    <DataTemplate x:DataType="vm:TagRowViewModel">
-                        <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536"
-                                Padding="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CardPadding}"
-                                MinimumHeightRequest="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=MinItemHeight}">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="8" />
-                            </Border.StrokeShape>
-                            <VerticalStackLayout Spacing="4">
-                                <Label Text="{Binding Name}"
-                                       TextColor="#C9D6E2"
-                                       LineBreakMode="TailTruncation"
-                                       MaxLines="2"
-                                       FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=BodyFontSize}" />
-                                <HorizontalStackLayout Spacing="4">
-                                    <Label Text="{Binding DisplayValue}"
-                                           TextColor="#2EC4B6"
-                                           FontAttributes="Bold"
-                                           LineBreakMode="TailTruncation"
-                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=ValueFontSize}" />
-                                    <Label Text="{Binding Unit}"
-                                           TextColor="#8AA0B5"
-                                           VerticalOptions="End"
-                                           Margin="0,0,0,2"
-                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=CaptionFontSize}" />
-                                </HorizontalStackLayout>
-                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                                    <Label Text="{Binding AddressText}" TextColor="#6E8499" LineBreakMode="TailTruncation"
-                                           FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
-                                    <HorizontalStackLayout Grid.Column="1" Spacing="4">
-                                        <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center" Color="{Binding QualityColor}" />
-                                        <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5"
-                                               FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
-                                    </HorizontalStackLayout>
-                                </Grid>
-                            </VerticalStackLayout>
-                        </Border>
-                    </DataTemplate>
-                </controls:FitGrid.ItemTemplate>
-                <controls:FitGrid.EmptyView>
-                    <Label Text="{Binding EmptyTagsHint}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
+            <ScrollView Grid.Row="1">
+                <VerticalStackLayout Spacing="14" Padding="0,4">
+                    <Label Text="{Binding EmptyTagsHint}"
+                           TextColor="#8AA0B5"
+                           LineBreakMode="WordWrap"
+                           IsVisible="{Binding ShowEmptyTagsHint}"
                            FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
-                </controls:FitGrid.EmptyView>
-            </controls:FitGrid>
+
+                    <VerticalStackLayout IsVisible="{Binding ShowSingleDeviceDashboard}"
+                                         BindableLayout.ItemsSource="{Binding TagGroups}"
+                                         Spacing="14">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate x:DataType="vm:TagGroupViewModel">
+                                <VerticalStackLayout Spacing="6">
+                                    <HorizontalStackLayout Spacing="8">
+                                        <BoxView WidthRequest="4"
+                                                 HeightRequest="18"
+                                                 Color="{Binding AccentBrush}"
+                                                 VerticalOptions="Center"
+                                                 CornerRadius="2" />
+                                        <Label Text="{Binding Title}"
+                                               TextColor="{Binding AccentBrush}"
+                                               FontAttributes="Bold"
+                                               VerticalOptions="Center"
+                                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                                        <Label Text="{Binding Tags.Count, StringFormat='({0})'}"
+                                               TextColor="#8AA0B5"
+                                               VerticalOptions="Center"
+                                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                                    </HorizontalStackLayout>
+
+                                    <controls:FitGrid ItemsSource="{Binding Tags}"
+                                                      PreferFill="False"
+                                                      MinItemWidth="{Binding Source={x:Reference ThisPage}, Path=CardMinWidth}"
+                                                      MinItemHeight="{Binding Source={x:Reference ThisPage}, Path=CardMinHeight}"
+                                                      CardPadding="{Binding Source={x:Reference ThisPage}, Path=CardPadding}"
+                                                      BodyFontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                                                      ValueFontSize="{Binding Source={x:Reference ThisPage}, Path=ValueFontSize}"
+                                                      CaptionFontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                                                      SmallFontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}"
+                                                      ItemTemplate="{StaticResource DashboardTagCardTemplate}" />
+                                </VerticalStackLayout>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout IsVisible="{Binding ShowMultiDeviceDashboard}"
+                                         BindableLayout.ItemsSource="{Binding RemoteDevicePanels}"
+                                         BindableLayout.ItemTemplate="{StaticResource RemoteDevicePanelTemplate}"
+                                         Spacing="16" />
+                </VerticalStackLayout>
+            </ScrollView>
         </Grid>
 
         <Border x:Name="PayloadFooter"
@@ -272,8 +490,13 @@
                 Stroke="#1F3A52"
                 StrokeThickness="1"
                 BackgroundColor="#101C28"
-                Padding="8,4"
-                IsVisible="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource InverseBoolConverter}}">
+                Padding="8,4">
+            <Border.IsVisible>
+                <MultiBinding Converter="{StaticResource AndBoolConverter}">
+                    <Binding Source="{x:Reference ThisPage}" Path="IsCompactLayout" Converter="{StaticResource InverseBoolConverter}" />
+                    <Binding Source="{x:Reference ThisPage}" Path="IsFullScreenMode" Converter="{StaticResource InverseBoolConverter}" />
+                </MultiBinding>
+            </Border.IsVisible>
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="8" />
             </Border.StrokeShape>

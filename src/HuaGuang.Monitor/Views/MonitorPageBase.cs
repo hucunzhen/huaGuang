@@ -1,7 +1,14 @@
+using HuaGuang.Monitor.Services;
+
 namespace HuaGuang.Monitor.Views;
 
 public class MonitorPageBase : ContentPage
 {
+    FullScreenService? _fullScreen;
+
+    public static readonly BindableProperty IsFullScreenModeProperty =
+        BindableProperty.Create(nameof(IsFullScreenMode), typeof(bool), typeof(MonitorPageBase), false);
+
     public static readonly BindableProperty IsLandscapeProperty =
         BindableProperty.Create(nameof(IsLandscape), typeof(bool), typeof(MonitorPageBase), false);
 
@@ -46,6 +53,12 @@ public class MonitorPageBase : ContentPage
 
     public static readonly BindableProperty CardPaddingProperty =
         BindableProperty.Create(nameof(CardPadding), typeof(Thickness), typeof(MonitorPageBase), new Thickness(8, 6));
+
+    public bool IsFullScreenMode
+    {
+        get => (bool)GetValue(IsFullScreenModeProperty);
+        private set => SetValue(IsFullScreenModeProperty, value);
+    }
 
     public bool IsLandscape
     {
@@ -137,6 +150,39 @@ public class MonitorPageBase : ContentPage
         private set => SetValue(CardPaddingProperty, value);
     }
 
+    protected void ToggleFullScreen() =>
+        (_fullScreen ??= MauiProgram.Services.GetRequiredService<FullScreenService>()).Toggle();
+
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        _fullScreen ??= MauiProgram.Services.GetRequiredService<FullScreenService>();
+        _fullScreen.FullScreenChanged += OnFullScreenChanged;
+        ApplyFullScreenMode(_fullScreen.IsFullScreen);
+    }
+
+    protected override void OnDisappearing()
+    {
+        if (_fullScreen is not null)
+        {
+            _fullScreen.FullScreenChanged -= OnFullScreenChanged;
+        }
+
+        base.OnDisappearing();
+    }
+
+    void OnFullScreenChanged(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(() => ApplyFullScreenMode(_fullScreen!.IsFullScreen));
+
+    void ApplyFullScreenMode(bool enabled)
+    {
+        IsFullScreenMode = enabled;
+        if (Width > 0 && Height > 0)
+        {
+            UpdateResponsiveLayout(Width, Height);
+        }
+    }
+
     protected override void OnSizeAllocated(double width, double height)
     {
         base.OnSizeAllocated(width, height);
@@ -145,15 +191,41 @@ public class MonitorPageBase : ContentPage
             return;
         }
 
+        UpdateResponsiveLayout(width, height);
+    }
+
+    void UpdateResponsiveLayout(double width, double height)
+    {
         var landscape = width > height;
         var expanded = width >= 960 && height >= 540;
         var compact = !expanded && (height < 520 || (landscape && height < 640));
 
+        if (IsFullScreenMode)
+        {
+            expanded = true;
+            compact = false;
+        }
+
         IsLandscape = landscape;
         IsExpandedLayout = expanded;
         IsCompactLayout = compact;
-        ShowCompactInfoPanel = expanded || (compact && landscape);
-        InfoPanelMaxHeight = expanded ? 88 : compact ? 96 : 168;
+        ShowCompactInfoPanel = !IsFullScreenMode && (expanded || (compact && landscape));
+        InfoPanelMaxHeight = IsFullScreenMode ? 0 : expanded ? 88 : compact ? 96 : 168;
+
+        if (IsFullScreenMode)
+        {
+            TitleFontSize = 24;
+            SubtitleFontSize = 14;
+            BodyFontSize = 16;
+            ValueFontSize = 40;
+            CaptionFontSize = 13;
+            SmallFontSize = 12;
+            ButtonFontSize = 15;
+            CardMinHeight = 148;
+            CardMinWidth = 188;
+            CardPadding = new Thickness(12, 10);
+            return;
+        }
 
         TitleFontSize = expanded ? 26 : compact ? 16 : 20;
         SubtitleFontSize = expanded ? 15 : compact ? 10 : 12;
@@ -166,4 +238,40 @@ public class MonitorPageBase : ContentPage
         CardMinWidth = expanded ? 176 : compact ? 140 : 156;
         CardPadding = expanded ? new Thickness(12, 10) : compact ? new Thickness(6, 4) : new Thickness(8, 6);
     }
+
+#if WINDOWS
+    protected override void OnHandlerChanged()
+    {
+        base.OnHandlerChanged();
+        if (Handler?.PlatformView is not Microsoft.UI.Xaml.Window nativeWindow ||
+            nativeWindow.Content is not Microsoft.UI.Xaml.UIElement root)
+        {
+            return;
+        }
+
+        root.KeyDown -= OnNativeKeyDown;
+        root.KeyDown += OnNativeKeyDown;
+    }
+
+    void OnNativeKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        _fullScreen ??= MauiProgram.Services.GetRequiredService<FullScreenService>();
+        if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            if (_fullScreen.IsFullScreen)
+            {
+                _fullScreen.SetFullScreen(false);
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.F11)
+        {
+            _fullScreen.Toggle();
+            e.Handled = true;
+        }
+    }
+#endif
 }

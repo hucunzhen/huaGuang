@@ -23,4 +23,6 @@ public partial class DashboardPage : MonitorPageBase
             await viewModel.TryAutoStartAsync();
         }
     }
+
+    void OnFullScreenClicked(object? sender, EventArgs e) => ToggleFullScreen();
 }
