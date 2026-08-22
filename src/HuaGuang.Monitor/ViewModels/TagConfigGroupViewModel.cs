@@ -4,7 +4,7 @@ using HuaGuang.Monitor.Services;
 
 namespace HuaGuang.Monitor.ViewModels;
 
-public sealed class TagConfigGroupViewModel
+public sealed class TagConfigGroupViewModel : ObservableCollection<TagConfigViewModel>
 {
     public TagConfigGroupViewModel(TagDisplayCategory category)
     {
@@ -17,5 +17,4 @@ public sealed class TagConfigGroupViewModel
     public string Title { get; }
     public string AccentColor { get; }
     public Color AccentBrush => Color.FromArgb(AccentColor);
-    public ObservableCollection<TagConfigViewModel> Tags { get; } = [];
 }

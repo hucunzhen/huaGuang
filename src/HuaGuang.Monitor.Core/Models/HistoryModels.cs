@@ -61,4 +61,29 @@ public sealed class HistoryQuery
     public DateTimeOffset To { get; init; }
     public string? DeviceId { get; init; }
     public int Limit { get; init; } = 200;
+    public int Offset { get; init; }
+}
+
+public sealed class HistoryTableColumn
+{
+    public string TagName { get; init; } = string.Empty;
+    public string HeaderText { get; init; } = string.Empty;
+}
+
+public sealed class HistoryTableRow
+{
+    public long SampleId { get; init; }
+    public string RecordedAtText { get; init; } = string.Empty;
+    public string DeviceId { get; init; } = string.Empty;
+    public IReadOnlyList<string> Cells { get; init; } = [];
+    public string LineText { get; init; } = string.Empty;
+}
+
+public sealed class HistoryTableData
+{
+    public static HistoryTableData Empty { get; } = new();
+
+    public IReadOnlyList<HistoryTableColumn> Columns { get; init; } = [];
+    public IReadOnlyList<HistoryTableRow> Rows { get; init; } = [];
+    public string HeaderLine { get; init; } = string.Empty;
 }

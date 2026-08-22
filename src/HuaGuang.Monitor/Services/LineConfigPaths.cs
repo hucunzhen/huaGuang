@@ -84,67 +84,21 @@ public static class LineConfigPaths
         var destination = GetExcelPath(lineName);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
 
+        if (File.Exists(destination))
+        {
+            return;
+        }
+
 #if WINDOWS
         var installPath = Path.Combine(InstallLinesDirectory, $"{lineName}.xlsx");
-        if (File.Exists(installPath) && ShouldReplaceWithShipped(destination, installPath))
+        if (File.Exists(installPath) && !PathsEqual(installPath, destination))
         {
             File.Copy(installPath, destination, overwrite: true);
             return;
         }
 #endif
 
-        if (ShouldReplaceWithBundled(destination, lineName))
-        {
-            TryCopyBundledLineFile(lineName, destination);
-        }
-    }
-
-    static bool ShouldReplaceWithShipped(string localPath, string shippedPath)
-    {
-        if (!File.Exists(localPath))
-        {
-            return true;
-        }
-
-        var localRevision = LineExcelConfigService.ReadLineConfigRevision(localPath);
-        var shippedRevision = LineExcelConfigService.ReadLineConfigRevision(shippedPath);
-        if (shippedRevision > localRevision)
-        {
-            return true;
-        }
-
-        return File.GetLastWriteTimeUtc(shippedPath) > File.GetLastWriteTimeUtc(localPath);
-    }
-
-    static bool ShouldReplaceWithBundled(string localPath, string lineName)
-    {
-        if (!File.Exists(localPath))
-        {
-            return true;
-        }
-
-        var localRevision = LineExcelConfigService.ReadLineConfigRevision(localPath);
-        var bundledRevision = ReadBundledLineConfigRevision(lineName);
-        if (bundledRevision > localRevision)
-        {
-            return true;
-        }
-
-        return bundledRevision == 0 && localRevision == 0 && !File.Exists(localPath);
-    }
-
-    static int ReadBundledLineConfigRevision(string lineName)
-    {
-        var assetPath = $"lines/{LineCatalog.GetBundledAssetName(lineName)}.xlsx";
-        try
-        {
-            using var stream = FileSystem.OpenAppPackageFileAsync(assetPath).GetAwaiter().GetResult();
-            return LineExcelConfigService.ReadLineConfigRevision(stream);
-        }
-        catch
-        {
-            return 0;
-        }
+        TryCopyBundledLineFile(lineName, destination);
     }
 
     static bool UsesInstallLinesDirectory()

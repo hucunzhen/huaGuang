@@ -54,6 +54,9 @@ public class MonitorPageBase : ContentPage
     public static readonly BindableProperty CardPaddingProperty =
         BindableProperty.Create(nameof(CardPadding), typeof(Thickness), typeof(MonitorPageBase), new Thickness(8, 6));
 
+    public static readonly BindableProperty TagGridSpanProperty =
+        BindableProperty.Create(nameof(TagGridSpan), typeof(int), typeof(MonitorPageBase), 2);
+
     public bool IsFullScreenMode
     {
         get => (bool)GetValue(IsFullScreenModeProperty);
@@ -150,6 +153,12 @@ public class MonitorPageBase : ContentPage
         private set => SetValue(CardPaddingProperty, value);
     }
 
+    public int TagGridSpan
+    {
+        get => (int)GetValue(TagGridSpanProperty);
+        private set => SetValue(TagGridSpanProperty, value);
+    }
+
     protected void ToggleFullScreen() =>
         (_fullScreen ??= MauiProgram.Services.GetRequiredService<FullScreenService>()).Toggle();
 
@@ -224,6 +233,7 @@ public class MonitorPageBase : ContentPage
             CardMinHeight = 148;
             CardMinWidth = 188;
             CardPadding = new Thickness(12, 10);
+            TagGridSpan = 2;
             return;
         }
 
@@ -237,6 +247,7 @@ public class MonitorPageBase : ContentPage
         CardMinHeight = expanded ? 136 : compact ? 96 : 112;
         CardMinWidth = expanded ? 176 : compact ? 140 : 156;
         CardPadding = expanded ? new Thickness(12, 10) : compact ? new Thickness(6, 4) : new Thickness(8, 6);
+        TagGridSpan = compact ? 1 : 2;
     }
 
 #if WINDOWS

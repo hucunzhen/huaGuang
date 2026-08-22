@@ -35,6 +35,8 @@ public sealed class AppSettings
     public bool EnableHistoryRecording { get; set; } = true;
     /// <summary>历史数据保留天数；超出后自动清理。</summary>
     public int HistoryRetentionDays { get; set; } = 14;
+    /// <summary>一次性迁移标记；避免每次启动重复覆盖用户配置。</summary>
+    public int SettingsMigrationVersion { get; set; }
 }
 
 public sealed class PlcSettings

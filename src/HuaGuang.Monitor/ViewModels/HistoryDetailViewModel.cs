@@ -18,6 +18,8 @@ public partial class HistoryDetailViewModel : ObservableObject, IQueryAttributab
 
     public ObservableCollection<HistoryTagValueRow> Tags { get; } = [];
 
+    long? _sampleId;
+
     [ObservableProperty] string title = "历史详情";
     [ObservableProperty] string headerText = string.Empty;
     [ObservableProperty] string metaText = string.Empty;
@@ -31,6 +33,8 @@ public partial class HistoryDetailViewModel : ObservableObject, IQueryAttributab
             HeaderText = "无效的历史记录。";
             return;
         }
+
+        _sampleId = sampleId;
 
         var detail = await _store.GetDetailAsync(sampleId, _settings.Current.TemperaturePrecision).ConfigureAwait(false);
         if (detail is null)
@@ -61,4 +65,31 @@ public partial class HistoryDetailViewModel : ObservableObject, IQueryAttributab
 
     [RelayCommand]
     Task GoBackAsync() => Shell.Current.GoToAsync("..");
+
+    [RelayCommand]
+    async Task DeleteAsync()
+    {
+        if (!_sampleId.HasValue)
+        {
+            return;
+        }
+
+        var confirm = await Shell.Current.DisplayAlertAsync(
+            "删除历史记录",
+            "确定删除这条历史记录？",
+            "删除",
+            "取消");
+        if (!confirm)
+        {
+            return;
+        }
+
+        if (await _store.DeleteSampleAsync(_sampleId.Value).ConfigureAwait(false))
+        {
+            await Shell.Current.GoToAsync("..");
+            return;
+        }
+
+        HeaderText = "删除失败，记录可能已不存在。";
+    }
 }

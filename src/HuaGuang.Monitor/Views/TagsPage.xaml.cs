@@ -19,7 +19,7 @@ public partial class TagsPage : MonitorPageBase
         base.OnAppearing();
         if (BindingContext is TagsViewModel viewModel)
         {
-            viewModel.Reload();
+            viewModel.ReloadIfNeeded();
         }
     }
 }

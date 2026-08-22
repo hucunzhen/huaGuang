@@ -64,7 +64,6 @@ public static class MauiProgram
 		Services = app.Services;
 		var store = Services.GetRequiredService<SettingsStore>();
 		store.LoadAsync().GetAwaiter().GetResult();
-		LineConfigPaths.EnsureDefaultExcelFiles();
 		Services.GetRequiredService<IStartupRegistration>().Apply(store.Current.StartWithWindows);
 		Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
 		return app;

@@ -97,8 +97,20 @@
 		<AndroidSigningV3Scheme>true</AndroidSigningV3Scheme>
 	</PropertyGroup>
 
+	<!-- Android 自适应图标背景强制不透明；改为 legacy 透明 PNG。 -->
+	<Target Name="FixAndroidTransparentAppIcon"
+	        AfterTargets="ResizetizeImages"
+	        Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+		<PropertyGroup>
+			<_AndroidIconResRoot>$([System.IO.Path]::Combine('$(IntermediateOutputPath)', 'resizetizer', 'r'))</_AndroidIconResRoot>
+		</PropertyGroup>
+		<Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\fix-android-transparent-icon.ps1&quot; -SourcePng &quot;$(MSBuildProjectDirectory)\Resources\AppIcon\appicon.png&quot; -ResRoot &quot;$(_AndroidIconResRoot)&quot;"
+		      ConsoleToMSBuild="true"
+		      Condition="Exists('$(MSBuildProjectDirectory)\..\..\scripts\fix-android-transparent-icon.ps1')" />
+	</Target>
+
 	<ItemGroup>
-		<!-- App Icon：文件名须为 appicon，与 AndroidManifest @mipmap/appicon 一致；源图 logo.png -->
+		<!-- App Icon：文件名须为 appicon；Android 构建后脚本会替换为透明 legacy 图标 -->
 		<MauiIcon Include="Resources\AppIcon\appicon.png" Color="#00000000" />
 
 		<MauiSplashScreen Include="Resources\AppIcon\appicon.png" Color="#000000" BaseSize="256,256" />

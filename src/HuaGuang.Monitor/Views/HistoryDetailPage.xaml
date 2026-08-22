@@ -10,7 +10,10 @@
 
     <ScrollView Padding="16">
         <VerticalStackLayout Spacing="12">
-            <Button Text="返回" Command="{Binding GoBackCommand}" HorizontalOptions="Start" />
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="返回" Command="{Binding GoBackCommand}" />
+                <Button Text="删除" Command="{Binding DeleteCommand}" />
+            </HorizontalStackLayout>
 
             <VerticalStackLayout Spacing="4">
                 <Label Text="{Binding HeaderText}" TextColor="White" FontAttributes="Bold" FontSize="18" />

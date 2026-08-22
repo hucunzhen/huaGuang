@@ -7,6 +7,8 @@ namespace HuaGuang.Monitor.Services;
 
 public sealed class SettingsStore
 {
+    public const int CurrentSettingsMigrationVersion = 1;
+
     static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -28,12 +30,15 @@ public sealed class SettingsStore
 
     public async Task LoadAsync()
     {
+        LineConfigPaths.EnsureDefaultExcelFiles();
+
         try
         {
             if (!File.Exists(_filePath))
             {
                 Current = CreateDefault();
                 ApplyCurrentLineFromExcel();
+                RunOneTimeMigrations();
                 await SaveAsync(Current).ConfigureAwait(false);
                 return;
             }
@@ -42,13 +47,28 @@ public sealed class SettingsStore
             var loaded = await JsonSerializer.DeserializeAsync<AppSettings>(stream, JsonOptions).ConfigureAwait(false);
             Current = loaded ?? CreateDefault();
             SubscribeTopicHelper.Migrate(Current);
-            ApplyCurrentLineFromExcel();
-            await SaveAsync(Current).ConfigureAwait(false);
+
+            var modified = RunOneTimeMigrations();
+            if (NeedsLineDataRefresh())
+            {
+                ApplyCurrentLineFromExcel();
+                modified = true;
+            }
+            else
+            {
+                NormalizeMqttPayloadProfile();
+            }
+
+            if (modified)
+            {
+                await SaveAsync(Current).ConfigureAwait(false);
+            }
         }
         catch
         {
             Current = CreateDefault();
             ApplyCurrentLineFromExcel();
+            RunOneTimeMigrations();
         }
     }
 
@@ -63,21 +83,41 @@ public sealed class SettingsStore
         File.Delete(temp);
     }
 
+    static bool NeedsLineDataRefresh(AppSettings settings) =>
+        settings.Tags.Count == 0 ||
+        settings.AddressCatalogVersion < LineCatalog.Version;
+
+    bool NeedsLineDataRefresh() => NeedsLineDataRefresh(Current);
+
+    bool RunOneTimeMigrations()
+    {
+        if (Current.SettingsMigrationVersion >= CurrentSettingsMigrationVersion)
+        {
+            return false;
+        }
+
+        Current.SettingsMigrationVersion = CurrentSettingsMigrationVersion;
+        return true;
+    }
+
     void ApplyCurrentLineFromExcel()
     {
-        LineConfigPaths.EnsureDefaultExcelFiles();
         if (string.IsNullOrWhiteSpace(Current.LineName))
         {
             Current.LineName = LineCatalog.LineNames[0];
         }
 
         LineConfigPaths.SyncCurrentLine(Current);
+        Current.AddressCatalogVersion = LineCatalog.Version;
+        NormalizeMqttPayloadProfile();
+    }
+
+    void NormalizeMqttPayloadProfile()
+    {
         if (Current.MqttPayload is not null)
         {
             MqttFieldMappingCatalog.NormalizeLegacyProfile(Current.MqttPayload);
         }
-
-        LineMqttDefaults.MigrateLegacySettings(Current);
     }
 
     public static AppSettings CreateDefault()

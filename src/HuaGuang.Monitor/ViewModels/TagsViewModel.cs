@@ -13,12 +13,14 @@ public partial class TagsViewModel : ObservableObject
     readonly AcquisitionService _acquisition;
     readonly DashboardViewModel _dashboard;
 
+    string? _reloadSignature;
+
     public TagsViewModel(SettingsStore store, AcquisitionService acquisition, DashboardViewModel dashboard)
     {
         _store = store;
         _acquisition = acquisition;
         _dashboard = dashboard;
-        Reload();
+        Reload(force: true);
     }
 
     public ObservableCollection<TagConfigGroupViewModel> TagGroups { get; } = [];
@@ -32,10 +34,21 @@ public partial class TagsViewModel : ObservableObject
     [ObservableProperty]
     bool showEmptyHint;
 
-    public void Reload()
+    public void ReloadIfNeeded() => Reload(force: false);
+
+    public void Reload(bool force = true)
     {
+        var storeTags = _store.Current.Tags;
+        var signature = BuildReloadSignature(storeTags);
+        if (!force && signature == _reloadSignature)
+        {
+            UpdateSummary(storeTags);
+            return;
+        }
+
+        _reloadSignature = signature;
         TagGroups.Clear();
-        var tags = _store.Current.Tags.Select(tag => new TagConfigViewModel(tag)).ToList();
+        var tags = storeTags.Select(tag => new TagConfigViewModel(tag)).ToList();
 
         foreach (var group in tags
                      .GroupBy(item => item.Category)
@@ -44,13 +57,24 @@ public partial class TagsViewModel : ObservableObject
             var groupViewModel = new TagConfigGroupViewModel(group.Key);
             foreach (var item in group)
             {
-                groupViewModel.Tags.Add(item);
+                groupViewModel.Add(item);
             }
 
             TagGroups.Add(groupViewModel);
         }
 
-        var enabledCount = tags.Count(item => item.Tag.Enabled);
+        UpdateSummary(storeTags);
+    }
+
+    static string BuildReloadSignature(IReadOnlyList<PlcTag> tags) =>
+        string.Join("|", tags
+            .OrderBy(tag => tag.Id, StringComparer.Ordinal)
+            .Select(tag =>
+                $"{tag.Id}:{tag.Name}:{tag.Enabled}:{tag.DisplayAddress}:{tag.MqttField}:{tag.DataType}:{tag.DisplayCategory}:{tag.IsManual}"));
+
+    void UpdateSummary(IReadOnlyList<PlcTag> tags)
+    {
+        var enabledCount = tags.Count(tag => tag.Enabled);
         LineSummary = $"产线：{_store.Current.LineName} · {tags.Count} 个点位（{enabledCount} 启用）";
         ShowEmptyHint = tags.Count == 0;
     }

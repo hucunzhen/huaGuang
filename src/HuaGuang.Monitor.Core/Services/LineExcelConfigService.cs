@@ -119,7 +119,10 @@ public static class LineExcelConfigService
 
         if (NeedsRevisionUpgrade(filePath))
         {
-            Export(CreateSeedSettings(lineName), filePath);
+            var settings = new AppSettings();
+            Apply(settings, filePath);
+            settings.AddressCatalogVersion = LineCatalog.Version;
+            Export(settings, filePath);
         }
     }
 

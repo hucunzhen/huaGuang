@@ -210,7 +210,80 @@
           RowDefinitions="Auto,*,Auto"
           Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
           RowSpacing="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource RowSpacingConverter}}">
-        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+        <!-- 竖屏：标题 / 按钮 / 开关 分行 -->
+        <VerticalStackLayout Spacing="6"
+                             IsVisible="{Binding Source={x:Reference ThisPage}, Path=IsLandscape, Converter={StaticResource InverseBoolConverter}}">
+            <VerticalStackLayout Spacing="0">
+                <Label Text="工业监控" TextColor="White" FontAttributes="Bold"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
+                <Label Text="{Binding DeviceId, StringFormat='设备 {0}'}" TextColor="#8AA0B5" LineBreakMode="TailTruncation"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}" />
+                <Label Text="{Binding ModeText}" TextColor="#2EC4B6" LineBreakMode="TailTruncation" MaxLines="2"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}" />
+            </VerticalStackLayout>
+
+            <ScrollView Orientation="Horizontal" HorizontalScrollBarVisibility="Never">
+                <HorizontalStackLayout Spacing="6" HorizontalOptions="End">
+                    <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8,6"
+                            IsVisible="{Binding IsAcquisitionMode}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <HorizontalStackLayout Spacing="6">
+                            <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center"
+                                     Color="{Binding PlcConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
+                            <VerticalStackLayout Spacing="0">
+                                <Label Text="PLC" TextColor="#8AA0B5"
+                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                                <Label Text="{Binding PlcConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White"
+                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                            </VerticalStackLayout>
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8,6">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <HorizontalStackLayout Spacing="6">
+                            <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center"
+                                     Color="{Binding MqttConnected, Converter={StaticResource BoolToStatusColorConverter}}" />
+                            <VerticalStackLayout Spacing="0">
+                                <Label Text="MQTT" TextColor="#8AA0B5"
+                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                                <Label Text="{Binding MqttConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White"
+                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                            </VerticalStackLayout>
+                        </HorizontalStackLayout>
+                    </Border>
+
+                    <Button Text="{Binding Source={x:Reference ThisPage}, Path=IsFullScreenMode, Converter={StaticResource FullScreenLabelConverter}}"
+                            Clicked="OnFullScreenClicked"
+                            Padding="12,8"
+                            MinimumWidthRequest="72"
+                            VerticalOptions="Center"
+                            FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+
+                    <Button Text="{Binding ToggleText}"
+                            Command="{Binding ToggleCommand}"
+                            Padding="12,8"
+                            MinimumWidthRequest="88"
+                            VerticalOptions="Center"
+                            FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                </HorizontalStackLayout>
+            </ScrollView>
+
+            <controls:EqualWidthRowLayout ItemsSource="{Binding SwitchStatusTags}"
+                                          ItemTemplate="{StaticResource DashboardSwitchChipTemplate}"
+                                          MinimumHeightRequest="52"
+                                          HorizontalOptions="Fill"
+                                          VerticalOptions="Fill"
+                                          IsVisible="{Binding HasSwitchStatusTags}" />
+        </VerticalStackLayout>
+
+        <!-- 横屏：单行三列 -->
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"
+              IsVisible="{Binding Source={x:Reference ThisPage}, Path=IsLandscape}">
             <VerticalStackLayout Spacing="0" VerticalOptions="Center">
                 <Label Text="工业监控" TextColor="White" FontAttributes="Bold"
                        FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />

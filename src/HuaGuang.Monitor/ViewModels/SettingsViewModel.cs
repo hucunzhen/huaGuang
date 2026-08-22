@@ -291,11 +291,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         try
         {
-            if (IsServiceRunning())
-            {
-                StatusMessage = "请先停止采集/订阅再保存设置。";
-                return;
-            }
+            var running = IsServiceRunning();
 
             var settings = _store.Current;
             settings.OperationMode = SelectedOperationMode == "订阅模式"
@@ -340,9 +336,11 @@ public partial class SettingsViewModel : ObservableObject
             LineConfigPaths.SaveCurrentLine(settings);
             await _store.SaveAsync(settings);
             _dashboard.Reload();
-            StatusMessage = settings.StartWithWindows && _startup.IsSupported
-                ? "设置已保存，已启用开机启动。"
-                : "设置已保存。";
+            StatusMessage = running
+                ? "设置已保存。部分项需停止采集/订阅后重新启动才会生效。"
+                : settings.StartWithWindows && _startup.IsSupported
+                    ? "设置已保存，已启用开机启动。"
+                    : "设置已保存。";
         }
         catch (Exception ex)
         {

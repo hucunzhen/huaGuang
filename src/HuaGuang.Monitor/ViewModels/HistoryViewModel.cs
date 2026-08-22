@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HuaGuang.Monitor.Services;
-using HuaGuang.Monitor.Views;
 
 namespace HuaGuang.Monitor.ViewModels;
 
@@ -10,6 +9,15 @@ public partial class HistoryViewModel : ObservableObject
 {
     readonly HistoryStore _store;
     readonly SettingsStore _settings;
+
+    bool _suppressFilterRefresh;
+    int _totalCount;
+    int _currentOffset;
+    DateTimeOffset _queryFrom;
+    DateTimeOffset _queryTo;
+    string? _queryDeviceFilter;
+    List<string> _preferredTags = [];
+    List<HistoryTableColumn> _fixedColumns = [];
 
     public HistoryViewModel(HistoryStore store, SettingsStore settings)
     {
@@ -23,25 +31,31 @@ public partial class HistoryViewModel : ObservableObject
 
     public string[] RangeOptions { get; }
     public ObservableCollection<string> DeviceOptions { get; } = [];
-    public ObservableCollection<HistorySampleSummary> Samples { get; } = [];
 
+    [ObservableProperty] ObservableCollection<HistoryTableRow> tableRows = [];
+    [ObservableProperty] string headerLine = string.Empty;
     [ObservableProperty] string selectedRange = "最近 24 小时";
     [ObservableProperty] string selectedDevice = "全部设备";
-    [ObservableProperty] string summaryText = "加载中…";
+    [ObservableProperty] string summaryText = "点「刷新」加载历史数据。";
     [ObservableProperty] string statusMessage = string.Empty;
     [ObservableProperty] bool isBusy;
+    [ObservableProperty] bool isLoadingMore;
+    [ObservableProperty] bool canLoadMore;
     [ObservableProperty] bool showEmpty;
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
         if (!_settings.Current.EnableHistoryRecording)
         {
             SummaryText = "历史记录已关闭，可在「设置」中开启。";
             ShowEmpty = true;
-            return;
+        }
+        else if (TableRows.Count == 0)
+        {
+            ShowEmpty = true;
         }
 
-        await RefreshAsync();
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
@@ -56,9 +70,125 @@ public partial class HistoryViewModel : ObservableObject
         try
         {
             var (from, to) = ResolveRange(SelectedRange);
-            var stats = await _store.GetStatsAsync().ConfigureAwait(false);
-            var devices = await _store.GetDeviceIdsAsync().ConfigureAwait(false);
+            _queryFrom = from;
+            _queryTo = to;
+            _queryDeviceFilter = SelectedDevice == "全部设备" ? null : SelectedDevice;
+            _currentOffset = 0;
+            _fixedColumns = [];
 
+            var countQuery = BuildCountQuery();
+            _totalCount = await _store.CountMatchingAsync(countQuery).ConfigureAwait(false);
+            var devices = await _store.GetDeviceIdsAsync().ConfigureAwait(false);
+            _preferredTags = _settings.Current.Tags
+                .Where(tag => tag.Enabled)
+                .Select(tag => tag.Name)
+                .Take(HistoryTableFormatting.MaxColumns)
+                .ToList();
+
+            var table = await LoadPageAsync(0).ConfigureAwait(false);
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                ApplyFilterOptions(devices, _queryDeviceFilter);
+                TableRows = new ObservableCollection<HistoryTableRow>(table.Rows);
+                _fixedColumns = table.Columns.ToList();
+                HeaderLine = table.HeaderLine;
+                ShowEmpty = TableRows.Count == 0;
+                UpdateSummary();
+                StatusMessage = string.Empty;
+                UpdateLoadMoreState(table.Rows.Count);
+            });
+        }
+        catch (Exception ex)
+        {
+            await MainThread.InvokeOnMainThreadAsync(() => StatusMessage = ex.Message);
+        }
+        finally
+        {
+            await MainThread.InvokeOnMainThreadAsync(() => IsBusy = false);
+        }
+    }
+
+    [RelayCommand]
+    async Task LoadMoreAsync()
+    {
+        if (IsBusy || IsLoadingMore || !CanLoadMore)
+        {
+            return;
+        }
+
+        IsLoadingMore = true;
+        try
+        {
+            _currentOffset += HistoryTableFormatting.PageSize;
+            var table = await LoadPageAsync(_currentOffset).ConfigureAwait(false);
+            var batchCount = table.Rows.Count;
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                foreach (var row in table.Rows)
+                {
+                    TableRows.Add(row);
+                }
+
+                UpdateSummary();
+                UpdateLoadMoreState(batchCount);
+            });
+        }
+        catch (Exception ex)
+        {
+            await MainThread.InvokeOnMainThreadAsync(() => StatusMessage = ex.Message);
+            _currentOffset = Math.Max(0, _currentOffset - HistoryTableFormatting.PageSize);
+        }
+        finally
+        {
+            await MainThread.InvokeOnMainThreadAsync(() => IsLoadingMore = false);
+        }
+    }
+
+    async Task<HistoryTableData> LoadPageAsync(int offset) =>
+        await _store.QueryTableAsync(
+            new HistoryQuery
+            {
+                From = _queryFrom,
+                To = _queryTo,
+                DeviceId = _queryDeviceFilter,
+                Limit = HistoryTableFormatting.PageSize,
+                Offset = offset
+            },
+            _settings.Current.TemperaturePrecision,
+            _preferredTags,
+            _fixedColumns.Count > 0 ? _fixedColumns : null).ConfigureAwait(false);
+
+    void UpdateLoadMoreState(int? lastBatchCount = null)
+    {
+        var hasMoreByCount = TableRows.Count < _totalCount;
+        var receivedFullPage = lastBatchCount is null || lastBatchCount >= HistoryTableFormatting.PageSize;
+        CanLoadMore = hasMoreByCount && receivedFullPage;
+    }
+
+    void UpdateSummary()
+    {
+        SummaryText = _totalCount == 0
+            ? "暂无历史数据。启动采集或订阅后会自动记录。"
+            : CanLoadMore
+                ? $"共 {_totalCount} 条 · 已加载 {TableRows.Count} 条 · 下滑加载更多"
+                : $"共 {_totalCount} 条 · 已全部加载";
+    }
+
+    HistoryQuery BuildCountQuery() =>
+        new()
+        {
+            From = _queryFrom,
+            To = _queryTo,
+            DeviceId = _queryDeviceFilter
+        };
+
+    void ApplyFilterOptions(IReadOnlyList<string> devices, string? deviceFilter)
+    {
+        _suppressFilterRefresh = true;
+        try
+        {
             DeviceOptions.Clear();
             DeviceOptions.Add("全部设备");
             foreach (var device in devices)
@@ -66,31 +196,58 @@ public partial class HistoryViewModel : ObservableObject
                 DeviceOptions.Add(device);
             }
 
-            if (!DeviceOptions.Contains(SelectedDevice))
+            if (deviceFilter is not null && DeviceOptions.Contains(deviceFilter))
+            {
+                SelectedDevice = deviceFilter;
+            }
+            else if (!DeviceOptions.Contains(SelectedDevice))
             {
                 SelectedDevice = "全部设备";
             }
+        }
+        finally
+        {
+            _suppressFilterRefresh = false;
+        }
+    }
 
-            var query = new HistoryQuery
-            {
-                From = from,
-                To = to,
-                DeviceId = SelectedDevice == "全部设备" ? null : SelectedDevice,
-                Limit = 300
-            };
-            var rows = await _store.QueryAsync(query).ConfigureAwait(false);
+    [RelayCommand]
+    async Task DeleteRowAsync(HistoryTableRow? row)
+    {
+        if (row is null || IsBusy)
+        {
+            return;
+        }
 
-            Samples.Clear();
-            foreach (var row in rows)
+        var confirm = await Shell.Current.DisplayAlertAsync(
+            "删除历史记录",
+            $"确定删除 {row.RecordedAtText} 的记录？",
+            "删除",
+            "取消");
+        if (!confirm)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            if (await _store.DeleteSampleAsync(row.SampleId).ConfigureAwait(false))
             {
-                Samples.Add(row);
+                _totalCount = Math.Max(0, _totalCount - 1);
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    TableRows.Remove(row);
+                    ShowEmpty = TableRows.Count == 0;
+                    StatusMessage = "已删除 1 条记录";
+                    UpdateSummary();
+                    UpdateLoadMoreState();
+                });
             }
-
-            ShowEmpty = Samples.Count == 0;
-            SummaryText = stats.SampleCount == 0
-                ? "暂无历史数据。启动采集或订阅后会自动记录。"
-                : $"共 {stats.SampleCount} 条记录 · 当前筛选 {Samples.Count} 条 · 保留 {_settings.Current.HistoryRetentionDays} 天";
-            StatusMessage = string.Empty;
+            else
+            {
+                StatusMessage = "删除失败，记录可能已不存在。";
+            }
         }
         catch (Exception ex)
         {
@@ -103,21 +260,100 @@ public partial class HistoryViewModel : ObservableObject
     }
 
     [RelayCommand]
-    Task OpenSampleAsync(HistorySampleSummary? sample)
+    async Task ClearFilteredAsync()
     {
-        if (sample is null)
+        if (IsBusy)
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        return Shell.Current.GoToAsync($"{nameof(HistoryDetailPage)}?id={sample.Id}");
+        var (from, to) = ResolveRange(SelectedRange);
+        var deviceLabel = SelectedDevice == "全部设备" ? "全部设备" : SelectedDevice;
+        var confirm = await Shell.Current.DisplayAlertAsync(
+            "删除历史记录",
+            $"确定删除「{SelectedRange} · {deviceLabel}」下的所有历史记录？此操作不可恢复。",
+            "删除",
+            "取消");
+        if (!confirm)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var deleted = await _store.DeleteMatchingAsync(new HistoryQuery
+            {
+                From = from,
+                To = to,
+                DeviceId = SelectedDevice == "全部设备" ? null : SelectedDevice
+            }).ConfigureAwait(false);
+            StatusMessage = deleted == 0 ? "没有可删除的记录。" : $"已删除 {deleted} 条记录，点「刷新」查看最新。";
+            ClearDisplayedTable();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
-    partial void OnSelectedRangeChanged(string value) =>
-        MainThread.BeginInvokeOnMainThread(async () => await RefreshAsync());
+    [RelayCommand]
+    async Task ClearAllAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
 
-    partial void OnSelectedDeviceChanged(string value) =>
-        MainThread.BeginInvokeOnMainThread(async () => await RefreshAsync());
+        var stats = await _store.GetStatsAsync().ConfigureAwait(false);
+        if (stats.SampleCount == 0)
+        {
+            StatusMessage = "没有可删除的记录。";
+            return;
+        }
+
+        var confirm = await Shell.Current.DisplayAlertAsync(
+            "清空历史数据",
+            $"确定删除全部 {stats.SampleCount} 条历史记录？此操作不可恢复。",
+            "清空",
+            "取消");
+        if (!confirm)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var deleted = await _store.DeleteAllAsync().ConfigureAwait(false);
+            StatusMessage = $"已删除 {deleted} 条记录，点「刷新」查看最新。";
+            ClearDisplayedTable();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    void ClearDisplayedTable()
+    {
+        TableRows.Clear();
+        HeaderLine = string.Empty;
+        _fixedColumns = [];
+        _currentOffset = 0;
+        _totalCount = 0;
+        CanLoadMore = false;
+        ShowEmpty = true;
+        SummaryText = "点「刷新」重新加载历史数据。";
+    }
 
     static (DateTimeOffset From, DateTimeOffset To) ResolveRange(string selected) =>
         selected switch

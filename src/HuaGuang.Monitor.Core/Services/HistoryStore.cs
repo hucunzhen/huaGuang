@@ -135,6 +135,37 @@ public sealed class HistoryStore
         }
     }
 
+    public async Task<int> CountMatchingAsync(HistoryQuery query)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT COUNT(*)
+                FROM telemetry_samples
+                WHERE recorded_at >= $from AND recorded_at <= $to
+                """;
+            command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
+            command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
+
+            if (!string.IsNullOrWhiteSpace(query.DeviceId))
+            {
+                command.CommandText += " AND device_id = $device_id";
+                command.Parameters.AddWithValue("$device_id", query.DeviceId);
+            }
+
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<IReadOnlyList<HistorySampleSummary>> QueryAsync(HistoryQuery query)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
@@ -163,9 +194,10 @@ public sealed class HistoryStore
                 """
                  GROUP BY s.id
                  ORDER BY s.recorded_at DESC
-                 LIMIT $limit;
+                 LIMIT $limit OFFSET $offset;
                 """;
             command.Parameters.AddWithValue("$limit", query.Limit);
+            command.Parameters.AddWithValue("$offset", query.Offset);
 
             var results = new List<HistorySampleSummary>();
             await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -192,6 +224,149 @@ public sealed class HistoryStore
         {
             _gate.Release();
         }
+    }
+
+    public async Task<HistoryTableData> QueryTableAsync(
+        HistoryQuery query,
+        int temperaturePrecision,
+        IReadOnlyList<string>? preferredTagOrder = null,
+        IReadOnlyList<HistoryTableColumn>? fixedColumns = null)
+    {
+        var samples = await QueryAsync(query).ConfigureAwait(false);
+        if (samples.Count == 0)
+        {
+            return HistoryTableData.Empty;
+        }
+
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var command = connection.CreateCommand();
+            var ids = samples.Select(sample => sample.Id).ToList();
+            command.CommandText = BuildInClause(
+                """
+                SELECT sample_id, tag_name, unit, value_real, value_text, value_kind, quality
+                FROM tag_values
+                WHERE sample_id IN 
+                """,
+                ids,
+                command).TrimEnd(';') + " ORDER BY sample_id, tag_name;";
+
+            var valuesBySample = new Dictionary<long, Dictionary<string, string>>();
+            var tagUnits = new Dictionary<string, string?>(StringComparer.Ordinal);
+            await using (var reader = await command.ExecuteReaderAsync().ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    var sampleId = reader.GetInt64(0);
+                    var tagName = reader.GetString(1);
+                    var unit = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                    var tag = new PlcTag
+                    {
+                        Name = tagName,
+                        Unit = unit,
+                        DataType = InferDataType(reader.GetString(5))
+                    };
+                    var value = DecodeValue(
+                        reader.IsDBNull(3) ? null : reader.GetDouble(3),
+                        reader.IsDBNull(4) ? null : reader.GetString(4),
+                        reader.GetString(5));
+                    var display = ValueFormatting.FormatDisplay(tag, value, temperaturePrecision);
+
+                    if (!valuesBySample.TryGetValue(sampleId, out var map))
+                    {
+                        map = new Dictionary<string, string>(StringComparer.Ordinal);
+                        valuesBySample[sampleId] = map;
+                    }
+
+                    map[tagName] = display;
+                    if (!tagUnits.ContainsKey(tagName) && !string.IsNullOrWhiteSpace(unit))
+                    {
+                        tagUnits[tagName] = unit;
+                    }
+                }
+            }
+
+            var columns = fixedColumns is { Count: > 0 }
+                ? fixedColumns.ToList()
+                : BuildTableColumns(valuesBySample, preferredTagOrder, tagUnits);
+            var rows = new List<HistoryTableRow>(samples.Count);
+            foreach (var sample in samples)
+            {
+                valuesBySample.TryGetValue(sample.Id, out var map);
+                map ??= new Dictionary<string, string>(StringComparer.Ordinal);
+                var cells = columns
+                    .Select(column => map.TryGetValue(column.TagName, out var value) ? value : "—")
+                    .ToList();
+                rows.Add(new HistoryTableRow
+                {
+                    SampleId = sample.Id,
+                    RecordedAtText = sample.RecordedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"),
+                    DeviceId = sample.DeviceId,
+                    Cells = cells,
+                    LineText = HistoryTableFormatting.FormatDataLine(
+                        sample.RecordedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"),
+                        sample.DeviceId,
+                        cells)
+                });
+            }
+
+            return new HistoryTableData
+            {
+                Columns = columns,
+                Rows = rows,
+                HeaderLine = HistoryTableFormatting.FormatHeaderLine(columns)
+            };
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    static List<HistoryTableColumn> BuildTableColumns(
+        Dictionary<long, Dictionary<string, string>> valuesBySample,
+        IReadOnlyList<string>? preferredTagOrder,
+        Dictionary<string, string?> tagUnits)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var map in valuesBySample.Values)
+        {
+            foreach (var name in map.Keys)
+            {
+                names.Add(name);
+            }
+        }
+
+        var ordered = new List<string>();
+        if (preferredTagOrder is not null)
+        {
+            foreach (var name in preferredTagOrder)
+            {
+                if (names.Remove(name))
+                {
+                    ordered.Add(name);
+                }
+            }
+        }
+
+        ordered.AddRange(names.OrderBy(name => name, StringComparer.Ordinal));
+        if (ordered.Count > HistoryTableFormatting.MaxColumns)
+        {
+            ordered = ordered.Take(HistoryTableFormatting.MaxColumns).ToList();
+        }
+
+        return ordered.Select(name =>
+        {
+            tagUnits.TryGetValue(name, out var unit);
+            var header = string.IsNullOrWhiteSpace(unit) ? name : $"{name}\n{unit}";
+            return new HistoryTableColumn
+            {
+                TagName = name,
+                HeaderText = header
+            };
+        }).ToList();
     }
 
     public async Task<HistorySampleDetail?> GetDetailAsync(long sampleId, int temperaturePrecision)
@@ -315,15 +490,158 @@ public sealed class HistoryStore
         try
         {
             await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM telemetry_samples WHERE recorded_at < $cutoff;";
-            command.Parameters.AddWithValue("$cutoff", cutoff.UtcDateTime.ToString("O"));
-            return await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
+            var deleted = await DeleteSamplesWhereAsync(
+                connection,
+                transaction,
+                "recorded_at < $cutoff",
+                command =>
+                {
+                    command.Parameters.AddWithValue("$cutoff", cutoff.UtcDateTime.ToString("O"));
+                }).ConfigureAwait(false);
+            await transaction.CommitAsync().ConfigureAwait(false);
+            return deleted;
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    public async Task<bool> DeleteSampleAsync(long sampleId)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
+            var deleted = await DeleteSamplesWhereAsync(
+                connection,
+                transaction,
+                "id = $id",
+                command => command.Parameters.AddWithValue("$id", sampleId)).ConfigureAwait(false);
+            await transaction.CommitAsync().ConfigureAwait(false);
+            return deleted > 0;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<int> DeleteMatchingAsync(HistoryQuery query)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var where = "recorded_at >= $from AND recorded_at <= $to";
+            if (!string.IsNullOrWhiteSpace(query.DeviceId))
+            {
+                where = "device_id = $device_id AND " + where;
+            }
+
+            await using var connection = OpenConnection();
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
+            var deleted = await DeleteSamplesWhereAsync(
+                connection,
+                transaction,
+                where,
+                command =>
+                {
+                    command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
+                    command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
+                    if (!string.IsNullOrWhiteSpace(query.DeviceId))
+                    {
+                        command.Parameters.AddWithValue("$device_id", query.DeviceId);
+                    }
+                }).ConfigureAwait(false);
+            await transaction.CommitAsync().ConfigureAwait(false);
+            return deleted;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<int> DeleteAllAsync()
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
+            await using (var deleteTags = connection.CreateCommand())
+            {
+                deleteTags.Transaction = transaction;
+                deleteTags.CommandText = "DELETE FROM tag_values;";
+                await deleteTags.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            int deleted;
+            await using (var deleteSamples = connection.CreateCommand())
+            {
+                deleteSamples.Transaction = transaction;
+                deleteSamples.CommandText = "DELETE FROM telemetry_samples;";
+                deleted = await deleteSamples.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            await transaction.CommitAsync().ConfigureAwait(false);
+            return deleted;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    static async Task<int> DeleteSamplesWhereAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string sampleWhereClause,
+        Action<SqliteCommand>? configure)
+    {
+        await using (var selectIds = connection.CreateCommand())
+        {
+            selectIds.Transaction = transaction;
+            selectIds.CommandText = $"SELECT id FROM telemetry_samples WHERE {sampleWhereClause};";
+            configure?.Invoke(selectIds);
+
+            var ids = new List<long>();
+            await using var reader = await selectIds.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                ids.Add(reader.GetInt64(0));
+            }
+
+            if (ids.Count == 0)
+            {
+                return 0;
+            }
+
+            await using var deleteTags = connection.CreateCommand();
+            deleteTags.Transaction = transaction;
+            deleteTags.CommandText = BuildInClause("DELETE FROM tag_values WHERE sample_id IN ", ids, deleteTags);
+            await deleteTags.ExecuteNonQueryAsync().ConfigureAwait(false);
+
+            await using var deleteSamples = connection.CreateCommand();
+            deleteSamples.Transaction = transaction;
+            deleteSamples.CommandText = BuildInClause("DELETE FROM telemetry_samples WHERE id IN ", ids, deleteSamples);
+            return await deleteSamples.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+    }
+
+    static string BuildInClause(string prefix, IReadOnlyList<long> ids, SqliteCommand command)
+    {
+        var placeholders = new string[ids.Count];
+        for (var i = 0; i < ids.Count; i++)
+        {
+            var name = $"$id{i}";
+            placeholders[i] = name;
+            command.Parameters.AddWithValue(name, ids[i]);
+        }
+
+        return prefix + "(" + string.Join(", ", placeholders) + ");";
     }
 
     public async Task<(int SampleCount, DateTimeOffset? Oldest, DateTimeOffset? Newest)> GetStatsAsync()
@@ -359,6 +677,9 @@ public sealed class HistoryStore
     {
         var connection = new SqliteConnection($"Data Source={_databasePath}");
         connection.Open();
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA foreign_keys = ON;";
+        pragma.ExecuteNonQuery();
         return connection;
     }
 

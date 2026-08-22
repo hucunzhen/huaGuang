@@ -27,6 +27,7 @@ public static class MonitorCoreTests
         Run("字段映射参考", TestReferenceFieldMapping),
         Run("点位显示分类", TestTagDisplayCategory),
         Run("历史数据存储", TestHistoryStoreRoundTrip),
+        Run("设置启动不覆盖", TestSettingsSurviveStartupLoad),
     ];
 
     static DiagnosticResult Run(string name, Action test)
@@ -417,6 +418,48 @@ public static class MonitorCoreTests
             AssertTrue(detail is not null);
             AssertTrue(detail!.Tags.Count == 2);
             AssertTrue(detail.Tags.Any(tag => tag.DisplayValue == "开"));
+
+            var table = store.QueryTableAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1),
+                Limit = 10
+            }, 1, ["车速", "运行状态"]).GetAwaiter().GetResult();
+            AssertTrue(table.Rows.Count == 1);
+            AssertTrue(table.Columns.Count == 2);
+            AssertTrue(table.Rows[0].Cells[0] == "45.2");
+            AssertTrue(table.Rows[0].Cells[1] == "开");
+
+            var matchingCount = store.CountMatchingAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1)
+            }).GetAwaiter().GetResult();
+            AssertTrue(matchingCount == 1);
+
+            AssertTrue(store.DeleteSampleAsync(sampleId).GetAwaiter().GetResult());
+            AssertTrue(store.GetDetailAsync(sampleId, 1).GetAwaiter().GetResult() is null);
+
+            var secondId = store.AppendAsync(new HistorySampleWriteRequest
+            {
+                DeviceId = "另一设备",
+                OperationMode = request.OperationMode,
+                Quality = request.Quality,
+                Tags = request.Tags
+            }).GetAwaiter().GetResult();
+            AssertTrue(secondId > 0);
+            var deleted = store.DeleteMatchingAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1),
+                DeviceId = "另一设备"
+            }).GetAwaiter().GetResult();
+            AssertTrue(deleted == 1);
+            AssertTrue(store.GetStatsAsync().GetAwaiter().GetResult().SampleCount == 0);
+
+            store.AppendAsync(request).GetAwaiter().GetResult();
+            AssertTrue(store.DeleteAllAsync().GetAwaiter().GetResult() == 1);
+            AssertTrue(store.GetStatsAsync().GetAwaiter().GetResult().SampleCount == 0);
         }
         finally
         {
@@ -424,6 +467,52 @@ public static class MonitorCoreTests
             if (File.Exists(dbPath))
             {
                 File.Delete(dbPath);
+            }
+        }
+    }
+
+    static void TestSettingsSurviveStartupLoad()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"huaguang-settings-{Guid.NewGuid():N}");
+        var jsonPath = Path.Combine(root, "settings.json");
+        var linePath = Path.Combine(root, "lines", $"{LineCatalog.LineNames[0]}.xlsx");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(linePath)!);
+
+            var saved = new AppSettings
+            {
+                DeviceId = "USER-DEVICE-99",
+                LineName = LineCatalog.LineNames[0],
+                AutoStartAcquisition = false,
+                EnableHistoryRecording = false,
+                HistoryRetentionDays = 30,
+                AddressCatalogVersion = LineCatalog.Version,
+                SettingsMigrationVersion = 1,
+                Plc = new PlcSettings { Host = "10.0.0.88" },
+                Mqtt = new MqttSettings { Host = "10.0.0.99", Port = 1888, Topic = "/custom/topic" },
+                Tags = [new PlcTag { Name = "测试点", Source = TagSource.Manual, ManualValue = "1" }]
+            };
+            File.WriteAllText(jsonPath, JsonSerializer.Serialize(saved));
+
+            var seeded = LineExcelConfigService.CreateSeedSettings(LineCatalog.LineNames[0]);
+            seeded.Plc.Host = "192.168.6.10";
+            seeded.Mqtt.Host = LineMqttDefaults.Host;
+            LineExcelConfigService.Export(seeded, linePath);
+
+            var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(jsonPath))!;
+            AssertTrue(loaded.DeviceId == "USER-DEVICE-99");
+            AssertTrue(loaded.Plc.Host == "10.0.0.88");
+            AssertTrue(loaded.Mqtt.Host == "10.0.0.99");
+            AssertTrue(loaded.AutoStartAcquisition == false);
+            AssertTrue(loaded.HistoryRetentionDays == 30);
+            AssertFalse(loaded.Plc.Host == seeded.Plc.Host);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
             }
         }
     }
