@@ -53,21 +53,13 @@ Then re-run: .\scripts\build-installer.ps1
 Write-Host "Using ISCC: $iscc" -ForegroundColor DarkGray
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
-$version = "1.1"
-try {
-    $csproj = [xml](Get-Content $project)
-    $verNode = $csproj.Project.PropertyGroup.ApplicationDisplayVersion |
-        Where-Object { $_ -ne $null } |
-        Select-Object -First 1
-    if ($verNode) { $version = [string]$verNode }
-} catch {
-}
+$appVer = & (Join-Path $PSScriptRoot "Get-AppVersion.ps1") $project
 
-Write-Host "Building installer (v$version) ..." -ForegroundColor Cyan
-& $iscc "/DPublishDir=$publishDir" "/DMyAppVersion=$version" $iss
+Write-Host "Building installer ($($appVer.Label)) ..." -ForegroundColor Cyan
+& $iscc "/DPublishDir=$publishDir" "/DMyAppVersion=$($appVer.Version)" "/DMyAppRevision=$($appVer.Revision)" $iss
 if ($LASTEXITCODE -ne 0) { throw "Installer build failed." }
 
-$setup = Join-Path $outputDir "IndustrialMonitor-$version-Setup.exe"
+$setup = Join-Path $outputDir "IndustrialMonitor-$($appVer.FileSuffix)-Setup.exe"
 Write-Host ""
 Write-Host "Installer ready:" -ForegroundColor Green
 Write-Host "  $setup"

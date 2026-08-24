@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<title>工业监控 — 设计手册</title>
+<title>工业监控 — 设计手册 1.1.3（修订 3）</title>
 <style>
 @page { margin: 18mm 16mm; }
 body {
@@ -79,8 +79,9 @@ ul, ol { padding-left: 22px; }
 </style>
 </head>
 <body>
+<p><strong>版本 1.1.3（修订 3）</strong></p>
 <h1>工业监控 — 设计手册</h1>
-<blockquote>版本 1.1 · 平台：Windows 10/11 工控机、Android 11 工业平板</blockquote>
+<blockquote>版本 1.1.3 · 修订 3 · 平台：Windows 10/11 工控机、Android 11 工业平板</blockquote>
 <blockquote>技术栈：.NET 10 MAUI · 信捷 XD5E-60T10 · Modbus TCP · MQTT</blockquote>
 <blockquote>PDF 版：[DESIGN.pdf](DESIGN.pdf)（运行 <code>python ../scripts/export-design-pdf.py</code> 重新生成）</blockquote>
 <hr/>
@@ -97,6 +98,14 @@ ul, ol { padding-left: 22px; }
 <tr>
 <td>应用名称</td>
 <td>工业监控</td>
+</tr>
+<tr>
+<td>版本号</td>
+<td>1.1.3（<code>ApplicationDisplayVersion</code>）</td>
+</tr>
+<tr>
+<td>修订号</td>
+<td>3（<code>ApplicationVersion</code>，Android versionCode）</td>
 </tr>
 <tr>
 <td>包名 / ID</td>
@@ -125,8 +134,13 @@ ul, ol { padding-left: 22px; }
                                          │
                     ┌────────────────────┼────────────────────┐
                     ▼                    ▼                    ▼
-              DashboardPage          TagsPage           SettingsPage
-              实时监控               点位管理              参数配置</code></pre>
+              DashboardPage          TagsPage           HistoryPage
+              实时监控               点位管理              历史数据
+                    │                    │                    │
+                    └────────────────────┼────────────────────┘
+                                         ▼
+                              SettingsPage / DiagnosticsPage
+                              参数配置          软件自检</code></pre>
 <h3>2.1 核心模块</h3>
 <table><thead><tr>
 <th>模块</th>
@@ -154,7 +168,15 @@ ul, ol { padding-left: 22px; }
 </tr>
 <tr>
 <td><code>SettingsStore</code></td>
-<td>本地 <code>settings.json</code> 持久化</td>
+<td>本地 <code>settings.json</code> 持久化（优先于 Excel 覆盖）</td>
+</tr>
+<tr>
+<td><code>LineExcelConfigService</code></td>
+<td>产线 Excel 导入/导出（配置、点表、字段映射、显示分组）</td>
+</tr>
+<tr>
+<td><code>HistoryStore</code></td>
+<td>本地 SQLite 历史快照存储、查询、删除与保留期清理</td>
 </tr>
 <tr>
 <td><code>LineCatalog</code></td>
@@ -163,6 +185,10 @@ ul, ol { padding-left: 22px; }
 <tr>
 <td><code>WindowsStartupRegistration</code></td>
 <td>Windows 开机自启注册表项</td>
+</tr>
+<tr>
+<td><code>MonitorCoreTests</code></td>
+<td>核心逻辑单元测试（诊断页可触发）</td>
 </tr>
 </tbody></table>
 <h3>2.2 数据流（采集模式）</h3>
@@ -277,7 +303,7 @@ ul, ol { padding-left: 22px; }
 </tr>
 </tbody></table>
 <h3>3.4 导航结构</h3>
-<p>底部 <strong>TabBar</strong> 三页，<strong>无顶部 Shell 标题栏</strong>（<code>Shell.NavBarIsVisible=False</code>），内容区自带标题。</p>
+<p>底部 <strong>TabBar</strong> 五页，<strong>无顶部 Shell 标题栏</strong>（<code>Shell.NavBarIsVisible=False</code>），内容区自带标题。</p>
 <table><thead><tr>
 <th>Tab</th>
 <th>路由</th>
@@ -291,12 +317,22 @@ ul, ol { padding-left: 22px; }
 <tr>
 <td>点位</td>
 <td><code>tags</code></td>
-<td>点位列表、增删改、手动值、显示精度</td>
+<td>按显示分组浏览点位，增删改、手动值、显示精度</td>
+</tr>
+<tr>
+<td>历史</td>
+<td><code>history</code></td>
+<td>本地 SQLite 历史记录表格查询、删除、分页加载</td>
 </tr>
 <tr>
 <td>设置</td>
 <td><code>settings</code></td>
-<td>运行模式、产线、PLC、MQTT、阈值与精度、开机自启</td>
+<td>运行模式、产线 Excel、PLC、MQTT、阈值与精度、历史开关</td>
+</tr>
+<tr>
+<td>诊断</td>
+<td><code>diagnostics</code></td>
+<td>软件自检，运行核心单元测试</td>
 </tr>
 </tbody></table>
 <hr/>
@@ -310,7 +346,7 @@ ul, ol { padding-left: 22px; }
 </tr></thead><tbody>
 <tr>
 <td>顶栏</td>
-<td>应用名、设备 ID、运行模式；PLC / MQTT 状态卡片（采集模式显示 PLC）；<strong>启动采集 / 停止采集</strong> 或 <strong>启动订阅 / 停止订阅</strong></td>
+<td>应用名、设备 ID、运行模式；PLC / MQTT 状态卡片；<strong>启动/停止</strong> 按钮。<strong>竖屏</strong>为三行（标题 → 按钮 → 状态），按钮区可横向滚动；<strong>横屏</strong>保持单行三列</td>
 </tr>
 <tr>
 <td>订阅区</td>
@@ -326,7 +362,7 @@ ul, ol { padding-left: 22px; }
 </tr>
 <tr>
 <td>主区域</td>
-<td>自适应网格卡片，展示各点位实时值、单位、地址/来源主题、质量、更新时间</td>
+<td>按 <strong>显示分组</strong> 分块，自适应网格卡片展示各点位实时值、单位、地址/来源主题、质量、更新时间</td>
 </tr>
 <tr>
 <td>底栏</td>
@@ -355,17 +391,22 @@ ul, ol { padding-left: 22px; }
 </tr></thead><tbody>
 <tr>
 <td>顶栏</td>
-<td>标题「采集点位」+ <strong>新增</strong> 按钮</td>
+<td>标题「采集点位」、产线摘要 + <strong>新增</strong> 按钮</td>
+</tr>
+<tr>
+<td>说明</td>
+<td>分组与颜色同产线 Excel「点表·显示分组」；MQTT 字段见「字段映射」表</td>
 </tr>
 <tr>
 <td>主区域</td>
-<td>点位卡片网格：名称、信捷地址、数据类型、单位</td>
+<td>虚拟化分组列表（<code>CollectionView</code>），每组标题带颜色条与数量；卡片含名称、分组、地址、来源、MQTT 字段、启用状态</td>
 </tr>
 <tr>
 <td>卡片操作</td>
 <td><strong>编辑</strong> / <strong>删除</strong>（删除为红色按钮）</td>
 </tr>
 </tbody></table>
+<p>进入页面时若数据未变则不重复加载；编辑/删除后强制刷新。</p>
 <p><strong>点位编辑页</strong>（从本页跳入）</p>
 <ul>
 <li>信捷地址：<code>D100</code>、<code>M0</code>、<code>X20</code>（八进制）、<code>Y0</code></li>
@@ -373,9 +414,48 @@ ul, ol { padding-left: 22px; }
 <li>Scale / Offset 工程量换算</li>
 <li><strong>显示精度</strong>：0–4 位小数，留空则使用设置页全局精度</li>
 </ul>
-<blockquote>产线切换时在「设置」页载入点表，会覆盖当前点位列表。</blockquote>
+<blockquote>产线切换或从 Excel 载入时在「设置」页操作；已保存的 <code>settings.json</code> 优先，Excel 仅在首次安装或点表为空时自动覆盖。</blockquote>
 <hr/>
-<h3>4.3 设置页</h3>
+<h3>4.3 历史页</h3>
+<p><strong>布局</strong></p>
+<table><thead><tr>
+<th>区域</th>
+<th>内容</th>
+</tr></thead><tbody>
+<tr>
+<td>顶栏</td>
+<td>标题「历史数据」、摘要（共 N 条 / 已加载 M 条）</td>
+</tr>
+<tr>
+<td>筛选</td>
+<td>时间范围（24 小时 / 7 天 / 30 天）、设备 Picker</td>
+</tr>
+<tr>
+<td>操作</td>
+<td><strong>刷新</strong>、<strong>删除筛选</strong>、<strong>清空全部</strong></td>
+</tr>
+<tr>
+<td>表头</td>
+<td>等宽 Consolas 列名行（时间、设备、各点位）</td>
+</tr>
+<tr>
+<td>主区域</td>
+<td>虚拟化列表，每行一条快照 + <strong>删</strong> 按钮</td>
+</tr>
+<tr>
+<td>底栏</td>
+<td><strong>加载更多</strong> 按钮、加载指示、状态消息</td>
+</tr>
+</tbody></table>
+<p><strong>交互</strong></p>
+<ul>
+<li><strong>不自动加载</strong>：进入页面或切换筛选后，须手动点「刷新」</li>
+<li><strong>分页</strong>：每页 40 条；滑到底部或点「加载更多」继续；按当前筛选条件统计总数</li>
+<li><strong>删除</strong>：单条删除即时从列表移除；批量删除后清空列表并提示重新刷新</li>
+</ul>
+<blockquote>须在「设置 → 历史数据」中开启记录；关闭后历史页提示在设置中开启。</blockquote>
+<hr/>
+<h3>4.4 设置页</h3>
 <figure><img src="images/03-settings.png" alt="设置页"/><figcaption>设置页</figcaption></figure>
 <p><strong>分组字段</strong></p>
 <h4>采集</h4>
@@ -392,8 +472,12 @@ ul, ol { padding-left: 22px; }
 <td>订阅模式下可配置 <strong>多个</strong> 主题，支持 <code>+</code> / <code>#</code>；至少保留一个</td>
 </tr>
 <tr>
-<td>产线</td>
-<td>先河 / 华迪，载入对应 IP 与点表（仅采集模式）</td>
+<td>产线（Excel）</td>
+<td>先河 / 华迪；每条产线一个 xlsx，含配置、MQTT 报文、字段映射、点表、显示分组说明</td>
+</tr>
+<tr>
+<td>Excel 操作</td>
+<td><strong>从 Excel 载入</strong>、<strong>保存到 Excel</strong>、<strong>从其他文件导入</strong>；路径见 <code>config/lines/</code> 或用户 <code>lines/</code></td>
 </tr>
 <tr>
 <td>设备编号</td>
@@ -422,6 +506,20 @@ ul, ol { padding-left: 22px; }
 <tr>
 <td>启动后自动运行</td>
 <td>打开程序后自动开始采集或订阅</td>
+</tr>
+</tbody></table>
+<h4>历史数据</h4>
+<table><thead><tr>
+<th>字段</th>
+<th>说明</th>
+</tr></thead><tbody>
+<tr>
+<td>记录开关</td>
+<td>采集/订阅快照写入本地 SQLite</td>
+</tr>
+<tr>
+<td>保留天数</td>
+<td>1–365，默认 14；启动时清理过期记录</td>
 </tr>
 </tbody></table>
 <h4>PLC（信捷 XD5E-60T10）</h4>
@@ -456,6 +554,18 @@ ul, ol { padding-left: 22px; }
 <td><code>127.0.0.1:1883</code></td>
 </tr>
 <tr>
+<td>ClientId</td>
+<td>可空，自动生成</td>
+</tr>
+<tr>
+<td>用户名 / 密码</td>
+<td>可选</td>
+</tr>
+<tr>
+<td>TLS</td>
+<td>可选</td>
+</tr>
+<tr>
 <td>主题</td>
 <td><code>monitor/{deviceId}/telemetry</code></td>
 </tr>
@@ -464,7 +574,26 @@ ul, ol { padding-left: 22px; }
 <td>0</td>
 </tr>
 </tbody></table>
-<blockquote><strong>保存前须停止采集/订阅</strong>（首页运行中添加主题除外，会即时重连）。</blockquote>
+<blockquote>保存设置时写回 <code>settings.json</code> 并同步 Excel（采集模式）。<strong>停止采集/订阅后再改 PLC/MQTT 或导入 Excel</strong>（首页运行中添加订阅主题除外）。</blockquote>
+<hr/>
+<h3>4.5 诊断页</h3>
+<table><thead><tr>
+<th>区域</th>
+<th>内容</th>
+</tr></thead><tbody>
+<tr>
+<td>顶栏</td>
+<td>标题「软件自检」、<strong>版本号与修订号</strong>、状态与摘要</td>
+</tr>
+<tr>
+<td>操作</td>
+<td><strong>核心测试</strong>（Modbus 地址、MQTT 匹配、Excel 读写、历史存储等单元测试）</td>
+</tr>
+<tr>
+<td>结果</td>
+<td>逐条 PASS/FAIL 列表</td>
+</tr>
+</tbody></table>
 <hr/>
 <h2>5. MQTT 报文格式</h2>
 <pre><code class="language-json">{
@@ -604,15 +733,18 @@ ul, ol { padding-left: 22px; }
 <hr/>
 <h2>8. 文件与目录</h2>
 <pre><code>huaGuang/
+├── config/lines/               ← 随程序分发的默认产线 Excel
 ├── installer/
 │   ├── IndustrialMonitor.iss   ← Inno Setup 脚本
 │   └── output/                 ← 生成的 IndustrialMonitor-Setup.exe
 ├── docs/
-│   ├── DESIGN.md          ← 本设计手册
-│   └── images/            ← 界面与架构图
-├── src/HuaGuang.Monitor/  ← MAUI 主工程
-├── scripts/               ← 编译、发布、测试脚本
-└── test/                  ← MQTT 与示例配置</code></pre>
+│   ├── DESIGN.md               ← 本设计手册
+│   ├── CHANGELOG.md            ← 版本更新日志
+│   └── images/                 ← 界面与架构图
+├── src/HuaGuang.Monitor/       ← MAUI 主工程
+├── src/HuaGuang.Monitor.Core/  ← 核心逻辑（Modbus、MQTT、历史、Excel）
+├── scripts/                    ← 编译、发布、测试脚本
+└── test/                       ← MQTT 与示例配置</code></pre>
 <hr/>
 <h2>9. 修订记录</h2>
 <table><thead><tr>
@@ -620,6 +752,21 @@ ul, ol { padding-left: 22px; }
 <th>日期</th>
 <th>说明</th>
 </tr></thead><tbody>
+<tr>
+<td>1.1.3</td>
+<td>2026-08-22</td>
+<td>历史表格与删除、手动刷新与分页加载；点位虚拟化；设置持久化；监控页竖横屏布局</td>
+</tr>
+<tr>
+<td>1.1.2</td>
+<td>2026-08-21</td>
+<td>产线 Excel 配置、SQLite 历史记录、MQTT 扩展连接参数</td>
+</tr>
+<tr>
+<td>1.1.1</td>
+<td>2026-08-20</td>
+<td>诊断 Tab 与核心自检；桌面/订阅 UI 与内存优化</td>
+</tr>
 <tr>
 <td>1.1</td>
 <td>2026-08-20</td>

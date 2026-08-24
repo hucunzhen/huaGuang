@@ -19,6 +19,9 @@
                    TextColor="White"
                    FontAttributes="Bold"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
+            <Label Text="{Binding AppVersionText}"
+                   TextColor="#6E8499"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
             <Label Text="{Binding StatusMessage}"
                    TextColor="#8AA0B5"
                    LineBreakMode="WordWrap"

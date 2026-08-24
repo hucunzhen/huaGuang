@@ -49,7 +49,7 @@
     <MakeDir Directories="$(InstallerOutputDir)" Condition="'$(_IsccPath)' != ''" />
 
     <Exec Condition="'$(_IsccPath)' != ''"
-          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishFullDir)&quot; /DMyAppVersion=&quot;$(ApplicationDisplayVersion)&quot; &quot;$(InstallerIssFile)&quot;"
+          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishFullDir)&quot; /DMyAppVersion=&quot;$(ApplicationDisplayVersion)&quot; /DMyAppRevision=&quot;$(ApplicationVersion)&quot; &quot;$(InstallerIssFile)&quot;"
           WorkingDirectory="$(MSBuildProjectDirectory)\..\..\installer"
           IgnoreExitCode="true"
           ConsoleToMSBuild="true">
@@ -61,7 +61,7 @@
 
     <Message Condition="'$(_IsccPath)' != '' and '$(_IsccExitCode)' == '0'"
              Importance="high"
-             Text="Windows installer ready: $(InstallerOutputDir)\IndustrialMonitor-$(ApplicationDisplayVersion)-Setup.exe (ISCC: $(_IsccPath))" />
+             Text="Windows installer ready: $(InstallerOutputDir)\IndustrialMonitor-$(ApplicationDisplayVersion)-r$(ApplicationVersion)-Setup.exe (ISCC: $(_IsccPath))" />
   </Target>
 
 </Project>

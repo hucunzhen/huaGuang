@@ -58,19 +58,11 @@ if (-not $signedApk) {
     $signedApk = $signedApks | Select-Object -First 1
 }
 
-$version = "1.1"
-try {
-    $csproj = [xml](Get-Content $project)
-    $verNode = $csproj.Project.PropertyGroup.ApplicationDisplayVersion |
-        Where-Object { $_ -ne $null } |
-        Select-Object -First 1
-    if ($verNode) { $version = [string]$verNode }
-} catch {
-}
+$appVer = & (Join-Path $PSScriptRoot "Get-AppVersion.ps1") $project
 
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installerOutputDir -Force | Out-Null
-$destName = "IndustrialMonitor-$version-android.apk"
+$destName = "IndustrialMonitor-$($appVer.FileSuffix)-android.apk"
 $destPath = Join-Path $distDir $destName
 $installerDestPath = Join-Path $installerOutputDir $destName
 Copy-Item -Path $signedApk.FullName -Destination $destPath -Force

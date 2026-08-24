@@ -14,6 +14,7 @@ DOCS = ROOT / "docs"
 MD_FILE = DOCS / "DESIGN.md"
 HTML_FILE = DOCS / "DESIGN.html"
 PDF_FILE = DOCS / "DESIGN.pdf"
+CSPROJ = ROOT / "src" / "HuaGuang.Monitor" / "HuaGuang.Monitor.csproj"
 
 EDGE_CANDIDATES = [
     Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
@@ -155,12 +156,22 @@ def convert_markdown(md: str) -> str:
     return "\n".join(out)
 
 
-def build_html(body: str) -> str:
+def read_app_version() -> tuple[str, str]:
+    text = CSPROJ.read_text(encoding="utf-8")
+    display = re.search(r"<ApplicationDisplayVersion>([^<]+)</ApplicationDisplayVersion>", text)
+    build = re.search(r"<ApplicationVersion>([^<]+)</ApplicationVersion>", text)
+    version = display.group(1).strip() if display else "1.0.0"
+    revision = build.group(1).strip() if build else "1"
+    return version, revision
+
+
+def build_html(body: str, version: str, revision: str) -> str:
+    version_label = f"{version}（修订 {revision}）"
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<title>工业监控 — 设计手册</title>
+<title>工业监控 — 设计手册 {version_label}</title>
 <style>
 @page {{ margin: 18mm 16mm; }}
 body {{
@@ -237,6 +248,7 @@ ul, ol {{ padding-left: 22px; }}
 </style>
 </head>
 <body>
+<p><strong>版本 {version_label}</strong></p>
 {body}
 </body>
 </html>
@@ -244,9 +256,10 @@ ul, ol {{ padding-left: 22px; }}
 
 
 def export_pdf() -> None:
+    version, revision = read_app_version()
     md = MD_FILE.read_text(encoding="utf-8")
     body = convert_markdown(md)
-    HTML_FILE.write_text(build_html(body), encoding="utf-8")
+    HTML_FILE.write_text(build_html(body, version, revision), encoding="utf-8")
 
     edge = find_edge()
     html_uri = HTML_FILE.resolve().as_uri()
@@ -271,7 +284,7 @@ def export_pdf() -> None:
         )
 
     size_kb = PDF_FILE.stat().st_size // 1024
-    print(f"Generated: {PDF_FILE} ({size_kb} KB)")
+    print(f"Generated: {PDF_FILE} ({size_kb} KB) · {version}（修订 {revision}）")
 
 
 if __name__ == "__main__":

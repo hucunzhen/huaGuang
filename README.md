@@ -2,7 +2,11 @@
 
 Windows / Android 共用一套代码：**采集模式**下按设定周期从 **信捷 XD5E-60T10** 读点位并以 JSON 发布 MQTT；**订阅模式**下连接同一 Broker，查看局域网内其他设备的遥测。
 
-**当前版本：v1.1.0**（采集 + 订阅、多主题切换、Windows 安装包、开机自启、点位精度与手动标签）
+**当前版本：1.1.3（修订 3）**（Excel 产线配置、本地历史数据、诊断自检、监控/点位/历史页体验优化、设置持久化）
+
+> 版本号与修订号定义在 `HuaGuang.Monitor.csproj` 的 `ApplicationDisplayVersion` / `ApplicationVersion`；安装包与 APK 文件名格式为 `IndustrialMonitor-{版本}-r{修订}-Setup.exe` / `IndustrialMonitor-{版本}-r{修订}-android.apk`。应用内可在 **诊断** Tab 查看。
+
+主要能力：采集 + 订阅、多主题切换、Windows 安装包、开机自启、点位精度与手动标签、**产线 Excel 点表**、**SQLite 历史记录**。
 
 ## 支持的系统
 
@@ -42,14 +46,14 @@ Visual Studio 中也可手动指定：`工具 → 选项 → Xamarin → Android
 **Android 平板安装**
 
 1. 运行 `publish-android.bat`（或上面的 `publish-android.ps1`）
-2. 把 **`dist\IndustrialMonitor-1.1-android.apk`** 拷到平板（U 盘 / 数据线；**不要用微信传 APK**，容易损坏）
+2. 把 **`dist\IndustrialMonitor-1.1.3-r3-android.apk`** 拷到平板（U 盘 / 数据线；**不要用微信传 APK**，容易损坏）
 3. 平板开启「允许安装未知来源应用」，用文件管理器打开上述 APK 安装
 
 > 务必安装 **已签名** 的安装包。`bin\...\publish\` 里带 **`-Signed`** 后缀的才是可安装文件；不带 `-Signed` 的 `.apk` 会提示「安装包似乎无效」。
 
 **生成 Windows 安装包**
 
-- **Visual Studio**：配置选 **Release**，框架选 **net10.0-windows10.0.19041.0**，点 **发布** → 完成后自动生成 `installer\output\IndustrialMonitor-Setup.exe`（需本机安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)）
+- **Visual Studio**：配置选 **Release**，框架选 **net10.0-windows10.0.19041.0**，点 **发布** → 完成后自动生成 `installer\output\IndustrialMonitor-1.1.3-r3-Setup.exe`（需本机安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)）
 - **或**双击 **`build-installer.bat`** / 运行 `.\scripts\build-installer.ps1`
 
 关闭自动打安装包：发布时加 MSBuild 属性 `-p:BuildInstallerOnPublish=false`
@@ -101,7 +105,15 @@ XD5E-60T10 本体大约 **36 入 / 24 晶体管出**，输入约 `X0–X43`，�
 
 默认载入 **先河热熔胶复合机**（`192.168.6.10`）点表。设置里可切换 **华迪**（`192.168.6.20`）。默认含胶辊/胶水型号、门幅、厚度（手动输入，不读 PLC）。
 
+**产线 Excel 配置**（设置 → 采集模式）：每条产线一个 `.xlsx`，含 PLC/MQTT/点表/字段映射/显示分组。程序目录 `config/lines/` 或用户数据目录 `lines/` 存放；支持从 Excel 载入、保存、从外部文件导入。点表列「显示分组」控制监控页分组与卡片颜色。
+
 各点位可在「点位 → 编辑」单独设置 **显示精度**（0–4 位小数）；未设置时使用设置页的全局温度精度。
+
+## 历史数据
+
+- 设置中可开关 **记录采集/订阅数据** 到本地 SQLite，并配置保留天数（默认 14 天，启动时自动清理过期记录）
+- **历史** Tab：点「刷新」按时间范围与设备筛选加载；表格展示时间、设备与各点位值；支持单条删除、按筛选删除、清空全部
+- 下滑或点「加载更多」分页浏览；修改筛选条件后需再次点「刷新」
 
 ## 运行模式
 
@@ -112,9 +124,13 @@ XD5E-60T10 本体大约 **36 入 / 24 晶体管出**，输入约 `X0–X43`，�
 
 订阅主题支持 MQTT 通配符 `+`、`#`。多个主题在 **设置** 中维护，首页可快速添加。
 
+## 界面导航
+
+底部 Tab：**监控** · **点位** · **历史** · **设置** · **诊断**（软件自检与核心单元测试）。
+
 ## 设计手册
 
-界面说明、架构与 MQTT 报文格式见 **[docs/DESIGN.md](docs/DESIGN.md)**（含 Windows 界面截图）。
+界面说明、架构与 MQTT 报文格式见 **[docs/DESIGN.md](docs/DESIGN.md)**（含 Windows 界面截图）。版本变更见 **[CHANGELOG.md](CHANGELOG.md)**。
 
 导出 PDF：
 

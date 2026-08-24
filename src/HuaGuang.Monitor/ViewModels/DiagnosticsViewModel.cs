@@ -15,7 +15,10 @@ public partial class DiagnosticsViewModel : ObservableObject
     {
         _subscription = subscription;
         _dashboard = dashboard;
+        AppVersionText = AppVersionInfo.Display;
     }
+
+    public string AppVersionText { get; }
 
     public ObservableCollection<DiagnosticResult> Results { get; } = [];
 

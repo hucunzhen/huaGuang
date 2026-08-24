@@ -10,6 +10,13 @@
   #define MyAppVersion "1.0.0"
 #endif
 
+#ifndef MyAppRevision
+  #define MyAppRevision "1"
+#endif
+
+#define MyAppVersionLabel "{#MyAppVersion}（修订 {#MyAppRevision}）"
+#define MyAppFileSuffix "{#MyAppVersion}-r{#MyAppRevision}"
+
 #define MyAppName "工业监控"
 #define MyAppPublisher "Industrial Monitor"
 #define MyAppExeName "HuaGuang.Monitor.exe"
@@ -18,13 +25,14 @@
 [Setup]
 AppId={#MyAppId}
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
+AppVersion={#MyAppVersion}.{#MyAppRevision}
+AppVerName={#MyAppName} {#MyAppVersionLabel}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\IndustrialMonitor
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output
-OutputBaseFilename=IndustrialMonitor-{#MyAppVersion}-Setup
+OutputBaseFilename=IndustrialMonitor-{#MyAppFileSuffix}-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
