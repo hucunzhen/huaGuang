@@ -2,7 +2,7 @@
 
 Windows / Android 共用一套代码：**采集模式**下按设定周期从 **信捷 XD5E-60T10** 读点位并以 JSON 发布 MQTT；**订阅模式**下连接同一 Broker，查看局域网内其他设备的遥测。
 
-**当前版本：1.1.3（修订 3）**（Excel 产线配置、本地历史数据、诊断自检、监控/点位/历史页体验优化、设置持久化）
+**当前版本：1.1.4（修订 1）**（产品货号扫码、历史时间筛选、Excel 产线配置、本地历史、诊断自检）
 
 > 版本号与修订号定义在 `HuaGuang.Monitor.csproj` 的 `ApplicationDisplayVersion` / `ApplicationVersion`；安装包与 APK 文件名格式为 `IndustrialMonitor-{版本}-r{修订}-Setup.exe` / `IndustrialMonitor-{版本}-r{修订}-android.apk`。应用内可在 **诊断** Tab 查看。
 
@@ -46,14 +46,14 @@ Visual Studio 中也可手动指定：`工具 → 选项 → Xamarin → Android
 **Android 平板安装**
 
 1. 运行 `publish-android.bat`（或上面的 `publish-android.ps1`）
-2. 把 **`dist\IndustrialMonitor-1.1.3-r3-android.apk`** 拷到平板（U 盘 / 数据线；**不要用微信传 APK**，容易损坏）
+2. 把 **`dist\IndustrialMonitor-1.1.4-r1-android.apk`** 拷到平板（U 盘 / 数据线；**不要用微信传 APK**，容易损坏）
 3. 平板开启「允许安装未知来源应用」，用文件管理器打开上述 APK 安装
 
 > 务必安装 **已签名** 的安装包。`bin\...\publish\` 里带 **`-Signed`** 后缀的才是可安装文件；不带 `-Signed` 的 `.apk` 会提示「安装包似乎无效」。
 
 **生成 Windows 安装包**
 
-- **Visual Studio**：配置选 **Release**，框架选 **net10.0-windows10.0.19041.0**，点 **发布** → 完成后自动生成 `installer\output\IndustrialMonitor-1.1.3-r3-Setup.exe`（需本机安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)）
+- **Visual Studio**：配置选 **Release**，框架选 **net10.0-windows10.0.19041.0**，点 **发布** → 完成后自动生成 `installer\output\IndustrialMonitor-1.1.4-r1-Setup.exe`（需本机安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)）
 - **或**双击 **`build-installer.bat`** / 运行 `.\scripts\build-installer.ps1`
 
 关闭自动打安装包：发布时加 MSBuild 属性 `-p:BuildInstallerOnPublish=false`
@@ -103,7 +103,7 @@ Release 自包含参数已在 `HuaGuang.Monitor.csproj` 中配置，**不要**�
 
 XD5E-60T10 本体大约 **36 入 / 24 晶体管出**，输入约 `X0–X43`，输出约 `Y0–Y27`。
 
-默认载入 **先河热熔胶复合机**（`192.168.6.10`）点表。设置里可切换 **华迪**（`192.168.6.20`）。默认含胶辊/胶水型号、门幅、厚度（手动输入，不读 PLC）。
+默认载入 **先河热熔胶复合机**（`192.168.6.10`）点表。设置里可切换 **华迪**（`192.168.6.20`）。默认含胶辊/胶水型号、产品货号、门幅、厚度（手动输入，不读 PLC）。
 
 **产线 Excel 配置**（设置 → 采集模式）：每条产线一个 `.xlsx`，含 PLC/MQTT/点表/字段映射/显示分组。程序目录 `config/lines/` 或用户数据目录 `lines/` 存放；支持从 Excel 载入、保存、从外部文件导入。点表列「显示分组」控制监控页分组与卡片颜色。
 

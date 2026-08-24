@@ -119,8 +119,11 @@ public static class LineExcelConfigService
 
         if (NeedsRevisionUpgrade(filePath))
         {
+            var seed = CreateSeedSettings(lineName);
             var settings = new AppSettings();
             Apply(settings, filePath);
+            MergeMissingCatalogTags(settings, seed.Tags);
+            MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
             settings.AddressCatalogVersion = LineCatalog.Version;
             Export(settings, filePath);
         }
@@ -196,6 +199,33 @@ public static class LineExcelConfigService
         var settings = new AppSettings();
         LineCatalog.Apply(settings, lineName);
         return settings;
+    }
+
+    static void MergeMissingCatalogTags(AppSettings settings, IReadOnlyList<PlcTag> catalogTags)
+    {
+        var existing = settings.Tags.ToDictionary(tag => tag.Name, StringComparer.Ordinal);
+        foreach (var catalogTag in catalogTags)
+        {
+            if (existing.ContainsKey(catalogTag.Name))
+            {
+                continue;
+            }
+
+            settings.Tags.Add(new PlcTag
+            {
+                Name = catalogTag.Name,
+                Unit = catalogTag.Unit,
+                XinjeAddress = catalogTag.XinjeAddress,
+                DataType = catalogTag.DataType,
+                ByteOrder = catalogTag.ByteOrder,
+                Source = catalogTag.Source,
+                ManualValue = catalogTag.ManualValue,
+                DisplayPrecision = catalogTag.DisplayPrecision,
+                MqttField = catalogTag.MqttField,
+                DisplayCategory = catalogTag.DisplayCategory,
+                Enabled = catalogTag.Enabled
+            });
+        }
     }
 
     static bool NeedsFormatUpgrade(string filePath)
@@ -442,7 +472,7 @@ public static class LineExcelConfigService
             (TagDisplayCategory.Switch, "Bool / 运行停止类点位", "大圆点 + 运行中/已停止，绿/红高亮"),
             (TagDisplayCategory.Temperature, "名称含「温度」或单位 ℃", "橙色分组 + 左侧色条"),
             (TagDisplayCategory.Process, "车速、间隙、张力等工艺数值", "青色分组 + 左侧色条"),
-            (TagDisplayCategory.Setting, "手动输入：型号、门幅、厚度等", "蓝色分组 + 左侧色条"),
+            (TagDisplayCategory.Setting, "手动输入：型号、货号、门幅、厚度等", "蓝色分组 + 左侧色条"),
             (TagDisplayCategory.Other, "未归入以上分组的点位", "灰色分组 + 左侧色条"),
         };
 

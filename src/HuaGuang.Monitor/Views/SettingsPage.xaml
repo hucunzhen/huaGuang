@@ -116,7 +116,7 @@
 
             <Button Text="保存设置" Command="{Binding SaveCommand}" />
             <Label Text="{Binding StatusMessage}" TextColor="#2EC4B6" FontSize="13" />
-            <Label Text="默认点表含胶辊型号、胶水型号、门幅、厚度（手动输入）。华迪无“上展开转速率”。REAL 按 D 双字、CDAB 读取。"
+            <Label Text="默认点表含胶辊型号、胶水型号、产品货号、门幅、厚度（手动输入）。华迪无“上展开转速率”。REAL 按 D 双字、CDAB 读取。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
         </VerticalStackLayout>
     </ScrollView>

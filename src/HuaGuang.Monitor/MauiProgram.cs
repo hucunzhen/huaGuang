@@ -38,8 +38,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IPlatformFullScreenPresenter, NoOpFullScreenPresenter>();
 #endif
 		builder.Services.AddSingleton<FullScreenService>();
-		builder.Services.AddSingleton(sp =>
-			new HistoryStore(Path.Combine(FileSystem.AppDataDirectory, "history.db")));
+		builder.Services.AddSingleton(_ => new HistoryStore(AppPaths.HistoryDatabasePath));
 		builder.Services.AddSingleton<HistoryRecorder>();
 		builder.Services.AddSingleton<IPlcClient, ModbusTcpPlcClient>();
 		builder.Services.AddSingleton<IMqttPublisher, MqttPublisher>();

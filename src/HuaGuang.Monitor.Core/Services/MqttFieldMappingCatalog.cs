@@ -31,6 +31,7 @@ public static class MqttFieldMappingCatalog
             ["铁合轮间隙"] = "thljx",
             ["上展开转速率"] = "szksl",
             ["卷曲张力"] = "jqzl",
+            ["产品货号"] = "cphh",
         };
 
     public static MqttPayloadProfile CreatePropertiesPayloadProfile() => new()
@@ -97,7 +98,10 @@ public static class MqttFieldMappingCatalog
                 continue;
             }
 
-            tag.MqttField = mqttField;
+            if (string.IsNullOrWhiteSpace(tag.MqttField))
+            {
+                tag.MqttField = mqttField;
+            }
         }
     }
 

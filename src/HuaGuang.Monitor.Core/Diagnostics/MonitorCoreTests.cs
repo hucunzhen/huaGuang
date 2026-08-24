@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Protocols;
@@ -21,6 +22,7 @@ public static class MonitorCoreTests
         Run("产线点位数量", TestLineCatalog),
         Run("设置读写", TestSettingsRoundTrip),
         Run("Excel 配置读写", TestLineExcelRoundTrip),
+        Run("Excel 配置补全点位", TestLineExcelRevisionMerge),
         Run("MQTT 报文映射", TestMqttPayloadMapping),
         Run("properties 上报格式", TestPropertiesPayloadFormat),
         Run("产线 MQTT 默认", TestLineMqttDefaults),
@@ -286,8 +288,13 @@ public static class MonitorCoreTests
     {
         var settings = new AppSettings();
         LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
-        AssertTrue(settings.Tags.Count >= 15);
+        AssertTrue(settings.Tags.Count >= 16);
         AssertTrue(settings.Tags.Any(tag => tag.Name.Contains("温度", StringComparison.Ordinal)));
+        var productSku = settings.Tags.FirstOrDefault(tag => tag.Name == "产品货号");
+        AssertTrue(productSku is not null);
+        AssertTrue(productSku!.IsManual);
+        AssertTrue(productSku.DataType == TagDataType.String);
+        AssertTrue(productSku.MqttField == "cphh");
     }
 
     static void TestSettingsRoundTrip()
@@ -341,7 +348,49 @@ public static class MonitorCoreTests
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").DisplayCategory == TagDisplayCategory.Process);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "热溶胶盘温度（热熔胶机1）").DisplayCategory == TagDisplayCategory.Temperature);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
+            AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
             AssertTrue(loaded.SubscribeTopics.Count == 2);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestLineExcelRevisionMerge()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-rev-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var legacy = new AppSettings();
+            LineCatalog.Apply(legacy, LineCatalog.Xianhe.Name);
+            legacy.Tags = legacy.Tags.Where(tag => tag.Name != "产品货号").ToList();
+            LineExcelConfigService.Export(legacy, tempPath);
+
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                var configSheet = workbook.Worksheet(LineExcelConfigService.ConfigSheetName);
+                foreach (var row in configSheet.RowsUsed())
+                {
+                    if (row.Cell(1).GetString() == "产线配置版本")
+                    {
+                        row.Cell(2).Value = (LineCatalog.Version - 1).ToString();
+                        break;
+                    }
+                }
+
+                workbook.SaveAs(tempPath);
+            }
+
+            LineExcelConfigService.EnsureLineFile(tempPath, LineCatalog.Xianhe.Name);
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
+            AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version);
         }
         finally
         {

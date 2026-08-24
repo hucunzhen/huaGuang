@@ -193,7 +193,7 @@ ul, ol { padding-left: 22px; }
 </tbody></table>
 <h3>2.2 数据流（采集模式）</h3>
 <ol>
-<li>按 <strong>扫描周期</strong>（默认 1000 ms）读取所有启用点位</li>
+<li>按 <strong>扫描周期</strong>（默认 60 s / 60000 ms）读取所有启用点位</li>
 <li>温度点位按 <strong>精度</strong> 四舍五入（全局默认或点位单独设置）</li>
 <li>若 <strong>温度发布阈值</strong> &gt; 0，仅当任一温度变化 ≥ 阈值时才发布；否则每次扫描都发布</li>
 <li>监控页 <strong>始终刷新</strong> 显示，与是否发布 MQTT 无关</li>
@@ -485,7 +485,7 @@ ul, ol { padding-left: 22px; }
 </tr>
 <tr>
 <td>扫描周期</td>
-<td>200–60000 ms</td>
+<td>200–60000 ms，默认 60000 ms（60 s）</td>
 </tr>
 <tr>
 <td>温度发布阈值</td>

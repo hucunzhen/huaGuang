@@ -7,7 +7,7 @@ public sealed class AppSettings
     public string DeviceId { get; set; } = "先河热熔胶复合机";
     public string LineName { get; set; } = "先河热熔胶复合机";
     public int AddressCatalogVersion { get; set; }
-    public int ScanIntervalMs { get; set; } = 1000;
+    public int ScanIntervalMs { get; set; } = 60_000;
     public bool UseSimulator { get; set; } = true;
     /// <summary>0 = 每次扫描都发布；大于 0 时，任一温度点位变化达到该值（℃）才发布 MQTT。</summary>
     public double TemperaturePublishThresholdC { get; set; }

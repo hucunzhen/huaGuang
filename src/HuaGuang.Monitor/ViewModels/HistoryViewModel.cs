@@ -23,10 +23,13 @@ public partial class HistoryViewModel : ObservableObject
     {
         _store = store;
         _settings = settings;
-        RangeOptions = ["最近 24 小时", "最近 7 天", "最近 30 天"];
+        RangeOptions = ["最近 24 小时", "最近 7 天", "最近 30 天", "自定义时间"];
         SelectedRange = RangeOptions[0];
         DeviceOptions = ["全部设备"];
         SelectedDevice = DeviceOptions[0];
+        CustomStartDate = DateTime.Today.AddDays(-1);
+        CustomEndDate = DateTime.Today;
+        CustomEndTime = TimeSpan.FromHours(23) + TimeSpan.FromMinutes(59) + TimeSpan.FromSeconds(59);
     }
 
     public string[] RangeOptions { get; }
@@ -42,6 +45,13 @@ public partial class HistoryViewModel : ObservableObject
     [ObservableProperty] bool isLoadingMore;
     [ObservableProperty] bool canLoadMore;
     [ObservableProperty] bool showEmpty;
+    [ObservableProperty] bool useCustomStart = true;
+    [ObservableProperty] bool useCustomEnd = true;
+    [ObservableProperty] DateTime customStartDate;
+    [ObservableProperty] TimeSpan customStartTime;
+    [ObservableProperty] DateTime customEndDate;
+    [ObservableProperty] TimeSpan customEndTime;
+    [ObservableProperty] bool showCustomTimeFilters;
 
     public Task InitializeAsync()
     {
@@ -69,7 +79,7 @@ public partial class HistoryViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var (from, to) = ResolveRange(SelectedRange);
+            var (from, to) = ResolveQueryRange();
             _queryFrom = from;
             _queryTo = to;
             _queryDeviceFilter = SelectedDevice == "全部设备" ? null : SelectedDevice;
@@ -108,6 +118,9 @@ public partial class HistoryViewModel : ObservableObject
             await MainThread.InvokeOnMainThreadAsync(() => IsBusy = false);
         }
     }
+
+    partial void OnSelectedRangeChanged(string value) =>
+        ShowCustomTimeFilters = value == "自定义时间";
 
     [RelayCommand]
     async Task LoadMoreAsync()
@@ -267,11 +280,12 @@ public partial class HistoryViewModel : ObservableObject
             return;
         }
 
-        var (from, to) = ResolveRange(SelectedRange);
+        var (from, to) = ResolveQueryRange();
         var deviceLabel = SelectedDevice == "全部设备" ? "全部设备" : SelectedDevice;
+        var rangeLabel = BuildFilterRangeLabel(from, to);
         var confirm = await Shell.Current.DisplayAlertAsync(
             "删除历史记录",
-            $"确定删除「{SelectedRange} · {deviceLabel}」下的所有历史记录？此操作不可恢复。",
+            $"确定删除「{rangeLabel} · {deviceLabel}」下的所有历史记录？此操作不可恢复。",
             "删除",
             "取消");
         if (!confirm)
@@ -355,11 +369,56 @@ public partial class HistoryViewModel : ObservableObject
         SummaryText = "点「刷新」重新加载历史数据。";
     }
 
-    static (DateTimeOffset From, DateTimeOffset To) ResolveRange(string selected) =>
+    static (DateTimeOffset From, DateTimeOffset To) ResolvePresetRange(string selected) =>
         selected switch
         {
             "最近 7 天" => (DateTimeOffset.Now.AddDays(-7), DateTimeOffset.Now),
             "最近 30 天" => (DateTimeOffset.Now.AddDays(-30), DateTimeOffset.Now),
             _ => (DateTimeOffset.Now.AddHours(-24), DateTimeOffset.Now)
         };
+
+    (DateTimeOffset From, DateTimeOffset To) ResolveQueryRange()
+    {
+        if (SelectedRange != "自定义时间")
+        {
+            return ResolvePresetRange(SelectedRange);
+        }
+
+        if (!UseCustomStart && !UseCustomEnd)
+        {
+            throw new InvalidOperationException("自定义时间至少需设置开始或结束时间。");
+        }
+
+        var from = UseCustomStart
+            ? ToLocalOffset(CustomStartDate, CustomStartTime)
+            : new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeZoneInfo.Local.GetUtcOffset(new DateTime(2000, 1, 1)));
+        var to = UseCustomEnd
+            ? ToLocalOffset(CustomEndDate, CustomEndTime)
+            : DateTimeOffset.Now;
+
+        if (from > to)
+        {
+            throw new InvalidOperationException("开始时间不能晚于结束时间。");
+        }
+
+        return (from, to);
+    }
+
+    static DateTimeOffset ToLocalOffset(DateTime date, TimeSpan time)
+    {
+        var local = date.Date + time;
+        return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+    }
+
+    string BuildFilterRangeLabel(DateTimeOffset from, DateTimeOffset to)
+    {
+        if (SelectedRange != "自定义时间")
+        {
+            return SelectedRange;
+        }
+
+        var startText = UseCustomStart ? from.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "最早";
+        var endText = UseCustomEnd ? to.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "现在";
+        return $"{startText} ~ {endText}";
+    }
 }

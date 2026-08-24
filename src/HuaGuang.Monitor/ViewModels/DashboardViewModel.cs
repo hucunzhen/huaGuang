@@ -59,6 +59,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty] string newSubscribeTopic = string.Empty;
     [ObservableProperty] string emptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
     [ObservableProperty] bool showEmptyTagsHint = true;
+    [ObservableProperty] string productSkuDraft = string.Empty;
+
+    public Action? RequestProductSkuFocus { get; set; }
+
+    public bool ShowProductSkuScanner =>
+        IsAcquisitionMode && FindProductSkuTag() is not null;
 
     public bool ShowMultiDeviceDashboard => IsSubscribeMode && IsAllDevicesSelected;
     public bool ShowSingleDeviceDashboard => !ShowMultiDeviceDashboard;
@@ -149,6 +155,36 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    async Task SubmitProductSkuAsync()
+    {
+        if (IsSubscribeMode)
+        {
+            return;
+        }
+
+        var tag = FindProductSkuTag();
+        if (tag is null)
+        {
+            return;
+        }
+
+        var trimmed = NormalizeScannerInput(ProductSkuDraft);
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            LastError = "产品货号不能为空。";
+            return;
+        }
+
+        _rowLookup.TryGetValue(tag.Id, out var row);
+        var saved = await SaveManualSettingAsync(tag, trimmed, row).ConfigureAwait(true);
+        if (saved)
+        {
+            ProductSkuDraft = trimmed;
+            RequestProductSkuFocus?.Invoke();
+        }
+    }
+
+    [RelayCommand]
     async Task EditSettingTagAsync(TagRowViewModel? row)
     {
         if (row is null || !row.IsEditableSetting || IsSubscribeMode)
@@ -160,6 +196,13 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         var tag = settings.Tags.FirstOrDefault(item => item.Id == row.Id);
         if (tag is null || !tag.IsManual)
         {
+            return;
+        }
+
+        if (string.Equals(tag.Name, LineCatalog.ProductSkuTagName, StringComparison.Ordinal))
+        {
+            ProductSkuDraft = tag.ManualValue;
+            RequestProductSkuFocus?.Invoke();
             return;
         }
 
@@ -175,13 +218,19 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var trimmed = input.Trim();
+        await SaveManualSettingAsync(tag, input.Trim(), row).ConfigureAwait(true);
+    }
+
+    async Task<bool> SaveManualSettingAsync(PlcTag tag, string rawValue, TagRowViewModel? row)
+    {
+        var trimmed = NormalizeScannerInput(rawValue);
         if (string.IsNullOrWhiteSpace(trimmed))
         {
             LastError = $"「{tag.Name}」设定值不能为空。";
-            return;
+            return false;
         }
 
+        var settings = _settings.Current;
         var previousValue = tag.ManualValue;
         tag.ManualValue = trimmed;
         if (tag.DataType != TagDataType.String)
@@ -194,7 +243,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             {
                 tag.ManualValue = previousValue;
                 LastError = $"「{tag.Name}」设定值与数据类型不匹配。";
-                return;
+                return false;
             }
         }
 
@@ -207,21 +256,46 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         {
             tag.ManualValue = previousValue;
             LastError = $"保存设定值失败：{ex.Message}";
-            return;
+            return false;
         }
 
-        var value = ValueFormatting.ResolveManualValue(tag);
-        value = ValueFormatting.ApplyDisplayPrecision(tag, value, settings.TemperaturePrecision);
-        row.Apply(new TagSnapshot
+        if (row is not null)
         {
-            TagId = tag.Id,
-            Name = tag.Name,
-            Unit = tag.Unit,
-            Value = value,
-            Quality = "Good",
-            Timestamp = DateTimeOffset.Now
-        });
+            var value = ValueFormatting.ResolveManualValue(tag);
+            value = ValueFormatting.ApplyDisplayPrecision(tag, value, settings.TemperaturePrecision);
+            row.Apply(new TagSnapshot
+            {
+                TagId = tag.Id,
+                Name = tag.Name,
+                Unit = tag.Unit,
+                Value = value,
+                Quality = "Good",
+                Timestamp = DateTimeOffset.Now
+            });
+        }
+
+        if (_acquisition.IsRunning)
+        {
+            _acquisition.RequestImmediatePublish();
+        }
+
         LastError = string.Empty;
+        return true;
+    }
+
+    static string NormalizeScannerInput(string input) =>
+        input.Trim().TrimEnd('\r', '\n', '\t');
+
+    PlcTag? FindProductSkuTag() =>
+        _settings.Current.Tags.FirstOrDefault(tag =>
+            tag.Enabled &&
+            tag.IsManual &&
+            string.Equals(tag.Name, LineCatalog.ProductSkuTagName, StringComparison.Ordinal));
+
+    void SyncProductSkuDraft()
+    {
+        ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
+        OnPropertyChanged(nameof(ShowProductSkuScanner));
     }
 
     [RelayCommand]
@@ -283,7 +357,14 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             PublishNote = BuildRemoteStatusNote();
         });
 
-    partial void OnIsSubscribeModeChanged(bool value) => NotifyRemoteLayoutChanged();
+    partial void OnIsSubscribeModeChanged(bool value)
+    {
+        NotifyRemoteLayoutChanged();
+        OnPropertyChanged(nameof(ShowProductSkuScanner));
+    }
+
+    partial void OnIsAcquisitionModeChanged(bool value) =>
+        OnPropertyChanged(nameof(ShowProductSkuScanner));
 
     void NotifyRemoteLayoutChanged()
     {
@@ -412,6 +493,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
         ShowEmptyTagsHint = rows.Count == 0;
         NotifySwitchStatusChanged();
+        SyncProductSkuDraft();
     }
 
     int TotalTagCount => TagGroups.Sum(group => group.Tags.Count) + SwitchStatusTags.Count;
@@ -423,6 +505,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         SwitchStatusTags.Clear();
         ShowEmptyTagsHint = true;
         NotifySwitchStatusChanged();
+        SyncProductSkuDraft();
     }
 
     void NotifySwitchStatusChanged() =>

@@ -14,6 +14,7 @@ public sealed class AcquisitionService : IDisposable
     CancellationTokenSource? _cts;
     Task? _loop;
     bool _initialPublishDone;
+    int _forcePublishSignal;
 
     public AcquisitionService(SettingsStore settingsStore, IPlcClient plc, IMqttPublisher mqtt)
     {
@@ -35,6 +36,9 @@ public sealed class AcquisitionService : IDisposable
 
     public event EventHandler? ConnectionChanged;
     public event EventHandler<IReadOnlyList<TagSnapshot>>? TagsUpdated;
+
+    public void RequestImmediatePublish() =>
+        Interlocked.Increment(ref _forcePublishSignal);
 
     public async Task StartAsync()
     {
@@ -249,6 +253,11 @@ public sealed class AcquisitionService : IDisposable
 
     bool ShouldPublish(AppSettings settings, IReadOnlyList<PlcTag> enabledTags, IReadOnlyDictionary<string, object?> values)
     {
+        if (Interlocked.Exchange(ref _forcePublishSignal, 0) > 0)
+        {
+            return true;
+        }
+
         var threshold = settings.TemperaturePublishThresholdC;
         if (threshold <= 0)
         {

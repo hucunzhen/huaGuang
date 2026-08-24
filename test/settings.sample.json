@@ -2,7 +2,7 @@
   "deviceId": "先河热熔胶复合机",
   "lineName": "先河热熔胶复合机",
   "addressCatalogVersion": 2,
-  "scanIntervalMs": 1000,
+  "scanIntervalMs": 60000,
   "temperaturePublishThresholdC": 0,
   "temperaturePrecision": 1,
   "useSimulator": true,

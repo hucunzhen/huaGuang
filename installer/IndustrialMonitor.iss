@@ -14,25 +14,23 @@
   #define MyAppRevision "1"
 #endif
 
-#define MyAppVersionLabel "{#MyAppVersion}（修订 {#MyAppRevision}）"
-#define MyAppFileSuffix "{#MyAppVersion}-r{#MyAppRevision}"
-
 #define MyAppName "工业监控"
 #define MyAppPublisher "Industrial Monitor"
 #define MyAppExeName "HuaGuang.Monitor.exe"
+#define MyAppPackageId "com.industrial.monitor"
 #define MyAppId "{{A7C3E9F1-2B4D-4F8A-9E6C-1D5A0B3C7E2F}"
 
 [Setup]
 AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}.{#MyAppRevision}
-AppVerName={#MyAppName} {#MyAppVersionLabel}
+AppVerName={#MyAppName} {#MyAppVersion}（修订 {#MyAppRevision}）
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\IndustrialMonitor
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=output
-OutputBaseFilename=IndustrialMonitor-{#MyAppFileSuffix}-Setup
+OutputBaseFilename=IndustrialMonitor-{#MyAppVersion}-r{#MyAppRevision}-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -65,3 +63,57 @@ Filename: "{app}\{#MyAppExeName}"; Description: "立即运行 {#MyAppName}"; Fla
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+var
+  DeleteUserData: Boolean;
+
+procedure DeletePackageUserDataUnder(const Root: String);
+var
+  FindRec: TFindRec;
+  PublisherDir, PackageDir: String;
+begin
+  if not DirExists(Root) then
+    Exit;
+
+  if FindFirst(Root + '\*', FindRec) then
+  try
+    repeat
+      if (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+         ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) then
+      begin
+        PublisherDir := Root + '\' + FindRec.Name;
+        PackageDir := PublisherDir + '\{#MyAppPackageId}';
+        if DirExists(PackageDir) then
+          DelTree(PackageDir, True, True, True);
+      end;
+    until not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  Answer: Integer;
+begin
+  DeleteUserData := False;
+  Answer := MsgBox(
+    '是否同时删除用户数据？' + #13#10 + #13#10 +
+    '包括：本地设置 (settings.json)、历史数据库 (history.db)、' + #13#10 +
+    '以及 AppData 中保存的产线 Excel 配置。' + #13#10 + #13#10 +
+    '选「是」将永久删除，无法恢复。',
+    mbConfirmation,
+    MB_YESNO or MB_DEFBUTTON2);
+  DeleteUserData := (Answer = IDYES);
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if (CurUninstallStep = usPostUninstall) and DeleteUserData then
+  begin
+    DeletePackageUserDataUnder(ExpandConstant('{localappdata}'));
+    DeletePackageUserDataUnder(ExpandConstant('{userappdata}'));
+  end;
+end;

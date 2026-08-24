@@ -8,7 +8,7 @@ public static class LineConfigPaths
     public static string InstallLinesDirectory => Path.Combine(AppContext.BaseDirectory, "lines");
 
     /// <summary>用户可写目录（Android 或安装目录不可写时使用）。</summary>
-    public static string UserLinesDirectory => Path.Combine(FileSystem.AppDataDirectory, "lines");
+    public static string UserLinesDirectory => AppPaths.UserLinesDirectory;
 
     public static string LinesDirectory => UsesInstallLinesDirectory()
         ? InstallLinesDirectory

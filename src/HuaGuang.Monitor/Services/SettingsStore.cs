@@ -22,7 +22,7 @@ public sealed class SettingsStore
 
     public SettingsStore()
     {
-        _filePath = Path.Combine(FileSystem.AppDataDirectory, "settings.json");
+        _filePath = AppPaths.SettingsFilePath;
         Current = CreateDefault();
     }
 

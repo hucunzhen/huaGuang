@@ -83,7 +83,7 @@
                             <Label Text="{Binding AddressText}" TextColor="#6E8499" LineBreakMode="TailTruncation"
                                    FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
                             <Label Grid.Column="1"
-                                   Text="点击修改"
+                                   Text="{Binding EditHintText}"
                                    TextColor="#7B9FD4"
                                    HorizontalOptions="End"
                                    IsVisible="{Binding IsEditableSetting}"
@@ -351,7 +351,7 @@
             </HorizontalStackLayout>
         </Grid>
 
-        <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="4">
+        <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*" RowSpacing="4">
             <ScrollView x:Name="InfoPortrait"
                         MaximumHeightRequest="{Binding Source={x:Reference ThisPage}, Path=InfoPanelMaxHeight}">
                 <ScrollView.IsVisible>
@@ -504,7 +504,39 @@
                        IsVisible="{Binding PublishNote, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
             </VerticalStackLayout>
 
-            <ScrollView Grid.Row="1">
+            <Border Grid.Row="1"
+                    Stroke="#1F3A52"
+                    StrokeThickness="1"
+                    BackgroundColor="#152536"
+                    Padding="10,8"
+                    IsVisible="{Binding ShowProductSkuScanner}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="产品货号（支持 Mexxen 等 USB 扫码枪，扫后自动回车）"
+                           TextColor="#8AA0B5"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <Entry x:Name="ProductSkuEntry"
+                               Text="{Binding ProductSkuDraft}"
+                               Placeholder="请聚焦此框后扫码，或手动输入后回车"
+                               ReturnType="Done"
+                               ReturnCommand="{Binding SubmitProductSkuCommand}"
+                               MaxLength="200"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                               Completed="OnProductSkuCompleted" />
+                        <Button Grid.Column="1"
+                                Text="确认"
+                                Command="{Binding SubmitProductSkuCommand}"
+                                Padding="14,8"
+                                MinimumWidthRequest="72"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                    </Grid>
+                </VerticalStackLayout>
+            </Border>
+
+            <ScrollView Grid.Row="2">
                 <VerticalStackLayout Spacing="14" Padding="0,4">
                     <Label Text="{Binding EmptyTagsHint}"
                            TextColor="#8AA0B5"

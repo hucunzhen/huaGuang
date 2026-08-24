@@ -40,7 +40,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] string newSubscribeTopic = string.Empty;
     [ObservableProperty] string selectedLineName = "先河热熔胶复合机";
     [ObservableProperty] string deviceId = "先河热熔胶复合机";
-    [ObservableProperty] string scanIntervalMs = "1000";
+    [ObservableProperty] string scanIntervalMs = "60000";
     [ObservableProperty] string temperaturePublishThresholdC = "0";
     [ObservableProperty] string temperaturePrecision = "1";
     [ObservableProperty] bool useSimulator = true;
@@ -265,7 +265,7 @@ public partial class SettingsViewModel : ObservableObject
         var settings = _store.Current;
         settings.LineName = SelectedLineName;
         settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
-        settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 1000, 200, 60_000);
+        settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 60_000, 200, 60_000);
         settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
         settings.TemperaturePrecision = ParseInt(TemperaturePrecision, 1, 0, 4);
         settings.UseSimulator = UseSimulator;
@@ -309,7 +309,7 @@ public partial class SettingsViewModel : ObservableObject
             settings.SubscribeTopic = topics.Count > 0 ? topics[0] : "monitor/+/telemetry";
             settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
             settings.LineName = SelectedLineName;
-            settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 1000, 200, 60_000);
+            settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 60_000, 200, 60_000);
             settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
             settings.TemperaturePrecision = ParseInt(TemperaturePrecision, 1, 0, 4);
             settings.UseSimulator = UseSimulator;

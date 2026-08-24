@@ -13,6 +13,8 @@
 
 卸载：Windows「设置 → 应用 → 已安装的应用」中找到「工业监控」卸载。
 
+卸载时会删除程序目录。卸载开始时会询问是否同时删除用户数据（`settings.json`、历史数据库、AppData 中的产线 Excel 等）；默认选「否」，保留用户数据。
+
 ## 开发机生成安装包
 
 1. 安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)

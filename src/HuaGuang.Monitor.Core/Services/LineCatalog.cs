@@ -4,11 +4,12 @@ using HuaGuang.Monitor.Protocols;
 namespace HuaGuang.Monitor.Services;
 
 /// <summary>
-/// 来自产线数据地址规划：PLC 点位为机台获取；胶辊型号、胶水型号、门幅、厚度为手动填写。
+/// 来自产线数据地址规划：PLC 点位为机台获取；胶辊型号、胶水型号、产品货号、门幅、厚度为手动填写。
 /// </summary>
 public static class LineCatalog
 {
-    public const int Version = 6;
+    public const string ProductSkuTagName = "产品货号";
+    public const int Version = 8;
 
     public static IReadOnlyList<string> LineNames { get; } =
     [
@@ -86,6 +87,7 @@ public static class LineCatalog
 
         tags.Add(ManualString("胶辊型号"));
         tags.Add(ManualString("胶水型号"));
+        tags.Add(ManualString(ProductSkuTagName));
         tags.Add(ManualReal("门幅", "mm"));
         tags.Add(ManualReal("厚度", "mm"));
         return tags;

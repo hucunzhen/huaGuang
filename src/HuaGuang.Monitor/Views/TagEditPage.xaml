@@ -11,7 +11,7 @@
     <ScrollView>
         <VerticalStackLayout Padding="16,6,16,24" Spacing="12">
             <Label Text="名称" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding Name}" Placeholder="胶辊型号 / 温度 / 门幅" />
+            <Entry Text="{Binding Name}" Placeholder="胶辊型号 / 产品货号 / 温度 / 门幅" />
             <Label Text="单位" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding Unit}" Placeholder="℃ / mm / 留空" />
             <HorizontalStackLayout Spacing="10">
@@ -31,7 +31,7 @@
 
             <Label Text="数据来源" TextColor="#8AA0B5" FontSize="12" />
             <Picker ItemsSource="{Binding SourceTypes}" SelectedItem="{Binding SelectedSourceType}" />
-            <Label Text="手动输入：不参与 PLC 读取，值随 MQTT 一起发布（如胶辊型号、门幅）。"
+            <Label Text="手动输入：不参与 PLC 读取，值随 MQTT 一起发布（如胶辊型号、产品货号、门幅）。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
                    IsVisible="{Binding IsManualSource}" />
 

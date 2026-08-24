@@ -157,6 +157,32 @@ def convert_markdown(md: str) -> str:
 
 
 def read_app_version() -> tuple[str, str]:
+    import json
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "dotnet",
+                "msbuild",
+                str(CSPROJ),
+                "-getProperty:ApplicationDisplayVersion",
+                "-getProperty:ApplicationVersion",
+                "-nologo",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        payload = json.loads(result.stdout)
+        version = payload["Properties"]["ApplicationDisplayVersion"].strip()
+        revision = payload["Properties"]["ApplicationVersion"].strip()
+        if version and revision:
+            return version, revision
+    except Exception:
+        pass
+
     text = CSPROJ.read_text(encoding="utf-8")
     display = re.search(r"<ApplicationDisplayVersion>([^<]+)</ApplicationDisplayVersion>", text)
     build = re.search(r"<ApplicationVersion>([^<]+)</ApplicationVersion>", text)

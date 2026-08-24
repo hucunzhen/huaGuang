@@ -19,12 +19,12 @@
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
             <Label Text="{Binding SummaryText}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-            <Label Text="先点「刷新」加载数据；修改筛选条件后需再次刷新；下滑到底部加载更多。"
+            <Label Text="先点「刷新」加载数据；可选快捷范围或「自定义时间」按起止时间查找；修改筛选后需再次刷新。"
                    TextColor="#6E8499"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
         </VerticalStackLayout>
 
-        <Grid Grid.Row="1" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="6">
+        <Grid Grid.Row="1" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="6">
             <VerticalStackLayout Spacing="2">
                 <Label Text="时间范围" TextColor="#8AA0B5" FontSize="12" />
                 <Picker ItemsSource="{Binding RangeOptions}" SelectedItem="{Binding SelectedRange}"
@@ -35,7 +35,44 @@
                 <Picker ItemsSource="{Binding DeviceOptions}" SelectedItem="{Binding SelectedDevice}"
                         FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
             </VerticalStackLayout>
-            <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+
+            <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="*,*" ColumnSpacing="8"
+                  IsVisible="{Binding ShowCustomTimeFilters}">
+                <VerticalStackLayout Spacing="4">
+                    <HorizontalStackLayout Spacing="8">
+                        <CheckBox IsChecked="{Binding UseCustomStart}" Color="#2EC4B6" VerticalOptions="Center" />
+                        <Label Text="开始时间" TextColor="#8AA0B5" VerticalOptions="Center"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    </HorizontalStackLayout>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+                        <DatePicker Date="{Binding CustomStartDate}"
+                                    IsEnabled="{Binding UseCustomStart}"
+                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <TimePicker Grid.Column="1"
+                                    Time="{Binding CustomStartTime}"
+                                    IsEnabled="{Binding UseCustomStart}"
+                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                    </Grid>
+                </VerticalStackLayout>
+                <VerticalStackLayout Grid.Column="1" Spacing="4">
+                    <HorizontalStackLayout Spacing="8">
+                        <CheckBox IsChecked="{Binding UseCustomEnd}" Color="#2EC4B6" VerticalOptions="Center" />
+                        <Label Text="结束时间" TextColor="#8AA0B5" VerticalOptions="Center"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    </HorizontalStackLayout>
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
+                        <DatePicker Date="{Binding CustomEndDate}"
+                                    IsEnabled="{Binding UseCustomEnd}"
+                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <TimePicker Grid.Column="1"
+                                    Time="{Binding CustomEndTime}"
+                                    IsEnabled="{Binding UseCustomEnd}"
+                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                    </Grid>
+                </VerticalStackLayout>
+            </Grid>
+
+            <Grid Grid.Row="2" Grid.ColumnSpan="2" ColumnDefinitions="*,*,*" ColumnSpacing="8">
                 <Button Text="刷新"
                         Command="{Binding RefreshCommand}"
                         Padding="12,6"
