@@ -30,7 +30,20 @@ public sealed class MqttPublisher : IMqttPublisher
         };
 
         var options = MqttConnectionFactory.BuildOptions(settings, "pub");
-        await client.ConnectAsync(options, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await WaitAsync(
+                ct => client.ConnectAsync(options, ct),
+                MqttTimeouts.Connect,
+                cancellationToken,
+                $"MQTT 连接超时（{MqttTimeouts.Connect.TotalSeconds:G} 秒）：{settings.Host}:{settings.Port}").ConfigureAwait(false);
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
+
         _client = client;
     }
 
@@ -80,7 +93,27 @@ public sealed class MqttPublisher : IMqttPublisher
             .WithQualityOfServiceLevel(level)
             .Build();
 
-        await _client.PublishAsync(message, cancellationToken).ConfigureAwait(false);
+        await WaitAsync(
+            ct => _client.PublishAsync(message, ct),
+            MqttTimeouts.Publish,
+            cancellationToken,
+            $"MQTT 发布超时（{MqttTimeouts.Publish.TotalSeconds:G} 秒）").ConfigureAwait(false);
+    }
+
+    static async Task WaitAsync(
+        Func<CancellationToken, Task> operation,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        string timeoutMessage)
+    {
+        var work = operation(CancellationToken.None);
+        var completed = await Task.WhenAny(work, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
+        if (completed != work)
+        {
+            throw new TimeoutException(timeoutMessage);
+        }
+
+        await work.ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync() => await DisconnectAsync().ConfigureAwait(false);

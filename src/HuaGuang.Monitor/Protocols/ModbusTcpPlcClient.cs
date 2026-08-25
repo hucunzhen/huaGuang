@@ -10,6 +10,7 @@ public sealed class ModbusTcpPlcClient : IPlcClient
     TcpClient? _tcpClient;
     IModbusMaster? _master;
     byte _station = 1;
+    int _timeoutMs = 2000;
 
     public bool IsConnected => _tcpClient is { Connected: true } && _master is not null;
 
@@ -31,6 +32,7 @@ public sealed class ModbusTcpPlcClient : IPlcClient
                 _tcpClient = client;
                 _master = new ModbusFactory().CreateMaster(client);
                 _station = settings.Station;
+                _timeoutMs = Math.Clamp(settings.TimeoutMs, 200, 10_000);
             }
         }
         catch
@@ -72,7 +74,53 @@ public sealed class ModbusTcpPlcClient : IPlcClient
     public Task<object> ReadAsync(PlcTag tag, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.Run(() => ReadCore(tag), cancellationToken);
+        return Task.FromResult(ReadCore(tag));
+    }
+
+    public Task<IReadOnlyDictionary<string, object?>> ReadTagsAsync(IReadOnlyList<PlcTag> tags, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (tags.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>(StringComparer.Ordinal));
+        }
+
+        IModbusMaster master;
+        byte station;
+        int timeoutMs;
+        lock (_gate)
+        {
+            master = _master ?? throw new InvalidOperationException("PLC 未连接");
+            station = _station;
+            timeoutMs = _timeoutMs;
+        }
+
+        var values = ModbusTagBatchReader.ReadTags(
+            master,
+            station,
+            tags,
+            timeoutMs,
+            AbortOnTimeout);
+        return Task.FromResult<IReadOnlyDictionary<string, object?>>(
+            values.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal));
+    }
+
+    void AbortOnTimeout()
+    {
+        lock (_gate)
+        {
+            try
+            {
+                _tcpClient?.Close();
+            }
+            catch
+            {
+                // 强制断开以结束阻塞中的 socket 读
+            }
+
+            _master = null;
+            _tcpClient = null;
+        }
     }
 
     object ReadCore(PlcTag tag)

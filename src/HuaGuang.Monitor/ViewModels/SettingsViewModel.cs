@@ -272,7 +272,7 @@ public partial class SettingsViewModel : ObservableObject
         settings.Plc.Host = PlcHost.Trim();
         settings.Plc.Port = ParseInt(PlcPort, 502, 1, 65535);
         settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
-        settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 30_000);
+        settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
         settings.Mqtt.Host = MqttHost.Trim();
         settings.Mqtt.Port = ParseInt(MqttPort, 1883, 1, 65535);
         settings.Mqtt.ClientId = MqttClientId.Trim();
@@ -320,7 +320,7 @@ public partial class SettingsViewModel : ObservableObject
             settings.Plc.Host = PlcHost.Trim();
             settings.Plc.Port = ParseInt(PlcPort, 502, 1, 65535);
             settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
-            settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 30_000);
+            settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
             settings.Mqtt.Host = MqttHost.Trim();
             settings.Mqtt.Port = ParseInt(MqttPort, 1883, 1, 65535);
             settings.Mqtt.ClientId = MqttClientId.Trim();

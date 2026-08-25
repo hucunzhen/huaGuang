@@ -8,4 +8,5 @@ public interface IPlcClient : IAsyncDisposable
     Task ConnectAsync(PlcSettings settings, CancellationToken cancellationToken);
     Task DisconnectAsync();
     Task<object> ReadAsync(PlcTag tag, CancellationToken cancellationToken);
+    Task<IReadOnlyDictionary<string, object?>> ReadTagsAsync(IReadOnlyList<PlcTag> tags, CancellationToken cancellationToken);
 }

@@ -509,18 +509,28 @@
                     StrokeThickness="1"
                     BackgroundColor="#152536"
                     Padding="10,8"
-                    IsVisible="{Binding ShowProductSkuScanner}">
+                    IsVisible="{Binding ShowProductSkuInput}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="8" />
                 </Border.StrokeShape>
                 <VerticalStackLayout Spacing="6">
-                    <Label Text="产品货号（支持 Mexxen 等 USB 扫码枪，扫后自动回车）"
-                           TextColor="#8AA0B5"
-                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <Label Text="产品货号（支持 Mexxen 等 USB 扫码枪，扫后自动回车）"
+                               TextColor="#8AA0B5"
+                               VerticalOptions="Center"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                        <Button Grid.Column="1"
+                                Text="取消"
+                                Command="{Binding CancelProductSkuInputCommand}"
+                                Padding="10,4"
+                                BackgroundColor="Transparent"
+                                TextColor="#8AA0B5"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    </Grid>
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <Entry x:Name="ProductSkuEntry"
                                Text="{Binding ProductSkuDraft}"
-                               Placeholder="请聚焦此框后扫码，或手动输入后回车"
+                               Placeholder="请扫码或输入，回车确认"
                                ReturnType="Done"
                                ReturnCommand="{Binding SubmitProductSkuCommand}"
                                MaxLength="200"

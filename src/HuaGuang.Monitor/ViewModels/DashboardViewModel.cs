@@ -60,11 +60,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty] string emptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
     [ObservableProperty] bool showEmptyTagsHint = true;
     [ObservableProperty] string productSkuDraft = string.Empty;
+    [ObservableProperty] bool showProductSkuInput;
 
     public Action? RequestProductSkuFocus { get; set; }
-
-    public bool ShowProductSkuScanner =>
-        IsAcquisitionMode && FindProductSkuTag() is not null;
 
     public bool ShowMultiDeviceDashboard => IsSubscribeMode && IsAllDevicesSelected;
     public bool ShowSingleDeviceDashboard => !ShowMultiDeviceDashboard;
@@ -185,6 +183,26 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    void CancelProductSkuInput()
+    {
+        ShowProductSkuInput = false;
+        ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
+        LastError = string.Empty;
+    }
+
+    void OpenProductSkuInput()
+    {
+        if (IsSubscribeMode || FindProductSkuTag() is null)
+        {
+            return;
+        }
+
+        ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
+        ShowProductSkuInput = true;
+        RequestProductSkuFocus?.Invoke();
+    }
+
+    [RelayCommand]
     async Task EditSettingTagAsync(TagRowViewModel? row)
     {
         if (row is null || !row.IsEditableSetting || IsSubscribeMode)
@@ -199,10 +217,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (string.Equals(tag.Name, LineCatalog.ProductSkuTagName, StringComparison.Ordinal))
+        if (string.Equals(tag.Name, ProductSkuConstants.TagName, StringComparison.Ordinal))
         {
-            ProductSkuDraft = tag.ManualValue;
-            RequestProductSkuFocus?.Invoke();
+            OpenProductSkuInput();
             return;
         }
 
@@ -290,12 +307,14 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         _settings.Current.Tags.FirstOrDefault(tag =>
             tag.Enabled &&
             tag.IsManual &&
-            string.Equals(tag.Name, LineCatalog.ProductSkuTagName, StringComparison.Ordinal));
+            string.Equals(tag.Name, ProductSkuConstants.TagName, StringComparison.Ordinal));
 
     void SyncProductSkuDraft()
     {
-        ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
-        OnPropertyChanged(nameof(ShowProductSkuScanner));
+        if (!ShowProductSkuInput)
+        {
+            ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
+        }
     }
 
     [RelayCommand]
@@ -360,11 +379,13 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     partial void OnIsSubscribeModeChanged(bool value)
     {
         NotifyRemoteLayoutChanged();
-        OnPropertyChanged(nameof(ShowProductSkuScanner));
+        ShowProductSkuInput = false;
     }
 
-    partial void OnIsAcquisitionModeChanged(bool value) =>
-        OnPropertyChanged(nameof(ShowProductSkuScanner));
+    partial void OnIsAcquisitionModeChanged(bool value)
+    {
+        ShowProductSkuInput = false;
+    }
 
     void NotifyRemoteLayoutChanged()
     {
@@ -396,6 +417,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             {
                 LastError = string.Empty;
             }
+
+            RefreshStatus();
         });
     }
 
@@ -916,6 +939,29 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         DeviceId = settings.DeviceId;
         TopicPreview = $"发布主题：{settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase)}";
         ModeText = settings.UseSimulator ? "采集模式 · 模拟数据" : "采集模式 · PLC 实采";
+        if (_acquisition.IsRunning)
+        {
+            ModeText += $" · 周期 {_acquisition.ActiveScanIntervalMs / 1000.0:G}s";
+            if (settings.UseSimulator)
+            {
+                ModeText += $" · 读 {_acquisition.LastPlcElapsedMs / 1000.0:0.0}s";
+            }
+            else
+            {
+                ModeText += $" · PLC {_acquisition.LastPlcElapsedMs / 1000.0:0.0}s";
+            }
+
+            ModeText += $" · 等 {_acquisition.LastWaitElapsedMs / 1000.0:0.0}s";
+            if (_acquisition.MqttPendingCount > 0)
+            {
+                ModeText += $" · 待发送 {_acquisition.MqttPendingCount}";
+            }
+
+            if (_acquisition.LastCycleCompletedAt is { } completedAt)
+            {
+                ModeText += $" · 刷新 {completedAt.LocalDateTime:HH:mm:ss}";
+            }
+        }
         EmptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
         if (settings.TemperaturePublishThresholdC > 0)
         {

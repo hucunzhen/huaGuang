@@ -2,7 +2,7 @@
 
 Windows / Android 共用一套代码：**采集模式**下按设定周期从 **信捷 XD5E-60T10** 读点位并以 JSON 发布 MQTT；**订阅模式**下连接同一 Broker，查看局域网内其他设备的遥测。
 
-**当前版本：1.1.4（修订 1）**（产品货号扫码、历史时间筛选、Excel 产线配置、本地历史、诊断自检）
+**当前版本：1.1.5（修订 2）**（MQTT 异步队列、Android 轮询修复、Modbus 批量读、产品货号扫码、历史时间筛选、Excel 产线配置）
 
 > 版本号与修订号定义在 `HuaGuang.Monitor.csproj` 的 `ApplicationDisplayVersion` / `ApplicationVersion`；安装包与 APK 文件名格式为 `IndustrialMonitor-{版本}-r{修订}-Setup.exe` / `IndustrialMonitor-{版本}-r{修订}-android.apk`。应用内可在 **诊断** Tab 查看。
 

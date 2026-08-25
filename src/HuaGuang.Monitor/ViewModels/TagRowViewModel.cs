@@ -31,7 +31,7 @@ public partial class TagRowViewModel : ObservableObject
     public bool IsEditableSetting => Category == TagDisplayCategory.Setting && _tag.IsManual;
 
     public bool IsProductSkuTag =>
-        string.Equals(Name, LineCatalog.ProductSkuTagName, StringComparison.Ordinal);
+        string.Equals(Name, ProductSkuConstants.TagName, StringComparison.Ordinal);
 
     public string EditHintText => IsProductSkuTag ? "点击扫码" : "点击修改";
 

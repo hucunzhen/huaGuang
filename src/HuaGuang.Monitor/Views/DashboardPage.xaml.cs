@@ -27,7 +27,6 @@ public partial class DashboardPage : MonitorPageBase
             viewModel.RequestProductSkuFocus = FocusProductSkuEntry;
             viewModel.Reload();
             await viewModel.TryAutoStartAsync();
-            await FocusProductSkuEntryDelayedAsync();
         }
     }
 
@@ -46,7 +45,7 @@ public partial class DashboardPage : MonitorPageBase
 
     async Task FocusProductSkuEntryDelayedAsync()
     {
-        if (_viewModel?.ShowProductSkuScanner != true)
+        if (_viewModel?.ShowProductSkuInput != true)
         {
             return;
         }

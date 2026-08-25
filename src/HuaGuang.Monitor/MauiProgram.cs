@@ -27,6 +27,11 @@ public static class MauiProgram
 #endif
 
 		builder.Services.AddSingleton<SettingsStore>();
+#if ANDROID
+		builder.Services.AddSingleton<IAcquisitionBackgroundGuard, Platforms.Android.AndroidAcquisitionBackgroundGuard>();
+#else
+		builder.Services.AddSingleton<IAcquisitionBackgroundGuard, NoOpAcquisitionBackgroundGuard>();
+#endif
 #if WINDOWS
 		builder.Services.AddSingleton<IStartupRegistration, Platforms.Windows.WindowsStartupRegistration>();
 		builder.Services.AddSingleton<IPlatformFullScreenPresenter, Platforms.Windows.WindowsFullScreenPresenter>();
@@ -42,6 +47,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<HistoryRecorder>();
 		builder.Services.AddSingleton<IPlcClient, ModbusTcpPlcClient>();
 		builder.Services.AddSingleton<IMqttPublisher, MqttPublisher>();
+		builder.Services.AddSingleton<MqttOutboundService>();
 		builder.Services.AddSingleton<AcquisitionService>();
 		builder.Services.AddSingleton<SubscriptionService>();
 		builder.Services.AddSingleton<DashboardViewModel>();

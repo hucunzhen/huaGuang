@@ -51,11 +51,13 @@
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="设备编号" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding DeviceId}" Placeholder="LINE-01" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="扫描周期（毫秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="扫描周期（毫秒，60000 = 60 秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding ScanIntervalMs}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="两次 PLC 扫描开始之间的间隔；已扣除本轮读取与通信耗时。MQTT 是否每次上报仍受下方温度阈值影响。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="温度发布阈值（℃）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding TemperaturePublishThresholdC}" Keyboard="Numeric" Placeholder="0" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="0 = 每次扫描都发布；大于 0 时，任一温度点位（单位 ℃ 或名称含“温度”）变化达到该值才发布 MQTT。"
+            <Label Text="0 = 每次扫描都发布；大于 0 时，温度变化达到阈值才发布，但最长不超过一个扫描周期。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="温度精度（小数位）" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding TemperaturePrecision}" Keyboard="Numeric" Placeholder="1" />
@@ -93,6 +95,8 @@
             <Entry Text="{Binding Station}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="超时（毫秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding PlcTimeoutMs}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="单次 Modbus 请求超时；PLC 无响应时过大会拖慢整轮采集（建议 2000–5000）。"
+                   TextColor="#8AA0B5" FontSize="11" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
 
             <Label Text="MQTT" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
             <Label Text="Broker 地址" TextColor="#8AA0B5" FontSize="12" />

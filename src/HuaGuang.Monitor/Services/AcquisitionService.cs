@@ -1,6 +1,10 @@
+using System.Diagnostics;
 using HuaGuang.Monitor.Messaging;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Protocols;
+#if ANDROID
+using Android.Util;
+#endif
 
 namespace HuaGuang.Monitor.Services;
 
@@ -8,29 +12,46 @@ public sealed class AcquisitionService : IDisposable
 {
     readonly SettingsStore _settingsStore;
     readonly IPlcClient _plc;
-    readonly IMqttPublisher _mqtt;
+    readonly MqttOutboundService _mqttOutbound;
+    readonly IAcquisitionBackgroundGuard _backgroundGuard;
     readonly SemaphoreSlim _gate = new(1, 1);
+    readonly object _publishStateGate = new();
     readonly Dictionary<string, double> _lastPublishedTemperatures = new(StringComparer.Ordinal);
     CancellationTokenSource? _cts;
-    Task? _loop;
+    Thread? _loopThread;
+    IDisposable? _backgroundLease;
     bool _initialPublishDone;
     int _forcePublishSignal;
+    string _plcError = string.Empty;
 
-    public AcquisitionService(SettingsStore settingsStore, IPlcClient plc, IMqttPublisher mqtt)
+    public AcquisitionService(
+        SettingsStore settingsStore,
+        IPlcClient plc,
+        MqttOutboundService mqttOutbound,
+        IAcquisitionBackgroundGuard backgroundGuard)
     {
         _settingsStore = settingsStore;
         _plc = plc;
-        _mqtt = mqtt;
-        _mqtt.ConnectionChanged += (_, connected) => ConnectionChanged?.Invoke(this, EventArgs.Empty);
+        _mqttOutbound = mqttOutbound;
+        _backgroundGuard = backgroundGuard;
+        _mqttOutbound.StateChanged += (_, _) => ConnectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public bool IsRunning { get; private set; }
-    public bool PlcConnected => _plc.IsConnected || CurrentSettings.UseSimulator;
-    public bool MqttConnected => _mqtt.IsConnected;
-    public string LastError { get; private set; } = string.Empty;
-    public string LastPayload { get; private set; } = string.Empty;
+    public bool PlcConnected => !CurrentSettings.UseSimulator && _plc.IsConnected;
+    public bool MqttConnected => _mqttOutbound.IsConnected;
+    public int MqttPendingCount => _mqttOutbound.PendingCount;
+    public string LastError => string.IsNullOrWhiteSpace(_plcError) ? _mqttOutbound.LastError : _plcError;
+    public string LastPayload => _mqttOutbound.LastPayload;
     public string LastPublishNote { get; private set; } = string.Empty;
-    public DateTimeOffset? LastPublishTime { get; private set; }
+    public DateTimeOffset? LastPublishTime => _mqttOutbound.LastPublishTime;
+    public double LastCycleElapsedMs { get; private set; }
+    public double LastPlcElapsedMs { get; private set; }
+    public double LastPublishElapsedMs => _mqttOutbound.LastPublishElapsedMs;
+    public double LastWaitElapsedMs { get; private set; }
+    public int ActiveScanIntervalMs { get; private set; }
+    public DateTimeOffset? LastCycleCompletedAt { get; private set; }
+    public long CycleCount { get; private set; }
 
     AppSettings CurrentSettings => _settingsStore.Current;
 
@@ -50,12 +71,25 @@ public sealed class AcquisitionService : IDisposable
                 return;
             }
 
+            if (CurrentSettings.UseSimulator && _plc.IsConnected)
+            {
+                await _plc.DisconnectAsync().ConfigureAwait(false);
+            }
+
             _cts = new CancellationTokenSource();
             IsRunning = true;
-            LastError = string.Empty;
+            _plcError = string.Empty;
             LastPublishNote = string.Empty;
             ResetPublishBaseline();
-            _loop = Task.Run(() => RunAsync(_cts.Token));
+            _mqttOutbound.Start();
+            _backgroundLease = _backgroundGuard.Begin();
+            _loopThread = new Thread(() => RunLoop(_cts.Token))
+            {
+                IsBackground = true,
+                Name = "AcquisitionLoop",
+                Priority = ThreadPriority.AboveNormal
+            };
+            _loopThread.Start();
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
         }
         finally
@@ -75,24 +109,23 @@ public sealed class AcquisitionService : IDisposable
                 await _cts.CancelAsync().ConfigureAwait(false);
             }
 
-            if (_loop is not null)
+            if (_loopThread is not null)
             {
-                try
+                if (_loopThread.IsAlive)
                 {
-                    await _loop.ConfigureAwait(false);
+                    _loopThread.Join(TimeSpan.FromSeconds(8));
                 }
-                catch (OperationCanceledException)
-                {
-                    // 正常停止
-                }
+
+                _loopThread = null;
             }
 
             _cts?.Dispose();
             _cts = null;
-            _loop = null;
+            _backgroundLease?.Dispose();
+            _backgroundLease = null;
             ResetPublishBaseline();
             await _plc.DisconnectAsync().ConfigureAwait(false);
-            await _mqtt.DisconnectAsync().ConfigureAwait(false);
+            await _mqttOutbound.StopAsync().ConfigureAwait(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
         }
         finally
@@ -101,53 +134,85 @@ public sealed class AcquisitionService : IDisposable
         }
     }
 
-    async Task RunAsync(CancellationToken cancellationToken)
+    void RunLoop(CancellationToken cancellationToken)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        var clock = ScanMonotonicClock.Create();
+
+        try
         {
-            var settings = CurrentSettings;
-            try
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var cycleStartMs = clock.ElapsedMs;
+                var intervalMs = Math.Clamp(CurrentSettings.ScanIntervalMs, 200, 60_000);
+                ActiveScanIntervalMs = intervalMs;
+                var targetNextMs = cycleStartMs + intervalMs;
+
+                RunCycleAsync(CurrentSettings, cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
+
+                LastCycleElapsedMs = clock.ElapsedMs - cycleStartMs;
+                LastCycleCompletedAt = DateTimeOffset.Now;
+                CycleCount++;
+                ConnectionChanged?.Invoke(this, EventArgs.Empty);
+
+                var waitStartMs = clock.ElapsedMs;
+                ScanIntervalDelay.WaitUntil(targetNextMs, clock, cancellationToken);
+                LastWaitElapsedMs = clock.ElapsedMs - waitStartMs;
+
+#if ANDROID
+                Log.Info(
+                    "HuaGuang.Acquisition",
+                    $"cycle={CycleCount} interval={intervalMs} work={LastCycleElapsedMs:0} wait={LastWaitElapsedMs:0} pending={MqttPendingCount} simulator={CurrentSettings.UseSimulator}");
+#endif
+
+                ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 正常停止
+        }
+    }
+
+    async Task RunCycleAsync(AppSettings settings, CancellationToken cancellationToken)
+    {
+        LastPlcElapsedMs = 0;
+
+        try
+        {
+            if (settings.UseSimulator)
+            {
+                if (_plc.IsConnected)
+                {
+                    await _plc.DisconnectAsync().ConfigureAwait(false);
+                }
+            }
+            else
             {
                 await EnsurePlcAsync(settings, cancellationToken).ConfigureAwait(false);
+            }
 
-                var enabledTags = settings.Tags.Where(t => t.Enabled).ToList();
-                var snapshots = new List<TagSnapshot>();
-                var values = new Dictionary<string, object?>();
-                var allGood = true;
+            var plcStarted = Stopwatch.GetTimestamp();
+            var enabledTags = settings.Tags.Where(t => t.Enabled).ToList();
+            var snapshots = new List<TagSnapshot>();
+            var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+            var allGood = true;
+            IReadOnlyDictionary<string, object?> plcValues = new Dictionary<string, object?>(StringComparer.Ordinal);
 
-                foreach (var tag in enabledTags)
+            var plcTags = enabledTags.Where(tag => !tag.IsManual).ToList();
+            if (plcTags.Count > 0 && !settings.UseSimulator)
+            {
+                try
                 {
-                    try
+                    plcValues = await _plc.ReadTagsAsync(plcTags, cancellationToken).ConfigureAwait(false);
+                    _plcError = string.Empty;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    allGood = false;
+                    _plcError = $"PLC: {ex.Message}";
+                    await _plc.DisconnectAsync().ConfigureAwait(false);
+                    foreach (var tag in plcTags)
                     {
-                        object value;
-                        if (tag.IsManual)
-                        {
-                            value = ValueFormatting.ResolveManualValue(tag);
-                        }
-                        else if (settings.UseSimulator)
-                        {
-                            value = Simulate(tag, settings.TemperaturePrecision);
-                        }
-                        else
-                        {
-                            value = await _plc.ReadAsync(tag, cancellationToken).ConfigureAwait(false);
-                        }
-
-                        value = ValueFormatting.ApplyTemperaturePrecision(tag, value, settings.TemperaturePrecision);
-                        snapshots.Add(new TagSnapshot
-                        {
-                            TagId = tag.Id,
-                            Name = tag.Name,
-                            Unit = tag.Unit,
-                            Value = value,
-                            Quality = "Good",
-                            Timestamp = DateTimeOffset.Now
-                        });
-                        values[tag.Name] = value;
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        allGood = false;
                         snapshots.Add(new TagSnapshot
                         {
                             TagId = tag.Id,
@@ -158,66 +223,122 @@ public sealed class AcquisitionService : IDisposable
                             Timestamp = DateTimeOffset.Now
                         });
                         values[tag.Name] = null;
-                        LastError = $"点位 {tag.Name}: {ex.Message}";
-                        await _plc.DisconnectAsync().ConfigureAwait(false);
                     }
+
+                    LastPlcElapsedMs = Stopwatch.GetElapsedTime(plcStarted).TotalMilliseconds;
+                    TagsUpdated?.Invoke(this, snapshots);
+                    ConnectionChanged?.Invoke(this, EventArgs.Empty);
+                    return;
                 }
+            }
 
-                TagsUpdated?.Invoke(this, snapshots);
-
+            foreach (var tag in enabledTags)
+            {
                 try
                 {
-                    await EnsureMqttAsync(settings, cancellationToken).ConfigureAwait(false);
-                    if (_mqtt.IsConnected && values.Count > 0)
+                    object value;
+                    if (tag.IsManual)
                     {
-                        if (ShouldPublish(settings, enabledTags, values))
-                        {
-                            var payload = MqttPayloadMapper.BuildPayload(settings, values, allGood);
-
-                            var topic = settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase);
-                            await _mqtt.PublishAsync(topic, payload, settings.Mqtt.Qos, cancellationToken).ConfigureAwait(false);
-                            LastPayload = TruncatePayload(payload);
-                            LastPublishTime = DateTimeOffset.Now;
-                            LastPublishNote = string.Empty;
-                            UpdatePublishedTemperatures(enabledTags, values);
-                            if (allGood)
-                            {
-                                LastError = string.Empty;
-                            }
-                        }
-                        else
-                        {
-                            LastPublishNote = BuildSkipNote(settings.TemperaturePublishThresholdC);
-                        }
+                        value = ValueFormatting.ResolveManualValue(tag);
                     }
+                    else if (settings.UseSimulator)
+                    {
+                        value = Simulate(tag, settings.TemperaturePrecision);
+                    }
+                    else if (!plcValues.TryGetValue(tag.Name, out var plcValue) || plcValue is null)
+                    {
+                        throw new InvalidOperationException($"未读取到点位 {tag.Name}。");
+                    }
+                    else
+                    {
+                        value = plcValue;
+                    }
+
+                    value = ValueFormatting.ApplyTemperaturePrecision(tag, value, settings.TemperaturePrecision);
+                    snapshots.Add(new TagSnapshot
+                    {
+                        TagId = tag.Id,
+                        Name = tag.Name,
+                        Unit = tag.Unit,
+                        Value = value,
+                        Quality = "Good",
+                        Timestamp = DateTimeOffset.Now
+                    });
+                    values[tag.Name] = value;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    LastError = $"MQTT: {ex.Message}";
+                    allGood = false;
+                    snapshots.Add(new TagSnapshot
+                    {
+                        TagId = tag.Id,
+                        Name = tag.Name,
+                        Unit = tag.Unit,
+                        Quality = "Bad",
+                        Error = ex.Message,
+                        Timestamp = DateTimeOffset.Now
+                    });
+                    values[tag.Name] = null;
+                    _plcError = $"点位 {tag.Name}: {ex.Message}";
                 }
-
-                ConnectionChanged?.Invoke(this, EventArgs.Empty);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                LastError = ex.Message;
-                ConnectionChanged?.Invoke(this, EventArgs.Empty);
             }
 
-            try
+            LastPlcElapsedMs = Stopwatch.GetElapsedTime(plcStarted).TotalMilliseconds;
+            TagsUpdated?.Invoke(this, snapshots);
+
+            if (values.Count > 0)
             {
-                var delay = Math.Clamp(settings.ScanIntervalMs, 200, 60_000);
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                if (ShouldPublish(settings, enabledTags, values))
+                {
+                    var payload = MqttPayloadMapper.BuildPayload(settings, values, allGood);
+                    var topic = settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase);
+                    var tagsForPublish = enabledTags;
+                    var valuesForPublish = values;
+                    _mqttOutbound.Enqueue(new MqttOutboundItem
+                    {
+                        Topic = topic,
+                        Payload = payload,
+                        Qos = settings.Mqtt.Qos,
+                        OnPublished = () => OnMqttPublished(tagsForPublish, valuesForPublish, allGood)
+                    });
+                    LastPublishNote = MqttPendingCount > 0
+                        ? $"待发送 {MqttPendingCount} 条"
+                        : string.Empty;
+                }
+                else
+                {
+                    LastPublishNote = BuildSkipNote(settings.TemperaturePublishThresholdC);
+                }
             }
-            catch (OperationCanceledException)
+
+            ConnectionChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _plcError = ex.Message;
+            ConnectionChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    void OnMqttPublished(IReadOnlyList<PlcTag> enabledTags, IReadOnlyDictionary<string, object?> values, bool allGood)
+    {
+        lock (_publishStateGate)
+        {
+            UpdatePublishedTemperatures(enabledTags, values);
+            if (allGood)
             {
-                break;
+                _plcError = string.Empty;
             }
         }
+
+        LastPublishNote = MqttPendingCount > 0
+            ? $"待发送 {MqttPendingCount} 条"
+            : string.Empty;
+        ConnectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     async Task EnsurePlcAsync(AppSettings settings, CancellationToken cancellationToken)
@@ -235,20 +356,13 @@ public sealed class AcquisitionService : IDisposable
         await _plc.ConnectAsync(settings.Plc, cancellationToken).ConfigureAwait(false);
     }
 
-    async Task EnsureMqttAsync(AppSettings settings, CancellationToken cancellationToken)
-    {
-        if (_mqtt.IsConnected)
-        {
-            return;
-        }
-
-        await _mqtt.ConnectAsync(settings.Mqtt, cancellationToken).ConfigureAwait(false);
-    }
-
     void ResetPublishBaseline()
     {
-        _initialPublishDone = false;
-        _lastPublishedTemperatures.Clear();
+        lock (_publishStateGate)
+        {
+            _initialPublishDone = false;
+            _lastPublishedTemperatures.Clear();
+        }
     }
 
     bool ShouldPublish(AppSettings settings, IReadOnlyList<PlcTag> enabledTags, IReadOnlyDictionary<string, object?> values)
@@ -264,26 +378,36 @@ public sealed class AcquisitionService : IDisposable
             return true;
         }
 
-        if (!_initialPublishDone)
+        lock (_publishStateGate)
         {
-            return true;
-        }
-
-        foreach (var tag in enabledTags.Where(t => t.IsTemperature && !t.IsManual))
-        {
-            if (!values.TryGetValue(tag.Name, out var value) || !ValueFormatting.TryAsDouble(value, out var current))
-            {
-                continue;
-            }
-
-            if (!_lastPublishedTemperatures.TryGetValue(tag.Id, out var previous))
+            if (!_initialPublishDone)
             {
                 return true;
             }
 
-            if (Math.Abs(current - previous) >= threshold)
+            var intervalMs = Math.Clamp(settings.ScanIntervalMs, 200, 60_000);
+            if (LastPublishTime.HasValue &&
+                (DateTimeOffset.Now - LastPublishTime.Value).TotalMilliseconds >= intervalMs)
             {
                 return true;
+            }
+
+            foreach (var tag in enabledTags.Where(t => t.IsTemperature && !t.IsManual))
+            {
+                if (!values.TryGetValue(tag.Name, out var value) || !ValueFormatting.TryAsDouble(value, out var current))
+                {
+                    continue;
+                }
+
+                if (!_lastPublishedTemperatures.TryGetValue(tag.Id, out var previous))
+                {
+                    return true;
+                }
+
+                if (Math.Abs(current - previous) >= threshold)
+                {
+                    return true;
+                }
             }
         }
 
@@ -304,9 +428,6 @@ public sealed class AcquisitionService : IDisposable
 
     static string BuildSkipNote(double threshold) =>
         $"未发布：温度变化未达 {threshold:G}℃ 阈值";
-
-    static bool TryAsDouble(object? value, out double number) =>
-        ValueFormatting.TryAsDouble(value, out number);
 
     static object Simulate(PlcTag tag, int temperaturePrecision)
     {
@@ -334,15 +455,11 @@ public sealed class AcquisitionService : IDisposable
         };
     }
 
-    static string TruncatePayload(string payload) =>
-        payload.Length <= 4096
-            ? payload
-            : payload[..4096] + "…";
-
     public void Dispose()
     {
         _cts?.Cancel();
         _cts?.Dispose();
+        _backgroundLease?.Dispose();
         _gate.Dispose();
     }
 }
