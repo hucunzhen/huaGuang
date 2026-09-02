@@ -1,4 +1,5 @@
-# 生成 config/lines 下的产线 Excel（提交到仓库，随安装包分发）
+# 从 LineCatalog 整本重新生成 config/lines（会覆盖 Excel 内全部配置，慎用）。
+# 若只需改「运行状态」和「精度」，请用 scripts\patch-line-excel.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $outputDir = Join-Path $root "config\lines"

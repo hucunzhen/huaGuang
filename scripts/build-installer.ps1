@@ -32,6 +32,11 @@ if (-not (Test-Path $exe)) {
     throw "Publish output not found: $exe`nRun publish-windows.ps1 first or omit -SkipPublish."
 }
 
+$serviceExe = Join-Path $publishDir "service\HuaGuang.Monitor.Service.exe"
+if (-not (Test-Path $serviceExe)) {
+    throw "Service publish output not found: $serviceExe`nRun publish-windows.ps1 first or omit -SkipPublish."
+}
+
 $iscc = Get-IsccPath
 if (-not $iscc) {
     Write-Host "Inno Setup not found. Installing via winget ..." -ForegroundColor Yellow

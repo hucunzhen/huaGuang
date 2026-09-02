@@ -37,6 +37,7 @@ public partial class HistoryViewModel : ObservableObject
 
     [ObservableProperty] ObservableCollection<HistoryTableRow> tableRows = [];
     [ObservableProperty] string headerLine = string.Empty;
+    [ObservableProperty] double tableContentMinWidth;
     [ObservableProperty] string selectedRange = "最近 24 小时";
     [ObservableProperty] string selectedDevice = "全部设备";
     [ObservableProperty] string summaryText = "点「刷新」加载历史数据。";
@@ -103,6 +104,7 @@ public partial class HistoryViewModel : ObservableObject
                 TableRows = new ObservableCollection<HistoryTableRow>(table.Rows);
                 _fixedColumns = table.Columns.ToList();
                 HeaderLine = table.HeaderLine;
+                TableContentMinWidth = HistoryTableFormatting.EstimateContentWidth(table.HeaderLine);
                 ShowEmpty = TableRows.Count == 0;
                 UpdateSummary();
                 StatusMessage = string.Empty;
@@ -361,6 +363,7 @@ public partial class HistoryViewModel : ObservableObject
     {
         TableRows.Clear();
         HeaderLine = string.Empty;
+        TableContentMinWidth = 0;
         _fixedColumns = [];
         _currentOffset = 0;
         _totalCount = 0;

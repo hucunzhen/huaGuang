@@ -2,38 +2,42 @@ using System.Diagnostics;
 using HuaGuang.Monitor.Messaging;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Protocols;
-#if ANDROID
-using Android.Util;
-#endif
+using HuaGuang.Monitor.Services.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace HuaGuang.Monitor.Services;
 
-public sealed class AcquisitionService : IDisposable
+public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 {
     readonly SettingsStore _settingsStore;
     readonly IPlcClient _plc;
     readonly MqttOutboundService _mqttOutbound;
     readonly IAcquisitionBackgroundGuard _backgroundGuard;
+    readonly ILogger<AcquisitionService> _logger;
     readonly SemaphoreSlim _gate = new(1, 1);
     readonly object _publishStateGate = new();
     readonly Dictionary<string, double> _lastPublishedTemperatures = new(StringComparer.Ordinal);
+    readonly Dictionary<string, TagSnapshot> _lastSnapshots = new(StringComparer.Ordinal);
     CancellationTokenSource? _cts;
     Thread? _loopThread;
     IDisposable? _backgroundLease;
     bool _initialPublishDone;
     int _forcePublishSignal;
     string _plcError = string.Empty;
+    DateTimeOffset _plcConnectRetryAfter = DateTimeOffset.MinValue;
 
     public AcquisitionService(
         SettingsStore settingsStore,
         IPlcClient plc,
         MqttOutboundService mqttOutbound,
-        IAcquisitionBackgroundGuard backgroundGuard)
+        IAcquisitionBackgroundGuard backgroundGuard,
+        ILogger<AcquisitionService> logger)
     {
         _settingsStore = settingsStore;
         _plc = plc;
         _mqttOutbound = mqttOutbound;
         _backgroundGuard = backgroundGuard;
+        _logger = logger;
         _mqttOutbound.StateChanged += (_, _) => ConnectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -52,6 +56,7 @@ public sealed class AcquisitionService : IDisposable
     public int ActiveScanIntervalMs { get; private set; }
     public DateTimeOffset? LastCycleCompletedAt { get; private set; }
     public long CycleCount { get; private set; }
+    public IReadOnlyDictionary<string, TagSnapshot> LastSnapshots => _lastSnapshots;
 
     AppSettings CurrentSettings => _settingsStore.Current;
 
@@ -71,6 +76,15 @@ public sealed class AcquisitionService : IDisposable
                 return;
             }
 
+            var settings = CurrentSettings;
+            _logger.LogInformation(
+                "启动采集 line={LineName} simulator={Simulator} intervalMs={IntervalMs} plc={Plc} mqtt={Mqtt}",
+                settings.LineName,
+                settings.UseSimulator,
+                settings.ScanIntervalMs,
+                LogFormatting.DescribePlc(settings.Plc),
+                LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
+
             if (CurrentSettings.UseSimulator && _plc.IsConnected)
             {
                 await _plc.DisconnectAsync().ConfigureAwait(false);
@@ -79,6 +93,7 @@ public sealed class AcquisitionService : IDisposable
             _cts = new CancellationTokenSource();
             IsRunning = true;
             _plcError = string.Empty;
+            _plcConnectRetryAfter = DateTimeOffset.MinValue;
             LastPublishNote = string.Empty;
             ResetPublishBaseline();
             _mqttOutbound.Start();
@@ -91,6 +106,7 @@ public sealed class AcquisitionService : IDisposable
             };
             _loopThread.Start();
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            _logger.LogInformation("采集线程已启动");
         }
         finally
         {
@@ -109,11 +125,13 @@ public sealed class AcquisitionService : IDisposable
                 await _cts.CancelAsync().ConfigureAwait(false);
             }
 
+            await _plc.DisconnectAsync().ConfigureAwait(false);
+
             if (_loopThread is not null)
             {
                 if (_loopThread.IsAlive)
                 {
-                    _loopThread.Join(TimeSpan.FromSeconds(8));
+                    _loopThread.Join(TimeSpan.FromSeconds(3));
                 }
 
                 _loopThread = null;
@@ -124,9 +142,10 @@ public sealed class AcquisitionService : IDisposable
             _backgroundLease?.Dispose();
             _backgroundLease = null;
             ResetPublishBaseline();
-            await _plc.DisconnectAsync().ConfigureAwait(false);
+            _plcConnectRetryAfter = DateTimeOffset.MinValue;
             await _mqttOutbound.StopAsync().ConfigureAwait(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            _logger.LogInformation("采集已停止 cycleCount={CycleCount}", CycleCount);
         }
         finally
         {
@@ -158,11 +177,16 @@ public sealed class AcquisitionService : IDisposable
                 ScanIntervalDelay.WaitUntil(targetNextMs, clock, cancellationToken);
                 LastWaitElapsedMs = clock.ElapsedMs - waitStartMs;
 
-#if ANDROID
-                Log.Info(
-                    "HuaGuang.Acquisition",
-                    $"cycle={CycleCount} interval={intervalMs} work={LastCycleElapsedMs:0} wait={LastWaitElapsedMs:0} pending={MqttPendingCount} simulator={CurrentSettings.UseSimulator}");
-#endif
+                _logger.LogDebug(
+                    "采集周期 cycle={Cycle} intervalMs={IntervalMs} workMs={WorkMs:0} waitMs={WaitMs:0} pendingMqtt={Pending} plcConnected={PlcConnected} mqttConnected={MqttConnected} simulator={Simulator}",
+                    CycleCount,
+                    intervalMs,
+                    LastCycleElapsedMs,
+                    LastWaitElapsedMs,
+                    MqttPendingCount,
+                    PlcConnected,
+                    MqttConnected,
+                    CurrentSettings.UseSimulator);
 
                 ConnectionChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -179,6 +203,9 @@ public sealed class AcquisitionService : IDisposable
 
         try
         {
+            var enabledTags = settings.Tags.Where(t => t.Enabled).ToList();
+            var plcTags = enabledTags.Where(tag => !tag.IsManual).ToList();
+
             if (settings.UseSimulator)
             {
                 if (_plc.IsConnected)
@@ -186,19 +213,21 @@ public sealed class AcquisitionService : IDisposable
                     await _plc.DisconnectAsync().ConfigureAwait(false);
                 }
             }
-            else
+            else if (!await TryEnsurePlcAsync(settings, cancellationToken).ConfigureAwait(false))
             {
-                await EnsurePlcAsync(settings, cancellationToken).ConfigureAwait(false);
+                if (plcTags.Count > 0)
+                {
+                    PublishPlcTagFailures(plcTags, _plcError);
+                    return;
+                }
             }
 
             var plcStarted = Stopwatch.GetTimestamp();
-            var enabledTags = settings.Tags.Where(t => t.Enabled).ToList();
             var snapshots = new List<TagSnapshot>();
             var values = new Dictionary<string, object?>(StringComparer.Ordinal);
             var allGood = true;
             IReadOnlyDictionary<string, object?> plcValues = new Dictionary<string, object?>(StringComparer.Ordinal);
 
-            var plcTags = enabledTags.Where(tag => !tag.IsManual).ToList();
             if (plcTags.Count > 0 && !settings.UseSimulator)
             {
                 try
@@ -210,24 +239,10 @@ public sealed class AcquisitionService : IDisposable
                 {
                     allGood = false;
                     _plcError = $"PLC: {ex.Message}";
+                    _logger.LogWarning(ex, "PLC 批量读取失败 tagCount={TagCount}", plcTags.Count);
                     await _plc.DisconnectAsync().ConfigureAwait(false);
-                    foreach (var tag in plcTags)
-                    {
-                        snapshots.Add(new TagSnapshot
-                        {
-                            TagId = tag.Id,
-                            Name = tag.Name,
-                            Unit = tag.Unit,
-                            Quality = "Bad",
-                            Error = ex.Message,
-                            Timestamp = DateTimeOffset.Now
-                        });
-                        values[tag.Name] = null;
-                    }
-
-                    LastPlcElapsedMs = Stopwatch.GetElapsedTime(plcStarted).TotalMilliseconds;
-                    TagsUpdated?.Invoke(this, snapshots);
-                    ConnectionChanged?.Invoke(this, EventArgs.Empty);
+                    _plcConnectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(5);
+                    PublishPlcTagFailures(plcTags, ex.Message, plcStarted);
                     return;
                 }
             }
@@ -284,6 +299,7 @@ public sealed class AcquisitionService : IDisposable
             }
 
             LastPlcElapsedMs = Stopwatch.GetElapsedTime(plcStarted).TotalMilliseconds;
+            RememberSnapshots(snapshots);
             TagsUpdated?.Invoke(this, snapshots);
 
             if (values.Count > 0)
@@ -301,6 +317,12 @@ public sealed class AcquisitionService : IDisposable
                         Qos = settings.Mqtt.Qos,
                         OnPublished = () => OnMqttPublished(tagsForPublish, valuesForPublish, allGood)
                     });
+                    _logger.LogDebug(
+                        "MQTT 入队 topic={Topic} bytes={Bytes} tagCount={TagCount} payload={Payload}",
+                        topic,
+                        payload.Length,
+                        values.Count,
+                        LogFormatting.Truncate(payload));
                     LastPublishNote = MqttPendingCount > 0
                         ? $"待发送 {MqttPendingCount} 条"
                         : string.Empty;
@@ -308,6 +330,7 @@ public sealed class AcquisitionService : IDisposable
                 else
                 {
                     LastPublishNote = BuildSkipNote(settings.TemperaturePublishThresholdC);
+                    _logger.LogDebug("MQTT 跳过发布 reason={Reason}", LastPublishNote);
                 }
             }
 
@@ -320,6 +343,7 @@ public sealed class AcquisitionService : IDisposable
         catch (Exception ex)
         {
             _plcError = ex.Message;
+            _logger.LogError(ex, "采集周期异常");
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -341,19 +365,65 @@ public sealed class AcquisitionService : IDisposable
         ConnectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    async Task EnsurePlcAsync(AppSettings settings, CancellationToken cancellationToken)
+    async Task<bool> TryEnsurePlcAsync(AppSettings settings, CancellationToken cancellationToken)
     {
         if (settings.UseSimulator || _plc.IsConnected)
         {
-            return;
+            return true;
         }
 
         if (!settings.Tags.Any(t => t.Enabled && !t.IsManual))
         {
-            return;
+            return true;
         }
 
-        await _plc.ConnectAsync(settings.Plc, cancellationToken).ConfigureAwait(false);
+        if (DateTimeOffset.UtcNow < _plcConnectRetryAfter)
+        {
+            return false;
+        }
+
+        try
+        {
+            await _plc.ConnectAsync(settings.Plc, cancellationToken).ConfigureAwait(false);
+            _plcConnectRetryAfter = DateTimeOffset.MinValue;
+            _plcError = string.Empty;
+            _logger.LogInformation("PLC 已连接 {Plc}", LogFormatting.DescribePlc(settings.Plc));
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _plcError = $"PLC: {ex.Message}";
+            _plcConnectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(5);
+            _logger.LogWarning(ex, "PLC 连接失败 {Plc}", LogFormatting.DescribePlc(settings.Plc));
+            await _plc.DisconnectAsync().ConfigureAwait(false);
+            return false;
+        }
+    }
+
+    void PublishPlcTagFailures(IReadOnlyList<PlcTag> plcTags, string error, long? plcStarted = null)
+    {
+        var snapshots = plcTags.Select(tag => new TagSnapshot
+        {
+            TagId = tag.Id,
+            Name = tag.Name,
+            Unit = tag.Unit,
+            Quality = "Bad",
+            Error = error,
+            Timestamp = DateTimeOffset.Now
+        }).ToList();
+
+        if (plcStarted.HasValue)
+        {
+            LastPlcElapsedMs = Stopwatch.GetElapsedTime(plcStarted.Value).TotalMilliseconds;
+        }
+
+        RememberSnapshots(snapshots);
+        TagsUpdated?.Invoke(this, snapshots);
+        ConnectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     void ResetPublishBaseline()
@@ -362,6 +432,16 @@ public sealed class AcquisitionService : IDisposable
         {
             _initialPublishDone = false;
             _lastPublishedTemperatures.Clear();
+        }
+
+        _lastSnapshots.Clear();
+    }
+
+    void RememberSnapshots(IReadOnlyList<TagSnapshot> snapshots)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            _lastSnapshots[snapshot.TagId] = snapshot;
         }
     }
 
@@ -438,6 +518,11 @@ public sealed class AcquisitionService : IDisposable
 
         var wave = DateTime.UtcNow.TimeOfDay.TotalSeconds;
         var phase = tag.Address * 0.35;
+        if (RunStatusFormatting.IsRunStatusTag(tag))
+        {
+            return (int)((int)wave / 5) % 3;
+        }
+
         if (tag.DataType == TagDataType.Bool)
         {
             return ((int)wave / 4) % 2 == 0;

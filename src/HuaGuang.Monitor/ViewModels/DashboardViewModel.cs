@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
+using Microsoft.Extensions.Logging;
 
 namespace HuaGuang.Monitor.ViewModels;
 
@@ -10,22 +11,25 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 {
     public const string AllRemoteDevicesKey = "__all__";
 
-    readonly AcquisitionService _acquisition;
-    readonly SubscriptionService _subscription;
+    readonly IMonitorAcquisition _acquisition;
+    readonly IMonitorSubscription _subscription;
     readonly SettingsStore _settings;
+    readonly ILogger<DashboardViewModel> _logger;
     static bool _autoStartAttempted;
     List<string> _cachedDeviceKeys = [];
     readonly Dictionary<string, TagRowViewModel> _rowLookup = new(StringComparer.Ordinal);
     readonly Dictionary<string, Dictionary<string, TagRowViewModel>> _multiRowLookup = new(StringComparer.Ordinal);
 
     public DashboardViewModel(
-        AcquisitionService acquisition,
-        SubscriptionService subscription,
-        SettingsStore settings)
+        IMonitorAcquisition acquisition,
+        IMonitorSubscription subscription,
+        SettingsStore settings,
+        ILogger<DashboardViewModel> logger)
     {
         _acquisition = acquisition;
         _subscription = subscription;
         _settings = settings;
+        _logger = logger;
         _acquisition.TagsUpdated += OnAcquisitionTagsUpdated;
         _acquisition.ConnectionChanged += OnServiceConnectionChanged;
         _subscription.DevicesUpdated += OnSubscriptionDevicesUpdated;
@@ -45,12 +49,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty] bool plcConnected;
     [ObservableProperty] bool mqttConnected;
     [ObservableProperty] string lastError = string.Empty;
-    [ObservableProperty] string lastPayload = "尚未收到数据";
     [ObservableProperty] string toggleText = "启动采集";
     [ObservableProperty] string deviceId = "LINE-01";
     [ObservableProperty] string topicPreview = string.Empty;
     [ObservableProperty] string modeText = "模拟模式";
-    [ObservableProperty] string publishNote = string.Empty;
     [ObservableProperty] bool isSubscribeMode;
     [ObservableProperty] bool isAcquisitionMode = true;
     [ObservableProperty] bool showRemoteDevicePicker;
@@ -59,10 +61,14 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty] string newSubscribeTopic = string.Empty;
     [ObservableProperty] string emptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
     [ObservableProperty] bool showEmptyTagsHint = true;
-    [ObservableProperty] string productSkuDraft = string.Empty;
-    [ObservableProperty] bool showProductSkuInput;
+    [ObservableProperty] string scannerInputDraft = string.Empty;
+    [ObservableProperty] bool showScannerInput;
+    [ObservableProperty] string scannerInputTitle = string.Empty;
 
-    public Action? RequestProductSkuFocus { get; set; }
+    PlcTag? _activeScannerTag;
+
+    public Action? RequestScannerFocus { get; set; }
+    public Action? RequestScannerInputMethodCycle { get; set; }
 
     public bool ShowMultiDeviceDashboard => IsSubscribeMode && IsAllDevicesSelected;
     public bool ShowSingleDeviceDashboard => !ShowMultiDeviceDashboard;
@@ -73,16 +79,44 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
     public void Reload()
     {
+        CloseScannerInputIfTagMissing();
         RebuildTopicFilters();
         RefreshStatus();
         RebuildRows();
+        ApplyLiveAcquisitionData();
+    }
+
+    void CloseScannerInputIfTagMissing()
+    {
+        if (_activeScannerTag is null)
+        {
+            return;
+        }
+
+        if (_settings.Current.Tags.Any(tag => tag.Id == _activeScannerTag.Id))
+        {
+            return;
+        }
+
+        ShowScannerInput = false;
+        _activeScannerTag = null;
+        ScannerInputTitle = string.Empty;
+        ScannerInputDraft = string.Empty;
+        LastError = string.Empty;
+    }
+
+    /// <summary>切换回监控页时刷新状态并恢复当前值，不重建点位结构。</summary>
+    public void RefreshOnAppear()
+    {
+        RefreshStatus();
+        ApplyLiveAcquisitionData();
     }
 
     public async Task TryAutoStartAsync()
     {
         RefreshStatus();
 
-        if (_autoStartAttempted || !_settings.Current.AutoStartAcquisition)
+        if (_autoStartAttempted || !_settings.Current.AutoStartAcquisition || MauiProgram.UsesWindowsBackgroundService)
         {
             return;
         }
@@ -109,7 +143,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            LastError = ex.Message;
+            _logger.LogWarning(ex, "自动启动失败");
         }
 
         RefreshStatus();
@@ -146,30 +180,25 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            LastError = ex.Message;
+            _logger.LogWarning(ex, "启动/停止失败");
         }
 
         RefreshStatus();
     }
 
     [RelayCommand]
-    async Task SubmitProductSkuAsync()
+    async Task SubmitScannerInputAsync()
     {
-        if (IsSubscribeMode)
+        if (IsSubscribeMode || _activeScannerTag is null)
         {
             return;
         }
 
-        var tag = FindProductSkuTag();
-        if (tag is null)
-        {
-            return;
-        }
-
-        var trimmed = NormalizeScannerInput(ProductSkuDraft);
+        var tag = _activeScannerTag;
+        var trimmed = NormalizeScannerInput(ScannerInputDraft);
         if (string.IsNullOrWhiteSpace(trimmed))
         {
-            LastError = "产品货号不能为空。";
+            LastError = $"「{tag.Name}」不能为空。";
             return;
         }
 
@@ -177,29 +206,39 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         var saved = await SaveManualSettingAsync(tag, trimmed, row).ConfigureAwait(true);
         if (saved)
         {
-            ProductSkuDraft = trimmed;
-            RequestProductSkuFocus?.Invoke();
+            ScannerInputDraft = trimmed;
+            RequestScannerInputMethodCycle?.Invoke();
+            RequestScannerFocus?.Invoke();
         }
     }
 
     [RelayCommand]
-    void CancelProductSkuInput()
+    void CancelScannerInput()
     {
-        ShowProductSkuInput = false;
-        ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
+        ShowScannerInput = false;
+        if (_activeScannerTag is not null)
+        {
+            ScannerInputDraft = _activeScannerTag.ManualValue ?? string.Empty;
+        }
+
+        _activeScannerTag = null;
+        ScannerInputTitle = string.Empty;
         LastError = string.Empty;
+        RequestScannerInputMethodCycle?.Invoke();
     }
 
-    void OpenProductSkuInput()
+    void OpenScannerInput(PlcTag tag)
     {
-        if (IsSubscribeMode || FindProductSkuTag() is null)
+        if (IsSubscribeMode || !TagScannerHelper.SupportsScannerInput(tag))
         {
             return;
         }
 
-        ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
-        ShowProductSkuInput = true;
-        RequestProductSkuFocus?.Invoke();
+        _activeScannerTag = tag;
+        ScannerInputDraft = tag.ManualValue ?? string.Empty;
+        ScannerInputTitle = $"{tag.Name}（支持 USB 扫码枪，扫后自动回车）";
+        ShowScannerInput = true;
+        RequestScannerFocus?.Invoke();
     }
 
     [RelayCommand]
@@ -217,9 +256,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (string.Equals(tag.Name, ProductSkuConstants.TagName, StringComparison.Ordinal))
+        if (TagScannerHelper.SupportsScannerInput(tag))
         {
-            OpenProductSkuInput();
+            OpenScannerInput(tag);
             return;
         }
 
@@ -266,7 +305,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
         try
         {
-            LineConfigPaths.SaveCurrentLine(settings);
             await _settings.SaveAsync(settings).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -303,17 +341,11 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     static string NormalizeScannerInput(string input) =>
         input.Trim().TrimEnd('\r', '\n', '\t');
 
-    PlcTag? FindProductSkuTag() =>
-        _settings.Current.Tags.FirstOrDefault(tag =>
-            tag.Enabled &&
-            tag.IsManual &&
-            string.Equals(tag.Name, ProductSkuConstants.TagName, StringComparison.Ordinal));
-
-    void SyncProductSkuDraft()
+    void SyncScannerDraft()
     {
-        if (!ShowProductSkuInput)
+        if (!ShowScannerInput)
         {
-            ProductSkuDraft = FindProductSkuTag()?.ManualValue ?? string.Empty;
+            ScannerInputDraft = _activeScannerTag?.ManualValue ?? string.Empty;
         }
     }
 
@@ -353,7 +385,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             }
             catch (Exception ex)
             {
-                LastError = ex.Message;
+                _logger.LogWarning(ex, "刷新订阅主题失败");
             }
         }
 
@@ -373,18 +405,21 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             _cachedDeviceKeys = [];
             RefreshRemoteDevices();
             RebuildRemoteView();
-            PublishNote = BuildRemoteStatusNote();
         });
 
     partial void OnIsSubscribeModeChanged(bool value)
     {
         NotifyRemoteLayoutChanged();
-        ShowProductSkuInput = false;
+        ShowScannerInput = false;
+        _activeScannerTag = null;
+        ScannerInputTitle = string.Empty;
     }
 
     partial void OnIsAcquisitionModeChanged(bool value)
     {
-        ShowProductSkuInput = false;
+        ShowScannerInput = false;
+        _activeScannerTag = null;
+        ScannerInputTitle = string.Empty;
     }
 
     void NotifyRemoteLayoutChanged()
@@ -405,19 +440,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 }
             }
 
-            LastPayload = string.IsNullOrWhiteSpace(_acquisition.LastPayload)
-                ? "尚未发布"
-                : _acquisition.LastPayload;
-            PublishNote = _acquisition.LastPublishNote;
-            if (!string.IsNullOrWhiteSpace(_acquisition.LastError))
-            {
-                LastError = _acquisition.LastError;
-            }
-            else if (snapshots.All(s => s.Quality == "Good"))
-            {
-                LastError = string.Empty;
-            }
-
             RefreshStatus();
         });
     }
@@ -435,12 +457,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 UpdateRemoteView();
             }
 
-            LastPayload = string.IsNullOrWhiteSpace(_subscription.LastPayload)
-                ? LastPayload
-                : _subscription.LastPayload;
-            PublishNote = BuildRemoteStatusNote();
-            LastError = _subscription.LastError;
-            ModeText = $"订阅模式 · 在线 {GetFilteredDevices().Count()} 台";
+            ModeText = BuildModeText();
         });
 
     void OnServiceConnectionChanged(object? sender, EventArgs e) =>
@@ -490,7 +507,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     void RebuildGroupedRows(IReadOnlyList<TagRowViewModel> rows)
     {
         _rowLookup.Clear();
-        TagGroups.Clear();
+        GroupedCollectionHelper.ClearDashboardGroups(TagGroups);
         SwitchStatusTags.Clear();
 
         foreach (var row in rows.Where(item => item.Category == TagDisplayCategory.Switch))
@@ -516,7 +533,50 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
         ShowEmptyTagsHint = rows.Count == 0;
         NotifySwitchStatusChanged();
-        SyncProductSkuDraft();
+        SyncScannerDraft();
+        ApplyLiveAcquisitionData();
+    }
+
+    void ApplyLiveAcquisitionData()
+    {
+        if (IsSubscribeMode)
+        {
+            return;
+        }
+
+        var settings = _settings.Current;
+        foreach (var snapshot in _acquisition.LastSnapshots.Values)
+        {
+            if (_rowLookup.TryGetValue(snapshot.TagId, out var row))
+            {
+                row.Apply(snapshot);
+            }
+        }
+
+        foreach (var tag in settings.Tags.Where(tag => tag.Enabled && tag.IsManual))
+        {
+            if (_acquisition.LastSnapshots.ContainsKey(tag.Id) ||
+                !_rowLookup.TryGetValue(tag.Id, out var row))
+            {
+                continue;
+            }
+
+            try
+            {
+                row.Apply(new TagSnapshot
+                {
+                    TagId = tag.Id,
+                    Name = tag.Name,
+                    Unit = tag.Unit,
+                    Value = ValueFormatting.ResolveManualValue(tag),
+                    Quality = "Good",
+                    Timestamp = DateTimeOffset.Now
+                });
+            }
+            catch
+            {
+            }
+        }
     }
 
     int TotalTagCount => TagGroups.Sum(group => group.Tags.Count) + SwitchStatusTags.Count;
@@ -524,11 +584,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     void ClearGroupedRows()
     {
         _rowLookup.Clear();
-        TagGroups.Clear();
+        GroupedCollectionHelper.ClearDashboardGroups(TagGroups);
         SwitchStatusTags.Clear();
         ShowEmptyTagsHint = true;
         NotifySwitchStatusChanged();
-        SyncProductSkuDraft();
+        CloseScannerInputIfTagMissing();
+        SyncScannerDraft();
     }
 
     void NotifySwitchStatusChanged() =>
@@ -784,8 +845,14 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         {
             bool => TagDataType.Bool,
             string => TagDataType.String,
+            int or short or long or byte => RunStatusFormatting.IsRunStatusTag(new PlcTag { Name = name })
+                ? TagDataType.Int16
+                : TagDataType.Float32,
             _ => TagDataType.Float32
-        }
+        },
+        DisplayCategory = string.Equals(name, RunStatusFormatting.TagName, StringComparison.Ordinal)
+            ? TagDisplayCategory.Switch
+            : null
     };
 
     void ApplyRemoteValuesToRows(
@@ -863,36 +930,18 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         UpdateDeviceHeader();
     }
 
-    string BuildRemoteStatusNote()
+    string BuildModeText()
     {
-        if (!IsSubscribeMode || !_subscription.IsRunning)
+        var settings = _settings.Current;
+        if (settings.OperationMode == AppOperationMode.Subscribe)
         {
-            return string.Empty;
+            var state = _subscription.IsRunning ? "运行中" : "已停止";
+            return $"订阅模式 · {state} · {GetFilteredDevices().Count()} 台";
         }
 
-        var filteredCount = GetFilteredDevices().Count();
-        if (filteredCount == 0)
-        {
-            return SelectedTopicFilter == SubscribeTopicHelper.AllTopicsLabel
-                ? "已连接 Broker，等待设备发布遥测…（通配主题如 monitor/+/telemetry 可同时接收多台设备）"
-                : $"主题「{SelectedTopicFilter}」暂无设备数据。";
-        }
-
-        if (IsAllDevicesSelected)
-        {
-            return $"当前主题 {SelectedTopicFilter} · 同时监控 {filteredCount} 台设备";
-        }
-
-        if (SelectedRemoteDeviceItem is not null &&
-            SelectedRemoteDeviceItem.Key != AllRemoteDevicesKey &&
-            _subscription.Devices.TryGetValue(SelectedRemoteDeviceItem.Key, out var device))
-        {
-            var host = string.IsNullOrWhiteSpace(device.PlcHost) ? "—" : device.PlcHost;
-            var mode = device.Simulator ? "模拟" : "PLC";
-            return $"当前主题 {SelectedTopicFilter} · 设备 {filteredCount} 台 · {device.DeviceId} · {mode} · PLC {host} · 更新 {device.ReceivedAt.ToLocalTime():HH:mm:ss}";
-        }
-
-        return $"当前主题 {SelectedTopicFilter} · 设备 {filteredCount} 台";
+        var mode = settings.UseSimulator ? "模拟" : "PLC";
+        var runState = _acquisition.IsRunning ? "运行中" : "已停止";
+        return $"采集模式 · {mode} · {runState}";
     }
 
     void RefreshStatus()
@@ -911,16 +960,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             TopicPreview = _subscription.IsRunning && _subscription.ActiveSubscribeTopics.Count > 0
                 ? $"已订阅：{string.Join("，", _subscription.ActiveSubscribeTopics)}"
                 : $"订阅主题：{string.Join("，", topics)}";
-            ModeText = $"订阅模式 · 在线 {GetFilteredDevices().Count()} 台";
+            ModeText = BuildModeText();
             EmptyTagsHint = _subscription.IsRunning
-                ? "等待遥测数据…使用 monitor/+/telemetry 等通配主题可同时订阅多台设备。"
-                : "请启动订阅，并确认 Broker 地址与主题配置正确。";
-            PublishNote = BuildRemoteStatusNote();
-            LastError = _subscription.LastError;
-            if (!string.IsNullOrWhiteSpace(_subscription.LastPayload))
-            {
-                LastPayload = _subscription.LastPayload;
-            }
+                ? "等待遥测数据…"
+                : "请启动订阅。";
 
             NotifyRemoteLayoutChanged();
             _cachedDeviceKeys = [];
@@ -938,42 +981,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         ToggleText = IsRunning ? "停止采集" : "启动采集";
         DeviceId = settings.DeviceId;
         TopicPreview = $"发布主题：{settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase)}";
-        ModeText = settings.UseSimulator ? "采集模式 · 模拟数据" : "采集模式 · PLC 实采";
-        if (_acquisition.IsRunning)
-        {
-            ModeText += $" · 周期 {_acquisition.ActiveScanIntervalMs / 1000.0:G}s";
-            if (settings.UseSimulator)
-            {
-                ModeText += $" · 读 {_acquisition.LastPlcElapsedMs / 1000.0:0.0}s";
-            }
-            else
-            {
-                ModeText += $" · PLC {_acquisition.LastPlcElapsedMs / 1000.0:0.0}s";
-            }
-
-            ModeText += $" · 等 {_acquisition.LastWaitElapsedMs / 1000.0:0.0}s";
-            if (_acquisition.MqttPendingCount > 0)
-            {
-                ModeText += $" · 待发送 {_acquisition.MqttPendingCount}";
-            }
-
-            if (_acquisition.LastCycleCompletedAt is { } completedAt)
-            {
-                ModeText += $" · 刷新 {completedAt.LocalDateTime:HH:mm:ss}";
-            }
-        }
+        ModeText = BuildModeText();
         EmptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
-        if (settings.TemperaturePublishThresholdC > 0)
-        {
-            ModeText += $" · 温度变化 ≥ {settings.TemperaturePublishThresholdC:G}℃ 才发布";
-        }
-
-        PublishNote = _acquisition.LastPublishNote;
-        LastError = _acquisition.LastError;
-        if (!string.IsNullOrWhiteSpace(_acquisition.LastPayload))
-        {
-            LastPayload = _acquisition.LastPayload;
-        }
 
         ShowRemoteDevicePicker = false;
     }

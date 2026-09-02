@@ -47,4 +47,14 @@ public static class HistoryTableFormatting
 
         return text.PadRight(width);
     }
+
+    /// <summary>Consolas 等宽字体下列表最小宽度（像素），供横向滚动容器使用。</summary>
+    public static double EstimateContentWidth(int tagColumnCount, double charWidth = 7.6)
+    {
+        var charCount = TimeWidth + 1 + DeviceWidth + 1 + tagColumnCount * (TagWidth + 1);
+        return Math.Max(320, charCount * charWidth);
+    }
+
+    public static double EstimateContentWidth(string headerLine, double charWidth = 7.6) =>
+        Math.Max(320, headerLine.Length * charWidth);
 }

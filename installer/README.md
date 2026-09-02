@@ -5,9 +5,12 @@
 1. 复制 **`IndustrialMonitor-{版本}-r{修订}-Setup.exe`**（如 `IndustrialMonitor-1.1.3-r3-Setup.exe`）到工控机（U 盘、网络共享均可）
 2. **双击**安装包，按向导「下一步」完成
 3. 建议勾选：
+   - **安装并启动后台采集服务**（默认已勾选；关闭界面后 PLC 采集与 MQTT 推送仍继续）
    - 创建桌面快捷方式
-   - 开机自动启动
+   - 登录 Windows 时自动打开监控界面（可选）
 4. 安装完成后打开「工业监控」，在「设置」里配置 PLC / MQTT
+
+后台服务名：`HuaGuangMonitor`（显示名：工业监控采集服务）。可在「服务」管理器或命令行 `sc query HuaGuangMonitor` 查看状态。
 
 无需命令行，无需预装 .NET。
 

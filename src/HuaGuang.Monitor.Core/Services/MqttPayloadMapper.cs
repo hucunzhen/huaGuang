@@ -25,7 +25,7 @@ public static class MqttPayloadMapper
         IEnumerable<PlcTag> tags,
         IReadOnlyDictionary<string, object?> valuesByTagName,
         MqttPayloadProfile profile,
-        int globalPrecision = 1)
+        int globalPrecision = AppSettings.DefaultTemperaturePrecision)
     {
         var result = new Dictionary<string, object?>(StringComparer.Ordinal);
         foreach (var tag in tags)
@@ -46,6 +46,11 @@ public static class MqttPayloadMapper
         if (value is null)
         {
             return null;
+        }
+
+        if (RunStatusFormatting.IsRunStatusTag(tag))
+        {
+            return RunStatusFormatting.TryGetCode(value) ?? 0;
         }
 
         if (tag.DataType == TagDataType.Bool || value is bool)

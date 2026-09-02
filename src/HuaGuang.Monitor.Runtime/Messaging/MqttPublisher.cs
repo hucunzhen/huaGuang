@@ -1,4 +1,7 @@
 using HuaGuang.Monitor.Models;
+using HuaGuang.Monitor.Services;
+using HuaGuang.Monitor.Services.Logging;
+using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Protocol;
 
@@ -7,13 +10,16 @@ namespace HuaGuang.Monitor.Messaging;
 public sealed class MqttPublisher : IMqttPublisher
 {
     readonly MqttClientFactory _factory = new();
+    readonly ILogger<MqttPublisher> _logger;
     IMqttClient? _client;
+
+    public MqttPublisher(ILogger<MqttPublisher> logger) => _logger = logger;
 
     public bool IsConnected => _client?.IsConnected == true;
 
     public event EventHandler<bool>? ConnectionChanged;
 
-    public async Task ConnectAsync(MqttSettings settings, CancellationToken cancellationToken)
+    public async Task ConnectAsync(MqttSettings settings, string? lineName, CancellationToken cancellationToken)
     {
         await DisconnectAsync().ConfigureAwait(false);
 
@@ -29,22 +35,30 @@ public sealed class MqttPublisher : IMqttPublisher
             return Task.CompletedTask;
         };
 
-        var options = MqttConnectionFactory.BuildOptions(settings, "pub");
+        var options = MqttConnectionFactory.BuildOptions(settings, lineName);
         try
         {
-            await WaitAsync(
-                ct => client.ConnectAsync(options, ct),
+            await MqttConnectionFactory.ConnectClientAsync(
+                client,
+                options,
+                settings,
                 MqttTimeouts.Connect,
-                cancellationToken,
-                $"MQTT 连接超时（{MqttTimeouts.Connect.TotalSeconds:G} 秒）：{settings.Host}:{settings.Port}").ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(
+                ex,
+                "MQTT 连接失败 {Mqtt}",
+                LogFormatting.DescribeMqtt(settings, lineName));
             client.Dispose();
             throw;
         }
 
         _client = client;
+        _logger.LogInformation(
+            "MQTT 客户端已连接 {Mqtt}",
+            LogFormatting.DescribeMqtt(settings, lineName));
     }
 
     public async Task DisconnectAsync()
@@ -70,6 +84,7 @@ public sealed class MqttPublisher : IMqttPublisher
             _client.Dispose();
             _client = null;
             ConnectionChanged?.Invoke(this, false);
+            _logger.LogInformation("MQTT 客户端已断开");
         }
     }
 
@@ -93,27 +108,16 @@ public sealed class MqttPublisher : IMqttPublisher
             .WithQualityOfServiceLevel(level)
             .Build();
 
-        await WaitAsync(
-            ct => _client.PublishAsync(message, ct),
-            MqttTimeouts.Publish,
-            cancellationToken,
-            $"MQTT 发布超时（{MqttTimeouts.Publish.TotalSeconds:G} 秒）").ConfigureAwait(false);
-    }
-
-    static async Task WaitAsync(
-        Func<CancellationToken, Task> operation,
-        TimeSpan timeout,
-        CancellationToken cancellationToken,
-        string timeoutMessage)
-    {
-        var work = operation(CancellationToken.None);
-        var completed = await Task.WhenAny(work, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
-        if (completed != work)
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(MqttTimeouts.Publish);
+        try
         {
-            throw new TimeoutException(timeoutMessage);
+            await _client.PublishAsync(message, timeoutCts.Token).ConfigureAwait(false);
         }
-
-        await work.ConfigureAwait(false);
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"MQTT 发布超时（{MqttTimeouts.Publish.TotalSeconds:G} 秒）");
+        }
     }
 
     public async ValueTask DisposeAsync() => await DisconnectAsync().ConfigureAwait(false);

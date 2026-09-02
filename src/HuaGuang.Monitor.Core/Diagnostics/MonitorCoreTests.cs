@@ -22,6 +22,8 @@ public static class MonitorCoreTests
         Run("产线点位数量", TestLineCatalog),
         Run("设置读写", TestSettingsRoundTrip),
         Run("Excel 配置读写", TestLineExcelRoundTrip),
+        Run("Excel 点表局部修补", TestPatchLineExcelRunStatusAndPrecision),
+        Run("Excel 维护保留点表", TestLineFileMaintenancePreservesCustomTags),
         Run("Excel 配置补全点位", TestLineExcelRevisionMerge),
         Run("MQTT 报文映射", TestMqttPayloadMapping),
         Run("properties 上报格式", TestPropertiesPayloadFormat),
@@ -163,7 +165,7 @@ public static class MonitorCoreTests
         LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["运行状态"] = true,
+            ["运行状态"] = 1,
             ["热溶胶盘温度（热熔胶机1）"] = 95.2,
             ["胶管温度（热熔胶机1）"] = 150.4
         };
@@ -186,10 +188,12 @@ public static class MonitorCoreTests
         AssertTrue(xianhe.Mqtt.Username == LineMqttDefaults.Username);
         AssertTrue(xianhe.Mqtt.Password == LineMqttDefaults.Password);
         AssertTrue(xianhe.Mqtt.Topic == LineMqttDefaults.XianhePublishTopic);
+        AssertTrue(xianhe.Mqtt.ClientId == LineMqttDefaults.XianheClientId);
 
         var huadi = new AppSettings();
         LineCatalog.Apply(huadi, LineCatalog.Huadi.Name);
         AssertTrue(huadi.Mqtt.Topic == LineMqttDefaults.HuadiPublishTopic);
+        AssertTrue(huadi.Mqtt.ClientId == LineMqttDefaults.HuadiClientId);
         AssertTrue(huadi.SubscribeTopics.Count == 2);
 
         var legacy = new AppSettings
@@ -202,6 +206,78 @@ public static class MonitorCoreTests
         AssertTrue(legacy.Mqtt.Host == LineMqttDefaults.Host);
         AssertTrue(legacy.Mqtt.Topic == LineMqttDefaults.HuadiPublishTopic);
         AssertTrue(legacy.SubscribeTopics[0] == LineMqttDefaults.XianhePublishTopic);
+
+        var hostOnly = new AppSettings
+        {
+            Mqtt = { Host = LineMqttDefaults.Host, Port = LineMqttDefaults.Port, Username = "", Password = "" }
+        };
+        LineMqttDefaults.MigrateLegacySettings(hostOnly);
+        AssertTrue(hostOnly.Mqtt.Username == LineMqttDefaults.Username);
+        AssertTrue(hostOnly.Mqtt.Password == LineMqttDefaults.Password);
+
+        var (username, password) = LineMqttDefaults.ResolveCredentials(hostOnly.Mqtt);
+        AssertTrue(username == LineMqttDefaults.Username);
+        AssertTrue(password == LineMqttDefaults.Password);
+
+        var legacyClient = new AppSettings
+        {
+            LineName = LineCatalog.Xianhe.Name,
+            DeviceId = LineCatalog.Xianhe.Name,
+            Mqtt = { ClientId = LineCatalog.Xianhe.Name }
+        };
+        LineMqttDefaults.MigrateLegacySettings(legacyClient);
+        AssertTrue(legacyClient.Mqtt.ClientId == LineMqttDefaults.XianheClientId);
+
+        var customClient = new AppSettings
+        {
+            LineName = LineCatalog.Huadi.Name,
+            Mqtt = { ClientId = "MY-DEVICE-01" }
+        };
+        LineMqttDefaults.MigrateLegacySettings(customClient);
+        AssertTrue(customClient.Mqtt.ClientId == "MY-DEVICE-01");
+        AssertTrue(LineMqttDefaults.ResolveClientId(customClient.Mqtt, customClient.LineName) == "MY-DEVICE-01");
+        AssertTrue(LineMqttDefaults.ResolveClientIdForLine(LineCatalog.Huadi.Name) == LineMqttDefaults.HuadiClientId);
+
+        var configPath = Path.Combine(Path.GetTempPath(), $"huaguang-config-{Guid.NewGuid():N}.xlsx");
+        var templatePath = Path.Combine(Path.GetTempPath(), $"huaguang-template-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            LineExcelConfigService.Export(LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name), templatePath);
+            File.Copy(templatePath, configPath);
+
+            var stale = new AppSettings { LineName = LineCatalog.Xianhe.Name, OperationMode = AppOperationMode.Subscribe };
+            var huadiTemplate = LineExcelConfigService.CreateSeedSettings(LineCatalog.Huadi.Name);
+            var huadiTemplatePath = Path.Combine(Path.GetTempPath(), $"huaguang-huadi-template-{Guid.NewGuid():N}.xlsx");
+            LineExcelConfigService.Export(huadiTemplate, huadiTemplatePath);
+
+            var loadedHuadi = LineExcelConfigService.SwitchLine(
+                LineCatalog.Huadi.Name,
+                configPath,
+                huadiTemplatePath,
+                stale);
+            AssertTrue(loadedHuadi.LineName == LineCatalog.Huadi.Name);
+            AssertTrue(loadedHuadi.Plc.Host == LineCatalog.Huadi.Host);
+            AssertTrue(loadedHuadi.Mqtt.ClientId == LineMqttDefaults.HuadiClientId);
+            AssertTrue(loadedHuadi.Tags.Count == huadiTemplate.Tags.Count);
+            AssertTrue(loadedHuadi.OperationMode == AppOperationMode.Subscribe);
+
+            if (File.Exists(huadiTemplatePath))
+            {
+                File.Delete(huadiTemplatePath);
+            }
+        }
+        finally
+        {
+            if (File.Exists(configPath))
+            {
+                File.Delete(configPath);
+            }
+
+            if (File.Exists(templatePath))
+            {
+                File.Delete(templatePath);
+            }
+        }
     }
 
     static void TestReferenceFieldMapping()
@@ -344,12 +420,107 @@ public static class MonitorCoreTests
             AssertTrue(loaded.MqttPayload.TagsPath == "data.tags");
             AssertTrue(loaded.Tags.Count == original.Tags.Count);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").MqttField == "speed");
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").DataType == TagDataType.Int16);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").DisplayCategory == TagDisplayCategory.Switch);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").DisplayCategory == TagDisplayCategory.Process);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "热溶胶盘温度（热熔胶机1）").DisplayCategory == TagDisplayCategory.Temperature);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
             AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
             AssertTrue(loaded.SubscribeTopics.Count == 2);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestPatchLineExcelRunStatusAndPrecision()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-patch-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var settings = new AppSettings();
+            LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
+            settings.Tags.First(tag => tag.Name == RunStatusFormatting.TagName).DataType = TagDataType.Bool;
+            settings.TemperaturePrecision = 1;
+            LineExcelConfigService.Export(settings, tempPath);
+
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                var configSheet = workbook.Worksheet(LineExcelConfigService.ConfigSheetName);
+                foreach (var row in configSheet.RowsUsed())
+                {
+                    if (row.Cell(1).GetString().Trim() == "精度")
+                    {
+                        row.Cell(1).Value = "温度精度";
+                        row.Cell(2).Value = "1";
+                        break;
+                    }
+                }
+
+                workbook.SaveAs(tempPath);
+            }
+
+            AssertTrue(LineExcelConfigService.PatchRunStatusAndPrecision(tempPath));
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            var runStatus = loaded.Tags.First(tag => tag.Name == RunStatusFormatting.TagName);
+            AssertTrue(runStatus.DataType == TagDataType.Int16);
+            AssertTrue(loaded.TemperaturePrecision == 1);
+
+            using var verifyWorkbook = new XLWorkbook(tempPath);
+            var verifyConfig = verifyWorkbook.Worksheet(LineExcelConfigService.ConfigSheetName);
+            AssertTrue(verifyConfig.RowsUsed().Any(row => row.Cell(1).GetString().Trim() == "精度"));
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestLineFileMaintenancePreservesCustomTags()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-maint-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var settings = LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name);
+            var workTag = settings.Tags.First(tag => tag.Name == "当前工作胶盘温度");
+            workTag.Source = TagSource.Plc;
+            workTag.ManualValue = string.Empty;
+            workTag.XinjeAddress = "D9999";
+            workTag.DataType = TagDataType.Float32;
+            LineExcelConfigService.Export(settings, tempPath);
+
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                var configSheet = workbook.Worksheet(LineExcelConfigService.ConfigSheetName);
+                foreach (var row in configSheet.RowsUsed())
+                {
+                    if (row.Cell(1).GetString().Trim() == "产线配置版本")
+                    {
+                        row.Cell(2).Value = (LineCatalog.Version - 1).ToString();
+                        break;
+                    }
+                }
+
+                workbook.SaveAs(tempPath);
+            }
+
+            LineExcelConfigService.ApplyLineFileMaintenance(tempPath);
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            var restored = loaded.Tags.First(tag => tag.Name == "当前工作胶盘温度");
+            AssertTrue(restored.Source == TagSource.Plc);
+            AssertTrue(restored.XinjeAddress == "D9999");
+            AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version);
         }
         finally
         {
@@ -389,8 +560,8 @@ public static class MonitorCoreTests
 
             var loaded = new AppSettings();
             LineExcelConfigService.Apply(loaded, tempPath);
-            AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
             AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version);
+            AssertFalse(loaded.Tags.Any(tag => tag.Name == "产品货号"));
         }
         finally
         {
@@ -403,7 +574,7 @@ public static class MonitorCoreTests
 
     static void TestTagDisplayCategory()
     {
-        var runStatus = new PlcTag { Name = "运行状态", DataType = TagDataType.Bool };
+        var runStatus = new PlcTag { Name = "运行状态", DataType = TagDataType.Int16 };
         var temperature = new PlcTag { Name = "复合温度", Unit = "℃", DataType = TagDataType.Float32 };
         var speed = new PlcTag { Name = "车速", DataType = TagDataType.Float32 };
         var manual = new PlcTag { Name = "胶辊型号", Source = TagSource.Manual, DataType = TagDataType.String };
@@ -445,7 +616,7 @@ public static class MonitorCoreTests
                     {
                         TagId = "run",
                         Name = "运行状态",
-                        Value = true,
+                        Value = 1,
                         Quality = "Good",
                         Timestamp = DateTimeOffset.Now
                     }
@@ -466,7 +637,7 @@ public static class MonitorCoreTests
             var detail = store.GetDetailAsync(sampleId, 1).GetAwaiter().GetResult();
             AssertTrue(detail is not null);
             AssertTrue(detail!.Tags.Count == 2);
-            AssertTrue(detail.Tags.Any(tag => tag.DisplayValue == "开"));
+            AssertTrue(detail.Tags.Any(tag => tag.DisplayValue == "运行中"));
 
             var table = store.QueryTableAsync(new HistoryQuery
             {
@@ -477,7 +648,7 @@ public static class MonitorCoreTests
             AssertTrue(table.Rows.Count == 1);
             AssertTrue(table.Columns.Count == 2);
             AssertTrue(table.Rows[0].Cells[0] == "45.2");
-            AssertTrue(table.Rows[0].Cells[1] == "开");
+            AssertTrue(table.Rows[0].Cells[1] == "运行中");
 
             var matchingCount = store.CountMatchingAsync(new HistoryQuery
             {
@@ -523,11 +694,10 @@ public static class MonitorCoreTests
     static void TestSettingsSurviveStartupLoad()
     {
         var root = Path.Combine(Path.GetTempPath(), $"huaguang-settings-{Guid.NewGuid():N}");
-        var jsonPath = Path.Combine(root, "settings.json");
-        var linePath = Path.Combine(root, "lines", $"{LineCatalog.LineNames[0]}.xlsx");
+        var configPath = Path.Combine(root, "lines", "产线配置.xlsx");
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(linePath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
 
             var saved = new AppSettings
             {
@@ -537,25 +707,21 @@ public static class MonitorCoreTests
                 EnableHistoryRecording = false,
                 HistoryRetentionDays = 30,
                 AddressCatalogVersion = LineCatalog.Version,
-                SettingsMigrationVersion = 1,
                 Plc = new PlcSettings { Host = "10.0.0.88" },
                 Mqtt = new MqttSettings { Host = "10.0.0.99", Port = 1888, Topic = "/custom/topic" },
                 Tags = [new PlcTag { Name = "测试点", Source = TagSource.Manual, ManualValue = "1" }]
             };
-            File.WriteAllText(jsonPath, JsonSerializer.Serialize(saved));
+            LineExcelConfigService.Export(saved, configPath);
 
-            var seeded = LineExcelConfigService.CreateSeedSettings(LineCatalog.LineNames[0]);
-            seeded.Plc.Host = "192.168.6.10";
-            seeded.Mqtt.Host = LineMqttDefaults.Host;
-            LineExcelConfigService.Export(seeded, linePath);
-
-            var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(jsonPath))!;
+            var loaded = LineExcelConfigService.LoadLineExcel(
+                saved.LineName,
+                configPath,
+                templateFilePath: configPath);
             AssertTrue(loaded.DeviceId == "USER-DEVICE-99");
             AssertTrue(loaded.Plc.Host == "10.0.0.88");
             AssertTrue(loaded.Mqtt.Host == "10.0.0.99");
             AssertTrue(loaded.AutoStartAcquisition == false);
             AssertTrue(loaded.HistoryRetentionDays == 30);
-            AssertFalse(loaded.Plc.Host == seeded.Plc.Host);
         }
         finally
         {

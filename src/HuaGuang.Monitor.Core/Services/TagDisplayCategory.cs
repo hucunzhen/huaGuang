@@ -9,6 +9,9 @@ public static class TagDisplayCategoryHelper
 
     public static TagDisplayCategory InferCategory(PlcTag tag, object? value = null)
     {
+        if (RunStatusFormatting.IsRunStatusTag(tag))
+            return TagDisplayCategory.Switch;
+
         if (tag.DataType == TagDataType.Bool || value is bool)
             return TagDisplayCategory.Switch;
 

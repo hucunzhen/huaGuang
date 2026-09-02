@@ -19,6 +19,10 @@
 #define MyAppExeName "HuaGuang.Monitor.exe"
 #define MyAppPackageId "com.industrial.monitor"
 #define MyAppId "{{A7C3E9F1-2B4D-4F8A-9E6C-1D5A0B3C7E2F}"
+#define ServiceName "HuaGuangMonitor"
+#define ServiceExeName "HuaGuang.Monitor.Service.exe"
+#define ServiceDisplayName "工业监控采集服务"
+#define ServiceDescription "工业监控 PLC 采集与 MQTT 推送后台服务"
 
 [Setup]
 AppId={#MyAppId}
@@ -45,8 +49,9 @@ SetupLogging=yes
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [Tasks]
+Name: "installservice"; Description: "安装并启动后台采集服务（推荐）"; GroupDescription: "附加选项:"; Flags: checkedonce
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项:"; Flags: checkedonce
-Name: "startup"; Description: "开机自动启动（Windows 登录后运行）"; GroupDescription: "附加选项:"; Flags: checkedonce
+Name: "startup"; Description: "登录 Windows 时自动打开监控界面（可选）"; GroupDescription: "附加选项:"; Flags: checkedonce
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -67,6 +72,52 @@ Type: filesandordirs; Name: "{app}"
 [Code]
 var
   DeleteUserData: Boolean;
+
+function ServiceExePath(): String;
+begin
+  Result := ExpandConstant('{app}\service\{#ServiceExeName}');
+end;
+
+procedure StopAndDeleteMonitorService();
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function InstallMonitorService(): Boolean;
+var
+  ResultCode: Integer;
+  BinPath, CreateArgs: String;
+begin
+  Result := False;
+  if not FileExists(ServiceExePath()) then
+  begin
+    MsgBox('未找到后台服务程序，跳过服务注册。', mbError, MB_OK);
+    Exit;
+  end;
+
+  StopAndDeleteMonitorService();
+
+  BinPath := ServiceExePath();
+  CreateArgs := 'create {#ServiceName} binPath= "' + BinPath + '" start= auto DisplayName= "{#ServiceDisplayName}"';
+  if not Exec(ExpandConstant('{sys}\sc.exe'), CreateArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('注册 Windows 服务失败。', mbError, MB_OK);
+    Exit;
+  end;
+
+  Exec(ExpandConstant('{sys}\sc.exe'), 'description {#ServiceName} "{#ServiceDescription}"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'start {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('installservice') then
+    InstallMonitorService();
+end;
 
 procedure DeletePackageUserDataUnder(const Root: String);
 var
@@ -111,6 +162,9 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then
+    StopAndDeleteMonitorService();
+
   if (CurUninstallStep = usPostUninstall) and DeleteUserData then
   begin
     DeletePackageUserDataUnder(ExpandConstant('{localappdata}'));

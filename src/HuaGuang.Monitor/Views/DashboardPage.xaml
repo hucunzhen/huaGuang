@@ -207,7 +207,7 @@
     </views:MonitorPageBase.Resources>
 
     <Grid x:Name="RootGrid"
-          RowDefinitions="Auto,*,Auto"
+          RowDefinitions="Auto,*"
           Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
           RowSpacing="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource RowSpacingConverter}}">
         <!-- 竖屏：标题 / 按钮 / 开关 分行 -->
@@ -372,6 +372,11 @@
                             <Button Grid.Column="1" Text="添加主题" Command="{Binding AddSubscribeTopicCommand}" MinimumWidthRequest="88"
                                     FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
                         </Grid>
+                        <Label Text="{Binding LastError}"
+                               TextColor="#FF6B6B"
+                               LineBreakMode="WordWrap"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                               IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
                     </VerticalStackLayout>
                     <VerticalStackLayout Spacing="4" IsVisible="{Binding ShowRemoteDevicePicker}">
                         <Label Text="远程设备（可选全部或单台）" TextColor="#8AA0B5"
@@ -384,12 +389,6 @@
                     <VerticalStackLayout Spacing="2">
                         <Label Text="{Binding TopicPreview, StringFormat='{0}'}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
                                FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
-                        <Label Text="{Binding PublishNote}" TextColor="#FFB347" LineBreakMode="WordWrap"
-                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
-                               IsVisible="{Binding PublishNote, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
-                        <Label Text="{Binding LastError}" TextColor="#FF6B6B" LineBreakMode="WordWrap"
-                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
-                               IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
                     </VerticalStackLayout>
                 </VerticalStackLayout>
             </ScrollView>
@@ -480,28 +479,15 @@
                            IsVisible="{Binding IsSubscribeMode, Converter={StaticResource InverseBoolConverter}}" />
                 </Grid>
 
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="*"
+                      ColumnSpacing="8">
                     <Label Text="{Binding TopicPreview, StringFormat='{0}'}"
                            TextColor="#8AA0B5"
                            LineBreakMode="TailTruncation"
                            MaxLines="1"
                            VerticalOptions="Center"
                            FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-                    <Label Grid.Column="1"
-                           Text="{Binding LastError}"
-                           TextColor="#FF6B6B"
-                           LineBreakMode="TailTruncation"
-                           MaxLines="1"
-                           VerticalOptions="Center"
-                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                           IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
                 </Grid>
-                <Label Text="{Binding PublishNote}"
-                       TextColor="#FFB347"
-                       LineBreakMode="TailTruncation"
-                       MaxLines="1"
-                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                       IsVisible="{Binding PublishNote, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
             </VerticalStackLayout>
 
             <Border Grid.Row="1"
@@ -509,40 +495,47 @@
                     StrokeThickness="1"
                     BackgroundColor="#152536"
                     Padding="10,8"
-                    IsVisible="{Binding ShowProductSkuInput}">
+                    IsVisible="{Binding ShowScannerInput}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="8" />
                 </Border.StrokeShape>
                 <VerticalStackLayout Spacing="6">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <Label Text="产品货号（支持 Mexxen 等 USB 扫码枪，扫后自动回车）"
+                        <Label Text="{Binding ScannerInputTitle}"
                                TextColor="#8AA0B5"
                                VerticalOptions="Center"
+                               LineBreakMode="WordWrap"
                                FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
                         <Button Grid.Column="1"
                                 Text="取消"
-                                Command="{Binding CancelProductSkuInputCommand}"
+                                Command="{Binding CancelScannerInputCommand}"
                                 Padding="10,4"
                                 BackgroundColor="Transparent"
                                 TextColor="#8AA0B5"
                                 FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
                     </Grid>
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <Entry x:Name="ProductSkuEntry"
-                               Text="{Binding ProductSkuDraft}"
+                        <Entry x:Name="ScannerInputEntry"
+                               Text="{Binding ScannerInputDraft}"
                                Placeholder="请扫码或输入，回车确认"
                                ReturnType="Done"
-                               ReturnCommand="{Binding SubmitProductSkuCommand}"
+                               ReturnCommand="{Binding SubmitScannerInputCommand}"
                                MaxLength="200"
                                FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
-                               Completed="OnProductSkuCompleted" />
+                               Focused="OnScannerInputEntryFocused"
+                               Completed="OnScannerInputCompleted" />
                         <Button Grid.Column="1"
                                 Text="确认"
-                                Command="{Binding SubmitProductSkuCommand}"
+                                Command="{Binding SubmitScannerInputCommand}"
                                 Padding="14,8"
                                 MinimumWidthRequest="72"
                                 FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
                     </Grid>
+                    <Label Text="{Binding LastError}"
+                           TextColor="#FF6B6B"
+                           LineBreakMode="WordWrap"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                           IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
                 </VerticalStackLayout>
             </Border>
 
@@ -599,33 +592,5 @@
                 </VerticalStackLayout>
             </ScrollView>
         </Grid>
-
-        <Border x:Name="PayloadFooter"
-                Grid.Row="2"
-                Stroke="#1F3A52"
-                StrokeThickness="1"
-                BackgroundColor="#101C28"
-                Padding="8,4">
-            <Border.IsVisible>
-                <MultiBinding Converter="{StaticResource AndBoolConverter}">
-                    <Binding Source="{x:Reference ThisPage}" Path="IsCompactLayout" Converter="{StaticResource InverseBoolConverter}" />
-                    <Binding Source="{x:Reference ThisPage}" Path="IsFullScreenMode" Converter="{StaticResource InverseBoolConverter}" />
-                </MultiBinding>
-            </Border.IsVisible>
-            <Border.StrokeShape>
-                <RoundRectangle CornerRadius="8" />
-            </Border.StrokeShape>
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
-                <Label Text="最近报文" TextColor="#8AA0B5" VerticalOptions="Center"
-                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-                <Label Grid.Column="1"
-                       Text="{Binding LastPayload}"
-                       TextColor="#C9D6E2"
-                       LineBreakMode="TailTruncation"
-                       MaxLines="1"
-                       VerticalOptions="Center"
-                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-            </Grid>
-        </Border>
     </Grid>
 </views:MonitorPageBase>

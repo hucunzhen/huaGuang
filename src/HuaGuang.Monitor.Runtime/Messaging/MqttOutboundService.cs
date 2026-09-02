@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
+using HuaGuang.Monitor.Services.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace HuaGuang.Monitor.Messaging;
 
@@ -13,6 +15,7 @@ public sealed class MqttOutboundService : IDisposable
 
     readonly SettingsStore _settingsStore;
     readonly IMqttPublisher _mqtt;
+    readonly ILogger<MqttOutboundService> _logger;
     readonly object _queueGate = new();
     readonly Queue<MqttOutboundItem> _queue = new();
     readonly AutoResetEvent _signal = new(false);
@@ -22,10 +25,14 @@ public sealed class MqttOutboundService : IDisposable
     DateTimeOffset _connectRetryAfter = DateTimeOffset.MinValue;
     bool _isRunning;
 
-    public MqttOutboundService(SettingsStore settingsStore, IMqttPublisher mqtt)
+    public MqttOutboundService(
+        SettingsStore settingsStore,
+        IMqttPublisher mqtt,
+        ILogger<MqttOutboundService> logger)
     {
         _settingsStore = settingsStore;
         _mqtt = mqtt;
+        _logger = logger;
         _mqtt.ConnectionChanged += (_, _) => StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -66,6 +73,7 @@ public sealed class MqttOutboundService : IDisposable
             Priority = ThreadPriority.Normal
         };
         _workerThread.Start();
+        _logger.LogInformation("MQTT 发送线程已启动");
     }
 
     public async Task StopAsync()
@@ -98,6 +106,7 @@ public sealed class MqttOutboundService : IDisposable
 
         await _mqtt.DisconnectAsync().ConfigureAwait(false);
         StateChanged?.Invoke(this, EventArgs.Empty);
+        _logger.LogInformation("MQTT 发送线程已停止");
     }
 
     public void Enqueue(MqttOutboundItem item)
@@ -142,6 +151,11 @@ public sealed class MqttOutboundService : IDisposable
                     LastError = string.Empty;
                     item.OnPublished?.Invoke();
                     StateChanged?.Invoke(this, EventArgs.Empty);
+                    _logger.LogDebug(
+                        "MQTT 发布成功 topic={Topic} elapsedMs={ElapsedMs:0} bytes={Bytes}",
+                        item.Topic,
+                        LastPublishElapsedMs,
+                        item.Payload.Length);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -152,6 +166,11 @@ public sealed class MqttOutboundService : IDisposable
                 {
                     LastError = $"MQTT: {ex.Message}";
                     _connectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(30);
+                    _logger.LogWarning(
+                        ex,
+                        "MQTT 发布失败 topic={Topic} pending={Pending}",
+                        item.Topic,
+                        PendingCount);
                     RequeueFront(item);
                     StateChanged?.Invoke(this, EventArgs.Empty);
                     _signal.WaitOne(1000);
@@ -208,12 +227,17 @@ public sealed class MqttOutboundService : IDisposable
 
         try
         {
-            _mqtt.ConnectAsync(settings.Mqtt, cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
+            _mqtt.ConnectAsync(settings.Mqtt, settings.LineName, cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
             _connectRetryAfter = DateTimeOffset.MinValue;
+            _logger.LogInformation(
+                "MQTT 已连接 line={LineName} {Mqtt}",
+                settings.LineName,
+                LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _connectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(30);
+            _logger.LogWarning(ex, "MQTT 连接失败 line={LineName}", settings.LineName);
             throw;
         }
     }

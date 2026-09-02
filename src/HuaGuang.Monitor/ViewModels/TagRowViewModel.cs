@@ -7,9 +7,9 @@ namespace HuaGuang.Monitor.ViewModels;
 public partial class TagRowViewModel : ObservableObject
 {
     readonly PlcTag _tag;
-    readonly int _globalPrecision = 1;
+    readonly int _globalPrecision = AppSettings.DefaultTemperaturePrecision;
 
-    public TagRowViewModel(PlcTag tag, int globalPrecision = 1, string? addressOverride = null)
+    public TagRowViewModel(PlcTag tag, int globalPrecision = AppSettings.DefaultTemperaturePrecision, string? addressOverride = null)
     {
         _tag = tag;
         _globalPrecision = globalPrecision;
@@ -30,10 +30,9 @@ public partial class TagRowViewModel : ObservableObject
 
     public bool IsEditableSetting => Category == TagDisplayCategory.Setting && _tag.IsManual;
 
-    public bool IsProductSkuTag =>
-        string.Equals(Name, ProductSkuConstants.TagName, StringComparison.Ordinal);
+    public bool SupportsScannerInput => TagScannerHelper.SupportsScannerInput(_tag);
 
-    public string EditHintText => IsProductSkuTag ? "点击扫码" : "点击修改";
+    public string EditHintText => SupportsScannerInput ? "点击扫码" : "点击修改";
 
     public string CategoryAccentColor => TagDisplayCategoryHelper.GetAccentColor(Category);
 
@@ -58,21 +57,65 @@ public partial class TagRowViewModel : ObservableObject
 
     public bool? BoolIsOn => Value is bool flag ? flag : null;
 
-    public string BoolStatusText => Value switch
-    {
-        bool flag => flag ? "运行中" : "已停止",
-        null => "—",
-        _ => DisplayValue
-    };
+    public string BoolStatusText => ResolveSwitchStatusText();
 
-    public string BoolIndicatorText => Value is bool flag ? (flag ? "开" : "关") : "—";
+    public string BoolIndicatorText => ResolveSwitchIndicatorText();
+
+    string ResolveSwitchStatusText()
+    {
+        if (RunStatusFormatting.IsRunStatusTag(_tag))
+            return RunStatusFormatting.GetStatusText(Value);
+
+        return Value switch
+        {
+            bool flag => flag ? "运行中" : "已停止",
+            null => "—",
+            _ => DisplayValue
+        };
+    }
+
+    string ResolveSwitchIndicatorText()
+    {
+        if (RunStatusFormatting.IsRunStatusTag(_tag))
+            return RunStatusFormatting.GetIndicatorText(Value);
+
+        return Value is bool flag ? (flag ? "开" : "关") : "—";
+    }
+
+    Color ResolveSwitchAccentColor()
+    {
+        if (RunStatusFormatting.IsRunStatusTag(_tag))
+            return Color.FromArgb(RunStatusFormatting.GetAccentColor(Value));
+
+        if (Value is bool flag)
+            return Color.FromArgb(flag ? "#3DDC97" : "#FF6B6B");
+
+        return Color.FromArgb(CategoryAccentColor);
+    }
+
+    Color ResolveSwitchBackgroundColor()
+    {
+        if (RunStatusFormatting.IsRunStatusTag(_tag))
+            return Color.FromArgb(RunStatusFormatting.GetBackgroundColor(Value));
+
+        if (Value is bool flag)
+            return Color.FromArgb(flag ? "#143328" : "#331E24");
+
+        return Category switch
+        {
+            TagDisplayCategory.Temperature => Color.FromArgb("#1E2430"),
+            TagDisplayCategory.Process => Color.FromArgb("#152536"),
+            TagDisplayCategory.Setting => Color.FromArgb("#182030"),
+            _ => Color.FromArgb("#152536")
+        };
+    }
 
     public Color ValueColor
     {
         get
         {
-            if (Value is bool flag)
-                return Color.FromArgb(flag ? "#3DDC97" : "#FF6B6B");
+            if (Category == TagDisplayCategory.Switch)
+                return ResolveSwitchAccentColor();
 
             return Color.FromArgb(CategoryAccentColor);
         }
@@ -82,8 +125,8 @@ public partial class TagRowViewModel : ObservableObject
     {
         get
         {
-            if (Value is bool flag)
-                return Color.FromArgb(flag ? "#3DDC97" : "#FF6B6B");
+            if (Category == TagDisplayCategory.Switch)
+                return ResolveSwitchAccentColor();
 
             return Color.FromArgb(CategoryAccentColor);
         }
@@ -93,8 +136,8 @@ public partial class TagRowViewModel : ObservableObject
     {
         get
         {
-            if (Value is bool flag)
-                return Color.FromArgb(flag ? "#143328" : "#331E24");
+            if (Category == TagDisplayCategory.Switch)
+                return ResolveSwitchBackgroundColor();
 
             return Category switch
             {

@@ -11,8 +11,10 @@ public sealed class AppSettings
     public bool UseSimulator { get; set; } = true;
     /// <summary>0 = 每次扫描都发布；大于 0 时，任一温度点位变化达到该值（℃）才发布 MQTT。</summary>
     public double TemperaturePublishThresholdC { get; set; }
-    /// <summary>全局默认显示与 MQTT 小数位数（0–4）；点位未单独设置时使用。</summary>
-    public int TemperaturePrecision { get; set; } = 1;
+    /// <summary>全局默认显示与 MQTT 小数位数（0–4），适用于温度及各类模拟量；点位未单独设置时使用。</summary>
+    public const int DefaultTemperaturePrecision = 2;
+
+    public int TemperaturePrecision { get; set; } = DefaultTemperaturePrecision;
     /// <summary>Windows 登录后自动启动本程序。</summary>
     public bool StartWithWindows { get; set; } = true;
     /// <summary>程序启动后自动开始采集。</summary>

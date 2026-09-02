@@ -4,6 +4,7 @@
              xmlns:views="clr-namespace:HuaGuang.Monitor.Views"
              xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
              xmlns:diag="clr-namespace:HuaGuang.Monitor.Diagnostics"
+             xmlns:logging="clr-namespace:HuaGuang.Monitor.Services.Logging"
              x:Class="HuaGuang.Monitor.Views.DiagnosticsPage"
              x:Name="ThisPage"
              x:DataType="vm:DiagnosticsViewModel"
@@ -11,11 +12,12 @@
              SafeAreaEdges="All"
              BackgroundColor="#0B1522">
 
-    <Grid RowDefinitions="Auto,Auto,Auto,*"
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,*"
           Padding="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource PagePaddingConverter}}"
           RowSpacing="{Binding Source={x:Reference ThisPage}, Path=IsCompactLayout, Converter={StaticResource RowSpacingConverter}}">
+
         <VerticalStackLayout Spacing="4">
-            <Label Text="软件自检"
+            <Label Text="诊断"
                    TextColor="White"
                    FontAttributes="Bold"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
@@ -26,13 +28,122 @@
                    TextColor="#8AA0B5"
                    LineBreakMode="WordWrap"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+        </VerticalStackLayout>
+
+        <VerticalStackLayout Grid.Row="1" Spacing="6">
+            <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="后台服务状态"
+                           TextColor="#2EC4B6"
+                           FontAttributes="Bold"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                    <Label Text="{Binding ServiceStatusText}"
+                           TextColor="#C9D6E2"
+                           LineBreakMode="WordWrap"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                </VerticalStackLayout>
+            </Border>
+
+            <FlexLayout Wrap="Wrap" Direction="Row" AlignItems="Center" JustifyContent="Start">
+                <Label Text="{Binding LogSummaryText}"
+                       TextColor="#8AA0B5"
+                       Margin="0,0,12,8"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                <Switch IsToggled="{Binding ShowAllLogCategories}"
+                        OnColor="#2EC4B6"
+                        Margin="0,0,8,8" />
+                <Label Text="显示全部类别"
+                       TextColor="#8AA0B5"
+                       Margin="0,0,12,8"
+                       VerticalOptions="Center"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                <Button Text="刷新"
+                        Command="{Binding RefreshLogsCommand}"
+                        Padding="10,6"
+                        Margin="0,0,8,8"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                <Button Text="清空"
+                        Command="{Binding ClearLogsCommand}"
+                        Padding="10,6"
+                        Margin="0,0,8,8"
+                        BackgroundColor="#1F3A52"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                <Button Text="日志路径"
+                        Command="{Binding OpenLogFolderCommand}"
+                        Padding="10,6"
+                        Margin="0,0,8,8"
+                        BackgroundColor="#1F3A52"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+            </FlexLayout>
+        </VerticalStackLayout>
+
+        <Border Grid.Row="2"
+                Stroke="#1F3A52"
+                StrokeThickness="1"
+                BackgroundColor="#101C28"
+                Padding="4,2">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="8" />
+            </Border.StrokeShape>
+            <CollectionView ItemsSource="{Binding LogEntries}"
+                            SelectionMode="None">
+                <CollectionView.EmptyView>
+                    <Label Text="暂无运行日志。启动采集或订阅后，后台服务日志将显示在此。"
+                           TextColor="#6E8499"
+                           HorizontalOptions="Center"
+                           VerticalOptions="Center"
+                           Margin="12"
+                           LineBreakMode="WordWrap"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                </CollectionView.EmptyView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="logging:RuntimeLogEntry">
+                        <Grid ColumnDefinitions="Auto,Auto,Auto,*"
+                              ColumnSpacing="6"
+                              Padding="6,3">
+                            <Label Text="{Binding TimeText}"
+                                   TextColor="#6E8499"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}"
+                                   VerticalOptions="Start" />
+                            <Label Grid.Column="1"
+                                   Text="{Binding LevelText}"
+                                   TextColor="{Binding Level, Converter={StaticResource LogLevelToColorConverter}}"
+                                   FontAttributes="Bold"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}"
+                                   VerticalOptions="Start" />
+                            <Label Grid.Column="2"
+                                   Text="{Binding Category}"
+                                   TextColor="#8AA0B5"
+                                   LineBreakMode="TailTruncation"
+                                   MaxLines="1"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}"
+                                   VerticalOptions="Start" />
+                            <Label Grid.Column="3"
+                                   Text="{Binding Message}"
+                                   TextColor="#C9D6E2"
+                                   LineBreakMode="WordWrap"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                                   VerticalOptions="Start" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </Border>
+
+        <VerticalStackLayout Grid.Row="3" Spacing="4">
+            <Label Text="软件自检"
+                   TextColor="#8AA0B5"
+                   FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
             <Label Text="{Binding SummaryText}"
                    TextColor="#2EC4B6"
                    FontAttributes="Bold"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=SubtitleFontSize}" />
         </VerticalStackLayout>
 
-        <FlexLayout Grid.Row="1"
+        <FlexLayout Grid.Row="4"
                     Wrap="Wrap"
                     Direction="Row"
                     JustifyContent="Start"
@@ -59,14 +170,10 @@
                                WidthRequest="28" />
         </FlexLayout>
 
-        <Label Grid.Row="2"
-               Text="测试项"
-               TextColor="#8AA0B5"
-               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-
-        <CollectionView Grid.Row="3"
+        <CollectionView Grid.Row="5"
                         ItemsSource="{Binding Results}"
-                        SelectionMode="None">
+                        SelectionMode="None"
+                        MaximumHeightRequest="220">
             <CollectionView.ItemsLayout>
                 <LinearItemsLayout Orientation="Vertical" ItemSpacing="6" />
             </CollectionView.ItemsLayout>
@@ -105,10 +212,9 @@
                 </DataTemplate>
             </CollectionView.ItemTemplate>
             <CollectionView.EmptyView>
-                <Label Text="点击上方按钮开始测试。"
-                       TextColor="#8AA0B5"
+                <Label Text="可选：运行上方自检项验证软件功能。"
+                       TextColor="#6E8499"
                        HorizontalOptions="Center"
-                       VerticalOptions="Center"
                        FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
             </CollectionView.EmptyView>
         </CollectionView>

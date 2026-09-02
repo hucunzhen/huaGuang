@@ -4,7 +4,8 @@ using HuaGuang.Monitor.Protocols;
 namespace HuaGuang.Monitor.Services;
 
 /// <summary>
-/// 来自产线数据地址规划：PLC 点位为机台获取；胶辊型号、胶水型号、产品货号、门幅、厚度为手动填写。
+/// 来自产线数据地址规划：仅用于<strong>新建</strong>产线 Excel 时的默认种子。
+/// 已存在的 config/lines 点表以 Excel 为准，不会随此类变更自动覆盖。
 /// </summary>
 public static class LineCatalog
 {
@@ -30,6 +31,7 @@ public static class LineCatalog
         LineMqttDefaults.ApplyBroker(settings.Mqtt);
         settings.Mqtt.Topic = line.MqttTopic;
         LineMqttDefaults.ApplySubscribeTopics(settings);
+        settings.Mqtt.ClientId = LineMqttDefaults.ResolveClientIdForLine(line.Name);
         settings.Tags = line.Tags.Select(CloneAndResolve).ToList();
         MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
     }
@@ -57,7 +59,7 @@ public static class LineCatalog
     {
         var tags = new List<PlcTag>
         {
-            Bool("运行状态", "D1000"),
+            RunStatus("运行状态", "D1000"),
             Real("热溶胶盘温度（热熔胶机1）", "D6000", "℃"),
             Real("胶管温度（热熔胶机1）", "D6002", "℃"),
             Real("胶枪温度（热熔胶机1）", "D6004", "℃"),
@@ -87,17 +89,17 @@ public static class LineCatalog
 
         tags.Add(ManualString("胶辊型号"));
         tags.Add(ManualString("胶水型号"));
-        tags.Add(ManualString(ProductSkuTagName));
+        tags.Add(ManualString(ProductSkuTagName, useScannerInput: true));
         tags.Add(ManualReal("门幅", "mm"));
         tags.Add(ManualReal("厚度", "mm"));
         return tags;
     }
 
-    static PlcTag Bool(string name, string address) => new()
+    static PlcTag RunStatus(string name, string address) => new()
     {
         Name = name,
         XinjeAddress = address,
-        DataType = TagDataType.Bool,
+        DataType = TagDataType.Int16,
         DisplayCategory = TagDisplayCategory.Switch
     };
 
@@ -114,13 +116,14 @@ public static class LineCatalog
             : TagDisplayCategory.Process
     };
 
-    static PlcTag ManualString(string name, string defaultValue = "") => new()
+    static PlcTag ManualString(string name, string defaultValue = "", bool useScannerInput = false) => new()
     {
         Name = name,
         Source = TagSource.Manual,
         DataType = TagDataType.String,
         ManualValue = defaultValue,
-        DisplayCategory = TagDisplayCategory.Setting
+        DisplayCategory = TagDisplayCategory.Setting,
+        UseScannerInput = useScannerInput
     };
 
     static PlcTag ManualReal(string name, string unit = "", string defaultValue = "") => new()
@@ -146,7 +149,8 @@ public static class LineCatalog
             ManualValue = source.ManualValue,
             DisplayPrecision = source.DisplayPrecision,
             MqttField = source.MqttField,
-            DisplayCategory = source.DisplayCategory
+            DisplayCategory = source.DisplayCategory,
+            UseScannerInput = source.UseScannerInput
         };
 
         if (tag.Source != TagSource.Manual)

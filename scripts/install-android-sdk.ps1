@@ -69,7 +69,9 @@ function Install-AndroidSdk {
     $packages = @(
         "platform-tools",
         "platforms;android-36",
-        "build-tools;36.0.0"
+        "build-tools;36.0.0",
+        "emulator",
+        "system-images;android-36;google_apis_playstore;x86_64"
     )
 
     Write-Host "Installing SDK packages..." -ForegroundColor Yellow
@@ -88,16 +90,24 @@ function Set-AndroidEnv {
     [Environment]::SetEnvironmentVariable("ANDROID_SDK_ROOT", $Root, "User")
 
     $platformTools = Join-Path $Root "platform-tools"
+    $emulatorDir = Join-Path $Root "emulator"
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($userPath -notlike "*$platformTools*") {
-        $newPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $platformTools } else { "$userPath;$platformTools" }
-        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+    foreach ($entry in @($platformTools, $emulatorDir)) {
+        if ((Test-Path $entry) -and ($userPath -notlike "*$entry*")) {
+            $userPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $entry } else { "$userPath;$entry" }
+        }
     }
+
+    [Environment]::SetEnvironmentVariable("Path", $userPath, "User")
 
     $env:ANDROID_HOME = $Root
     $env:ANDROID_SDK_ROOT = $Root
     if ($env:Path -notlike "*$platformTools*") {
         $env:Path = "$env:Path;$platformTools"
+    }
+
+    if ((Test-Path $emulatorDir) -and ($env:Path -notlike "*$emulatorDir*")) {
+        $env:Path = "$env:Path;$emulatorDir"
     }
 }
 
@@ -112,4 +122,5 @@ Write-Host "  ANDROID_HOME=$SdkRoot"
 Write-Host "  platform-tools: $(Join-Path $SdkRoot 'platform-tools')"
 Write-Host ""
 Write-Host "Restart terminal or VS, then run:"
+Write-Host "  .\scripts\start-android-emulator.ps1"
 Write-Host "  .\scripts\publish-android.ps1"

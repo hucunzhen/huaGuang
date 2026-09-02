@@ -19,7 +19,7 @@
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
             <Label Text="{Binding SummaryText}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-            <Label Text="先点「刷新」加载数据；可选快捷范围或「自定义时间」按起止时间查找；修改筛选后需再次刷新。"
+            <Label Text="先点「刷新」加载数据；可选快捷范围或「自定义时间」按起止时间查找；修改筛选后需再次刷新。表格列较多时可左右滑动查看。"
                    TextColor="#6E8499"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
         </VerticalStackLayout>
@@ -91,19 +91,23 @@
         </Grid>
 
         <Grid Grid.Row="2" RowDefinitions="Auto,*">
-            <Border Grid.Row="0"
-                    Stroke="#1F3A52"
-                    StrokeThickness="1"
-                    BackgroundColor="#152536"
-                    Padding="8,6"
-                    IsVisible="{Binding ShowEmpty, Converter={StaticResource InverseBoolConverter}}">
-                <Label Text="{Binding HeaderLine}"
-                       FontFamily="Consolas"
-                       FontAttributes="Bold"
-                       TextColor="#8AA0B5"
-                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                       LineBreakMode="CharacterWrap" />
-            </Border>
+            <ScrollView Grid.Row="0"
+                        Orientation="Horizontal"
+                        HorizontalScrollBarVisibility="Default"
+                        IsVisible="{Binding ShowEmpty, Converter={StaticResource InverseBoolConverter}}">
+                <Border Stroke="#1F3A52"
+                        StrokeThickness="1"
+                        BackgroundColor="#152536"
+                        Padding="8,6">
+                    <Label Text="{Binding HeaderLine}"
+                           FontFamily="Consolas"
+                           FontAttributes="Bold"
+                           TextColor="#8AA0B5"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                           LineBreakMode="NoWrap"
+                           MinimumWidthRequest="{Binding TableContentMinWidth}" />
+                </Border>
+            </ScrollView>
 
             <CollectionView Grid.Row="1"
                             ItemsSource="{Binding TableRows}"
@@ -116,14 +120,20 @@
                         <Grid ColumnDefinitions="*,Auto"
                               ColumnSpacing="4"
                               Padding="0,2">
-                            <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#101C28" Padding="8,4">
-                                <Label Text="{Binding LineText}"
-                                       FontFamily="Consolas"
-                                       TextColor="White"
-                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
-                                       LineBreakMode="CharacterWrap"
-                                       MaxLines="2" />
-                            </Border>
+                            <ScrollView Orientation="Horizontal"
+                                        HorizontalScrollBarVisibility="Never">
+                                <Border Stroke="#1F3A52"
+                                        StrokeThickness="1"
+                                        BackgroundColor="#101C28"
+                                        Padding="8,4">
+                                    <Label Text="{Binding LineText}"
+                                           FontFamily="Consolas"
+                                           TextColor="White"
+                                           FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                                           LineBreakMode="NoWrap"
+                                           MinimumWidthRequest="{Binding Source={x:Reference ThisPage}, Path=BindingContext.TableContentMinWidth}" />
+                                </Border>
+                            </ScrollView>
                             <Button Grid.Column="1"
                                     Text="删"
                                     WidthRequest="44"

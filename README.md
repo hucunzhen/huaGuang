@@ -2,7 +2,7 @@
 
 Windows / Android 共用一套代码：**采集模式**下按设定周期从 **信捷 XD5E-60T10** 读点位并以 JSON 发布 MQTT；**订阅模式**下连接同一 Broker，查看局域网内其他设备的遥测。
 
-**当前版本：1.1.5（修订 2）**（MQTT 异步队列、Android 轮询修复、Modbus 批量读、产品货号扫码、历史时间筛选、Excel 产线配置）
+**当前版本：1.1.6（修订 3）**（通用扫码点位、运行状态 Int、Excel 增量补丁、Windows 后台采集服务、点位删除稳定性）
 
 > 版本号与修订号定义在 `HuaGuang.Monitor.csproj` 的 `ApplicationDisplayVersion` / `ApplicationVersion`；安装包与 APK 文件名格式为 `IndustrialMonitor-{版本}-r{修订}-Setup.exe` / `IndustrialMonitor-{版本}-r{修订}-android.apk`。应用内可在 **诊断** Tab 查看。
 
@@ -107,7 +107,7 @@ XD5E-60T10 本体大约 **36 入 / 24 晶体管出**，输入约 `X0–X43`，�
 
 **产线 Excel 配置**（设置 → 采集模式）：每条产线一个 `.xlsx`，含 PLC/MQTT/点表/字段映射/显示分组。程序目录 `config/lines/` 或用户数据目录 `lines/` 存放；支持从 Excel 载入、保存、从外部文件导入。点表列「显示分组」控制监控页分组与卡片颜色。
 
-各点位可在「点位 → 编辑」单独设置 **显示精度**（0–4 位小数）；未设置时使用设置页的全局温度精度。
+各点位可在「点位 → 编辑」单独设置 **显示精度**（0–4 位小数）；未设置时使用设置页的全局精度。
 
 ## 历史数据
 

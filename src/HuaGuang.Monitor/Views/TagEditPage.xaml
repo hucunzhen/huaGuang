@@ -44,6 +44,14 @@
             <Picker ItemsSource="{Binding DataTypes}" SelectedItem="{Binding DataTypeName}"
                     IsVisible="{Binding IsManualSource}" />
 
+            <HorizontalStackLayout Spacing="10" IsVisible="{Binding ShowScannerInputOption}">
+                <CheckBox IsChecked="{Binding UseScannerInput}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="支持 USB 扫码枪输入（监控页点击后扫码）"
+                       TextColor="White"
+                       VerticalOptions="Center"
+                       LineBreakMode="WordWrap" />
+            </HorizontalStackLayout>
+
             <Label Text="信捷地址（XD5E）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Entry Text="{Binding XinjeAddress}" Placeholder="D100 / M0 / X20 / Y0" IsVisible="{Binding IsPlcSource}" />
             <Label Text="{Binding ResolvedHint}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="WordWrap"
@@ -64,7 +72,16 @@
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
                    IsVisible="{Binding ShowPrecision}" />
 
-            <Button Text="保存点位" Command="{Binding SaveCommand}" />
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="返回"
+                        Command="{Binding GoBackCommand}"
+                        HorizontalOptions="FillAndExpand"
+                        BackgroundColor="#1F3A52"
+                        TextColor="White" />
+                <Button Text="保存点位"
+                        Command="{Binding SaveCommand}"
+                        HorizontalOptions="FillAndExpand" />
+            </HorizontalStackLayout>
             <Label Text="{Binding StatusMessage}" TextColor="#FF6B6B" FontSize="13" />
         </VerticalStackLayout>
     </ScrollView>

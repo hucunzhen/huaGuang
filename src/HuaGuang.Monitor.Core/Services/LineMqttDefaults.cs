@@ -9,6 +9,9 @@ public static class LineMqttDefaults
     public const string Username = "hg_iot";
     public const string Password = "Hg@Iot2026";
 
+    public const string XianheClientId = "XHRRJFHJ";
+    public const string HuadiClientId = "HDRRJFHJ";
+
     public const string XianhePublishTopic = "/RRJFHJ/XHRRJFHJ/properties/report";
     public const string HuadiPublishTopic = "/RRJFHJ/HDRRJFHJ/properties/report";
 
@@ -20,6 +23,9 @@ public static class LineMqttDefaults
 
     public static string ResolvePublishTopic(string? lineName) =>
         lineName == "华迪热熔胶复合机" ? HuadiPublishTopic : XianhePublishTopic;
+
+    public static string ResolveClientIdForLine(string? lineName) =>
+        lineName == "华迪热熔胶复合机" ? HuadiClientId : XianheClientId;
 
     public static void ApplyBroker(MqttSettings mqtt)
     {
@@ -48,6 +54,10 @@ public static class LineMqttDefaults
         {
             ApplyBroker(settings.Mqtt);
         }
+        else
+        {
+            EnsureCredentials(settings.Mqtt);
+        }
 
         if (legacyTopic)
         {
@@ -60,5 +70,57 @@ public static class LineMqttDefaults
         {
             ApplySubscribeTopics(settings);
         }
+
+        if (IsLegacyClientId(settings))
+        {
+            settings.Mqtt.ClientId = ResolveClientIdForLine(settings.LineName);
+        }
+    }
+
+    /// <summary>现场常只改 Broker 地址，账号密码仍为空；与 MQTTX 手动填账号不一致时连接会失败。</summary>
+    public static void EnsureCredentials(MqttSettings mqtt)
+    {
+        if (!string.IsNullOrWhiteSpace(mqtt.Username))
+        {
+            return;
+        }
+
+        if (IsProductionBroker(mqtt.Host, mqtt.Port))
+        {
+            mqtt.Username = Username;
+            mqtt.Password = Password;
+        }
+    }
+
+    public static bool IsProductionBroker(string? host, int port) =>
+        string.Equals(host?.Trim(), Host, StringComparison.OrdinalIgnoreCase) && port == Port;
+
+    public static (string Username, string Password) ResolveCredentials(MqttSettings mqtt) =>
+        (mqtt.Username?.Trim() ?? string.Empty, mqtt.Password ?? string.Empty);
+
+    public static string ResolveClientId(MqttSettings mqtt, string? lineName = null)
+    {
+        if (!string.IsNullOrWhiteSpace(mqtt.ClientId))
+        {
+            return mqtt.ClientId.Trim();
+        }
+
+        return ResolveClientIdForLine(lineName);
+    }
+
+    static bool IsLegacyClientId(AppSettings settings)
+    {
+        var clientId = settings.Mqtt.ClientId?.Trim();
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            return true;
+        }
+
+        if (string.Equals(clientId, settings.DeviceId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return clientId is "先河热熔胶复合机" or "华迪热熔胶复合机";
     }
 }

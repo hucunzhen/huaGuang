@@ -19,7 +19,7 @@ public static class LineExcelConfigService
 
     static readonly string[] TagHeaders =
     [
-        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "显示分组"
+        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "显示分组", "扫码输入"
     ];
 
     static readonly (string Key, string Label, string Hint)[] MqttPayloadRows =
@@ -48,7 +48,7 @@ public static class LineExcelConfigService
         ("PlcTimeoutMs", "PLC超时毫秒"),
         ("ScanIntervalMs", "扫描周期毫秒"),
         ("TemperaturePublishThresholdC", "温度发布阈值"),
-        ("TemperaturePrecision", "温度精度"),
+        ("TemperaturePrecision", "精度"),
         ("UseSimulator", "使用模拟数据"),
         ("MqttHost", "MQTT_Broker"),
         ("MqttPort", "MQTT端口"),
@@ -59,6 +59,11 @@ public static class LineExcelConfigService
         ("MqttQos", "MQTT_QoS"),
         ("MqttTopic", "MQTT发布主题"),
         ("SubscribeTopics", "订阅主题"),
+        ("OperationMode", "运行模式"),
+        ("StartWithWindows", "开机自动启动"),
+        ("AutoStartAcquisition", "启动后自动运行"),
+        ("EnableHistoryRecording", "记录历史数据"),
+        ("HistoryRetentionDays", "历史保留天数"),
     ];
 
     public static void Export(AppSettings settings, string filePath)
@@ -74,7 +79,7 @@ public static class LineExcelConfigService
         workbook.SaveAs(filePath);
     }
 
-    public static void Apply(AppSettings settings, string filePath)
+    public static void Apply(AppSettings settings, string filePath, string? expectedLineName = null, string? templateFilePath = null)
     {
         if (!File.Exists(filePath))
         {
@@ -82,51 +87,166 @@ public static class LineExcelConfigService
         }
 
         using var workbook = new XLWorkbook(filePath);
-        ApplyWorkbook(settings, workbook);
+        ApplyWorkbook(settings, workbook, expectedLineName, templateFilePath);
     }
 
-    public static void ApplyWorkbook(AppSettings settings, XLWorkbook workbook)
+    /// <summary>从 Excel 加载；点表以 Excel「点表」工作表为准，不合并代码内置点位。</summary>
+    public static AppSettings LoadLineExcel(string lineName, string filePath, string? templateFilePath = null)
+    {
+        EnsureLineFile(filePath, lineName, templateFilePath);
+        return LoadLineExcelFromFile(filePath, templateFilePath, lineName);
+    }
+
+    public static AppSettings LoadLineExcelFromFile(string filePath, string? templateFilePath, string? expectedLineName = null)
+    {
+        var settings = new AppSettings();
+        Apply(settings, filePath, expectedLineName, templateFilePath);
+        if (string.IsNullOrWhiteSpace(settings.LineName))
+        {
+            settings.LineName = expectedLineName ?? LineCatalog.LineNames[0];
+        }
+
+        return settings;
+    }
+
+    public static AppSettings SwitchLine(
+        string lineName,
+        string filePath,
+        string? templateFilePath,
+        AppSettings? preserveFrom = null)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+
+        var useTemplate = !File.Exists(filePath);
+        if (File.Exists(filePath))
+        {
+            using var workbook = new XLWorkbook(filePath);
+            useTemplate = !ConfigSheetMatchesLine(workbook, lineName);
+        }
+
+        if (useTemplate)
+        {
+            if (templateFilePath is null || !File.Exists(templateFilePath))
+            {
+                throw new FileNotFoundException(
+                    $"找不到产线「{lineName}」的原始 Excel，请确认安装目录 lines 下存在 {lineName}.xlsx（来自 config/lines）。");
+            }
+
+            File.Copy(templateFilePath, filePath, overwrite: true);
+        }
+
+        var settings = LoadLineExcel(lineName, filePath, templateFilePath);
+        CopyPreserveFrom(preserveFrom, settings);
+        Export(settings, filePath);
+        return settings;
+    }
+
+    [Obsolete("Use SwitchLine or LoadLineExcel.")]
+    public static AppSettings LoadLineSettings(string lineName, string filePath, AppSettings? preserveFrom = null) =>
+        SwitchLine(lineName, filePath, null, preserveFrom);
+
+    public static AppSettings LoadConfig(string configFilePath) =>
+        LoadLineExcelFromFile(configFilePath, templateFilePath: null);
+
+    public static void ApplyWorkbook(
+        AppSettings settings,
+        XLWorkbook workbook,
+        string? expectedLineName = null,
+        string? templateFilePath = null)
     {
         if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out _))
         {
             throw new InvalidOperationException($"产线 Excel 缺少工作表「{ConfigSheetName}」。");
         }
 
-        ApplyConfigSheet(settings, workbook);
+        ApplyConfigSheet(settings, workbook, expectedLineName, templateFilePath);
         ApplyMqttPayloadSheet(settings, workbook);
         settings.Tags = ReadTagsSheet(workbook);
         ApplyFieldMappings(settings, workbook);
         settings.AddressCatalogVersion = LineCatalog.Version;
     }
 
-    public static void EnsureLineFile(string filePath, string lineName)
+    public static void EnsureLineFile(string filePath, string lineName, string? templateFilePath = null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        EnsureLineFileExists(filePath, lineName, templateFilePath);
         if (!File.Exists(filePath))
         {
-            Export(CreateSeedSettings(lineName), filePath);
             return;
         }
 
         if (NeedsFormatUpgrade(filePath))
         {
-            var settings = CreateSeedSettings(lineName);
+            var settings = LoadLineExcelFromFile(filePath, templateFilePath, lineName);
             using var workbook = new XLWorkbook(filePath);
             TryApplyExistingSheets(settings, workbook);
             Export(settings, filePath);
             return;
         }
 
+        ApplyLineFileMaintenance(filePath);
+    }
+
+    /// <summary>
+    /// 产线 Excel 已存在时只做局部维护（运行状态/精度键名、版本号），不重写点表。
+    /// </summary>
+    public static void ApplyLineFileMaintenance(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return;
+        }
+
+        PatchRunStatusAndPrecision(filePath);
         if (NeedsRevisionUpgrade(filePath))
         {
-            var seed = CreateSeedSettings(lineName);
-            var settings = new AppSettings();
-            Apply(settings, filePath);
-            MergeMissingCatalogTags(settings, seed.Tags);
-            MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
-            settings.AddressCatalogVersion = LineCatalog.Version;
-            Export(settings, filePath);
+            UpdateLineConfigRevisionInPlace(filePath, LineCatalog.Version);
         }
+    }
+
+    static void EnsureLineFileExists(string filePath, string lineName, string? templateFilePath)
+    {
+        _ = lineName;
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        if (File.Exists(filePath))
+        {
+            return;
+        }
+
+        if (templateFilePath is not null && File.Exists(templateFilePath))
+        {
+            File.Copy(templateFilePath, filePath);
+        }
+    }
+
+    static void UpdateLineConfigRevisionInPlace(string filePath, int revision)
+    {
+        using var workbook = new XLWorkbook(filePath);
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var configSheet))
+        {
+            return;
+        }
+
+        var updated = false;
+        foreach (var row in configSheet.RowsUsed())
+        {
+            if (row.Cell(1).GetString().Trim() != "产线配置版本")
+            {
+                continue;
+            }
+
+            row.Cell(2).Value = revision.ToString();
+            updated = true;
+            break;
+        }
+
+        if (!updated)
+        {
+            var nextRow = configSheet.LastRowUsed()?.RowNumber() + 1 ?? 2;
+            configSheet.Cell(nextRow, 1).Value = "产线配置版本";
+            configSheet.Cell(nextRow, 2).Value = revision.ToString();
+        }
+
+        workbook.SaveAs(filePath);
     }
 
     public static int ReadLineConfigRevision(string filePath)
@@ -201,7 +321,76 @@ public static class LineExcelConfigService
         return settings;
     }
 
-    static void MergeMissingCatalogTags(AppSettings settings, IReadOnlyList<PlcTag> catalogTags)
+    /// <summary>
+    /// 仅修改点表中的「运行状态」类型，以及配置表中的「精度」项；不重写整本 Excel。
+    /// </summary>
+    public static bool PatchRunStatusAndPrecision(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        using var workbook = new XLWorkbook(filePath);
+        var changed = false;
+
+        if (workbook.Worksheets.TryGetWorksheet(TagsSheetName, out var tagsSheet))
+        {
+            var lastRow = tagsSheet.LastRowUsed()?.RowNumber() ?? 1;
+            for (var row = 2; row <= lastRow; row++)
+            {
+                if (!tagsSheet.Cell(row, 1).GetString().Trim().Equals(RunStatusFormatting.TagName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var typeCell = tagsSheet.Cell(row, 4);
+                if (!typeCell.GetString().Trim().Equals(nameof(TagDataType.Int16), StringComparison.OrdinalIgnoreCase))
+                {
+                    typeCell.Value = nameof(TagDataType.Int16);
+                    changed = true;
+                }
+
+                var categoryColumn = FindTagColumn(tagsSheet, "显示分组");
+                if (categoryColumn > 0)
+                {
+                    var categoryCell = tagsSheet.Cell(row, categoryColumn);
+                    var switchLabel = TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Switch);
+                    if (!categoryCell.GetString().Trim().Equals(switchLabel, StringComparison.Ordinal))
+                    {
+                        categoryCell.Value = switchLabel;
+                        changed = true;
+                    }
+                }
+
+                break;
+            }
+        }
+
+        if (workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var configSheet))
+        {
+            foreach (var row in configSheet.RowsUsed())
+            {
+                var key = row.Cell(1).GetString().Trim();
+                if (!key.Equals("温度精度", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                row.Cell(1).Value = "精度";
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            workbook.SaveAs(filePath);
+        }
+
+        return changed;
+    }
+
+    public static void MergeMissingCatalogTags(AppSettings settings, IReadOnlyList<PlcTag> catalogTags)
     {
         var existing = settings.Tags.ToDictionary(tag => tag.Name, StringComparer.Ordinal);
         foreach (var catalogTag in catalogTags)
@@ -424,6 +613,11 @@ public static class LineExcelConfigService
         ["MqttQos"] = settings.Mqtt.Qos.ToString(),
         ["MqttTopic"] = settings.Mqtt.Topic,
         ["SubscribeTopics"] = string.Join(';', settings.SubscribeTopics),
+        ["OperationMode"] = FormatOperationMode(settings.OperationMode),
+        ["StartWithWindows"] = settings.StartWithWindows ? "是" : "否",
+        ["AutoStartAcquisition"] = settings.AutoStartAcquisition ? "是" : "否",
+        ["EnableHistoryRecording"] = settings.EnableHistoryRecording ? "是" : "否",
+        ["HistoryRetentionDays"] = settings.HistoryRetentionDays.ToString(),
     };
 
     static void WriteTagsSheet(XLWorkbook workbook, IReadOnlyList<PlcTag> tags)
@@ -452,6 +646,7 @@ public static class LineExcelConfigService
             sheet.Cell(row, 11).Value = tag.Offset;
             sheet.Cell(row, 12).Value = TagDisplayCategoryHelper.ToLabel(
                 tag.DisplayCategory ?? TagDisplayCategoryHelper.InferCategory(tag));
+            sheet.Cell(row, 13).Value = tag.UseScannerInput ? "是" : "否";
             row++;
         }
 
@@ -509,7 +704,11 @@ public static class LineExcelConfigService
         sheet.Columns(1, 2).AdjustToContents();
     }
 
-    static void ApplyConfigSheet(AppSettings settings, XLWorkbook workbook)
+    static void ApplyConfigSheet(
+        AppSettings settings,
+        XLWorkbook workbook,
+        string? expectedLineName = null,
+        string? templateFilePath = null)
     {
         if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var sheet))
         {
@@ -517,27 +716,126 @@ public static class LineExcelConfigService
         }
 
         var map = ReadKeyValueSheet(sheet);
-        settings.LineName = GetString(map, "产线名称", settings.LineName);
-        settings.DeviceId = GetString(map, "设备编号", settings.DeviceId);
-        settings.Plc.Model = GetString(map, "PLC型号", settings.Plc.Model);
-        settings.Plc.Host = GetString(map, "PLC_IP", settings.Plc.Host);
-        settings.Plc.Port = GetInt(map, "PLC端口", settings.Plc.Port);
-        settings.Plc.Station = (byte)GetInt(map, "PLC站号", settings.Plc.Station);
-        settings.Plc.TimeoutMs = GetInt(map, "PLC超时毫秒", settings.Plc.TimeoutMs);
-        settings.ScanIntervalMs = GetInt(map, "扫描周期毫秒", settings.ScanIntervalMs);
-        settings.TemperaturePublishThresholdC = GetDouble(map, "温度发布阈值", settings.TemperaturePublishThresholdC);
-        settings.TemperaturePrecision = GetInt(map, "温度精度", settings.TemperaturePrecision);
-        settings.UseSimulator = GetBool(map, "使用模拟数据", settings.UseSimulator);
-        settings.Mqtt.Host = GetString(map, "MQTT_Broker", settings.Mqtt.Host);
-        settings.Mqtt.Port = GetInt(map, "MQTT端口", settings.Mqtt.Port);
-        settings.Mqtt.ClientId = GetString(map, "MQTT_ClientId", settings.Mqtt.ClientId);
-        settings.Mqtt.Username = GetString(map, "MQTT_用户名", settings.Mqtt.Username);
-        settings.Mqtt.Password = GetString(map, "MQTT_密码", settings.Mqtt.Password);
-        settings.Mqtt.UseTls = GetBool(map, "MQTT_TLS", settings.Mqtt.UseTls);
-        settings.Mqtt.Qos = GetInt(map, "MQTT_QoS", settings.Mqtt.Qos);
-        settings.Mqtt.Topic = GetString(map, "MQTT发布主题", settings.Mqtt.Topic);
+        var lineName = expectedLineName
+                       ?? GetString(map, "产线名称", settings.LineName);
+        var defaults = ReadConfigDefaults(lineName, templateFilePath);
+
+        settings.LineName = lineName;
+        settings.DeviceId = GetString(map, "设备编号", defaults.DeviceId);
+        settings.Plc.Model = GetString(map, "PLC型号", defaults.Plc.Model);
+        settings.Plc.Host = GetString(map, "PLC_IP", defaults.Plc.Host);
+        settings.Plc.Port = GetInt(map, "PLC端口", defaults.Plc.Port);
+        settings.Plc.Station = (byte)GetInt(map, "PLC站号", defaults.Plc.Station);
+        settings.Plc.TimeoutMs = GetInt(map, "PLC超时毫秒", defaults.Plc.TimeoutMs);
+        settings.ScanIntervalMs = GetInt(map, "扫描周期毫秒", defaults.ScanIntervalMs);
+        settings.TemperaturePublishThresholdC = GetDouble(map, "温度发布阈值", defaults.TemperaturePublishThresholdC);
+        settings.TemperaturePrecision = GetIntPreferring(map, "精度", "温度精度", defaults.TemperaturePrecision);
+        settings.UseSimulator = GetBool(map, "使用模拟数据", defaults.UseSimulator);
+        settings.Mqtt.Host = GetString(map, "MQTT_Broker", defaults.Mqtt.Host);
+        settings.Mqtt.Port = GetInt(map, "MQTT端口", defaults.Mqtt.Port);
+        settings.Mqtt.ClientId = GetString(map, "MQTT_ClientId", defaults.Mqtt.ClientId);
+        settings.Mqtt.Username = GetString(map, "MQTT_用户名", defaults.Mqtt.Username);
+        settings.Mqtt.Password = GetString(map, "MQTT_密码", defaults.Mqtt.Password);
+        settings.Mqtt.UseTls = GetBool(map, "MQTT_TLS", defaults.Mqtt.UseTls);
+        settings.Mqtt.Qos = GetInt(map, "MQTT_QoS", defaults.Mqtt.Qos);
+        settings.Mqtt.Topic = GetString(map, "MQTT发布主题", defaults.Mqtt.Topic);
+        if (string.IsNullOrWhiteSpace(settings.Mqtt.ClientId))
+        {
+            settings.Mqtt.ClientId = LineMqttDefaults.ResolveClientIdForLine(settings.LineName);
+        }
+
+        settings.OperationMode = ParseOperationMode(GetString(map, "运行模式", FormatOperationMode(defaults.OperationMode)));
+        settings.StartWithWindows = GetBool(map, "开机自动启动", defaults.StartWithWindows);
+        settings.AutoStartAcquisition = GetBool(map, "启动后自动运行", defaults.AutoStartAcquisition);
+        settings.EnableHistoryRecording = GetBool(map, "记录历史数据", defaults.EnableHistoryRecording);
+        settings.HistoryRetentionDays = GetInt(map, "历史保留天数", defaults.HistoryRetentionDays);
+
         ApplySubscribeTopics(settings, map);
     }
+
+    static AppSettings ReadConfigDefaults(string lineName, string? templateFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(templateFilePath) || !File.Exists(templateFilePath))
+        {
+            return new AppSettings { LineName = lineName };
+        }
+
+        using var workbook = new XLWorkbook(templateFilePath);
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var sheet))
+        {
+            return new AppSettings { LineName = lineName };
+        }
+
+        var map = ReadKeyValueSheet(sheet);
+        return new AppSettings
+        {
+            LineName = lineName,
+            DeviceId = GetString(map, "设备编号", lineName),
+            Plc = new PlcSettings
+            {
+                Model = GetString(map, "PLC型号", "XD5E-60T10"),
+                Host = GetString(map, "PLC_IP", "192.168.6.10"),
+                Port = GetInt(map, "PLC端口", 502),
+                Station = (byte)GetInt(map, "PLC站号", 1),
+                TimeoutMs = GetInt(map, "PLC超时毫秒", 2000)
+            },
+            Mqtt = new MqttSettings
+            {
+                Host = GetString(map, "MQTT_Broker", LineMqttDefaults.Host),
+                Port = GetInt(map, "MQTT端口", LineMqttDefaults.Port),
+                ClientId = GetString(map, "MQTT_ClientId", LineMqttDefaults.ResolveClientIdForLine(lineName)),
+                Username = GetString(map, "MQTT_用户名", LineMqttDefaults.Username),
+                Password = GetString(map, "MQTT_密码", LineMqttDefaults.Password),
+                UseTls = GetBool(map, "MQTT_TLS", false),
+                Qos = GetInt(map, "MQTT_QoS", 0),
+                Topic = GetString(map, "MQTT发布主题", LineMqttDefaults.ResolvePublishTopic(lineName))
+            }
+        };
+    }
+
+    static string? ReadConfigLineName(XLWorkbook workbook)
+    {
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var sheet))
+        {
+            return null;
+        }
+
+        var map = ReadKeyValueSheet(sheet);
+        return map.TryGetValue("产线名称", out var lineName) && !string.IsNullOrWhiteSpace(lineName)
+            ? lineName.Trim()
+            : null;
+    }
+
+    static bool ConfigSheetMatchesLine(XLWorkbook workbook, string lineName)
+    {
+        var fileLineName = ReadConfigLineName(workbook);
+        return string.IsNullOrWhiteSpace(fileLineName) ||
+               string.Equals(fileLineName, lineName, StringComparison.Ordinal);
+    }
+
+    static void CopyPreserveFrom(AppSettings? preserveFrom, AppSettings settings)
+    {
+        if (preserveFrom is null)
+        {
+            return;
+        }
+
+        settings.OperationMode = preserveFrom.OperationMode;
+        settings.SubscribeTopics = preserveFrom.SubscribeTopics.ToList();
+        settings.SubscribeTopic = preserveFrom.SubscribeTopic;
+        settings.StartWithWindows = preserveFrom.StartWithWindows;
+        settings.AutoStartAcquisition = preserveFrom.AutoStartAcquisition;
+        settings.EnableHistoryRecording = preserveFrom.EnableHistoryRecording;
+        settings.HistoryRetentionDays = preserveFrom.HistoryRetentionDays;
+    }
+
+    static string FormatOperationMode(AppOperationMode mode) =>
+        mode == AppOperationMode.Subscribe ? "订阅模式" : "采集模式";
+
+    static AppOperationMode ParseOperationMode(string text) =>
+        text.Contains("订阅", StringComparison.Ordinal)
+            ? AppOperationMode.Subscribe
+            : AppOperationMode.Acquisition;
 
     static void ApplySubscribeTopics(AppSettings settings, IReadOnlyDictionary<string, string> map)
     {
@@ -621,6 +919,16 @@ public static class LineExcelConfigService
                 }
             }
 
+            var scannerInputColumn = FindTagColumn(sheet, "扫码输入");
+            if (scannerInputColumn > 0)
+            {
+                tag.UseScannerInput = ParseBoolCell(sheet.Cell(row, scannerInputColumn), false);
+            }
+            else if (string.Equals(name, LineCatalog.ProductSkuTagName, StringComparison.Ordinal))
+            {
+                tag.UseScannerInput = true;
+            }
+
             if (tag.Source != TagSource.Manual)
             {
                 XinjeXd5eMapper.ApplyTo(tag);
@@ -684,6 +992,9 @@ public static class LineExcelConfigService
 
     static int GetInt(IReadOnlyDictionary<string, string> map, string key, int fallback) =>
         map.TryGetValue(key, out var value) && int.TryParse(value, out var parsed) ? parsed : fallback;
+
+    static int GetIntPreferring(IReadOnlyDictionary<string, string> map, string key, string legacyKey, int fallback) =>
+        map.ContainsKey(key) ? GetInt(map, key, fallback) : GetInt(map, legacyKey, fallback);
 
     static double GetDouble(IReadOnlyDictionary<string, string> map, string key, double fallback) =>
         map.TryGetValue(key, out var value) && double.TryParse(value, out var parsed) ? parsed : fallback;

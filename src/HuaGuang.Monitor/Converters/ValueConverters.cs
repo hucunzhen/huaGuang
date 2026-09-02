@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Extensions.Logging;
 
 namespace HuaGuang.Monitor.Converters;
 
@@ -108,6 +109,24 @@ public sealed class OrientationThicknessConverter : IValueConverter
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         value is bool isLandscape && isLandscape ? LandscapeValue : PortraitValue;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+public sealed class LogLevelToColorConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is LogLevel level
+            ? level switch
+            {
+                LogLevel.Critical or LogLevel.Error => Color.FromArgb("#FF6B6B"),
+                LogLevel.Warning => Color.FromArgb("#FFB347"),
+                LogLevel.Information => Color.FromArgb("#C9D6E2"),
+                LogLevel.Debug or LogLevel.Trace => Color.FromArgb("#6E8499"),
+                _ => Color.FromArgb("#8AA0B5")
+            }
+            : Color.FromArgb("#8AA0B5");
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
         throw new NotSupportedException();

@@ -1,35 +1,45 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HuaGuang.Monitor.Ipc;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
+using HuaGuang.Monitor.Services.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace HuaGuang.Monitor.ViewModels;
 
 public partial class SettingsViewModel : ObservableObject
 {
     readonly SettingsStore _store;
-    readonly AcquisitionService _acquisition;
-    readonly SubscriptionService _subscription;
+    readonly IMonitorAcquisition _acquisition;
+    readonly IMonitorSubscription _subscription;
     readonly IStartupRegistration _startup;
     readonly DashboardViewModel _dashboard;
+    readonly ILogger<SettingsViewModel> _logger;
+    bool _isApplyingLine;
+    bool _isSwitchingLine;
 
     public SettingsViewModel(
         SettingsStore store,
-        AcquisitionService acquisition,
-        SubscriptionService subscription,
+        IMonitorAcquisition acquisition,
+        IMonitorSubscription subscription,
         IStartupRegistration startup,
-        DashboardViewModel dashboard)
+        DashboardViewModel dashboard,
+        ILogger<SettingsViewModel> logger)
     {
         _store = store;
         _acquisition = acquisition;
         _subscription = subscription;
         _startup = startup;
         _dashboard = dashboard;
+        _logger = logger;
+        _isApplyingLine = true;
         LoadFrom(_store.Current);
         SelectedLineName = string.IsNullOrWhiteSpace(_store.Current.LineName)
             ? LineCatalog.LineNames[0]
             : _store.Current.LineName;
+        _isApplyingLine = false;
     }
 
     public IReadOnlyList<string> LineNames => LineCatalog.LineNames;
@@ -42,7 +52,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] string deviceId = "先河热熔胶复合机";
     [ObservableProperty] string scanIntervalMs = "60000";
     [ObservableProperty] string temperaturePublishThresholdC = "0";
-    [ObservableProperty] string temperaturePrecision = "1";
+    [ObservableProperty] string temperaturePrecision = AppSettings.DefaultTemperaturePrecision.ToString();
     [ObservableProperty] bool useSimulator = true;
     [ObservableProperty] bool startWithWindows = true;
     [ObservableProperty] bool autoStartAcquisition = true;
@@ -66,7 +76,7 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty] string mqttHost = LineMqttDefaults.Host;
     [ObservableProperty] string mqttPort = LineMqttDefaults.Port.ToString();
-    [ObservableProperty] string mqttClientId = string.Empty;
+    [ObservableProperty] string mqttClientId = LineMqttDefaults.XianheClientId;
     [ObservableProperty] string mqttUsername = LineMqttDefaults.Username;
     [ObservableProperty] string mqttPassword = LineMqttDefaults.Password;
     [ObservableProperty] bool mqttUseTls;
@@ -75,39 +85,89 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty] string statusMessage = string.Empty;
 
-    public string LineExcelPath => LineConfigPaths.GetExcelPath(SelectedLineName);
+    public string LineExcelPath => LineConfigPaths.GetLineExcelPath(SelectedLineName);
 
     partial void OnSelectedLineNameChanged(string value)
     {
         OnPropertyChanged(nameof(LineExcelPath));
-        if (IsServiceRunning() || string.IsNullOrWhiteSpace(value))
+        if (_isApplyingLine || _isSwitchingLine || string.IsNullOrWhiteSpace(value))
         {
             return;
         }
 
-        _ = LoadSelectedLineFromExcelSilentAsync();
+        if (IsServiceRunning())
+        {
+            _isApplyingLine = true;
+            SelectedLineName = _store.Current.LineName;
+            _isApplyingLine = false;
+            StatusMessage = "请先停止采集/订阅再切换产线。";
+            return;
+        }
+
+        _ = LoadSelectedLineFromExcelSilentAsync(value);
     }
 
-    async Task LoadSelectedLineFromExcelSilentAsync()
+    async Task LoadSelectedLineFromExcelSilentAsync(string lineName)
     {
+        if (_isSwitchingLine)
+        {
+            return;
+        }
+
+        _isSwitchingLine = true;
         try
         {
-            var path = LineConfigPaths.GetExcelPath(SelectedLineName);
-            LineExcelConfigService.EnsureLineFile(path, SelectedLineName);
-            var settings = _store.Current;
-            settings.LineName = SelectedLineName;
-            LineExcelConfigService.Apply(settings, path);
+            var settings = LineExcelConfigService.SwitchLine(
+                lineName,
+                LineConfigPaths.GetLineExcelPath(lineName),
+                LineConfigPaths.ResolveShippedLineExcelPath(lineName),
+                _store.Current);
             await _store.SaveAsync(settings);
-            LoadFrom(settings);
+            await ApplyLoadedSettingsOnMainThreadAsync(settings, $"已切换产线：{lineName}（PLC {settings.Plc.Host}，ClientId {settings.Mqtt.ClientId}）");
             _dashboard.Reload();
+            _logger.LogInformation(
+                "产线已切换 line={LineName} plc={Plc} mqtt={Mqtt}",
+                lineName,
+                LogFormatting.DescribePlc(settings.Plc),
+                LogFormatting.DescribeMqtt(settings.Mqtt, lineName));
         }
-        catch
+        catch (Exception ex)
         {
-            // 切换产线时静默失败，用户可手动点「从 Excel 载入」
+            _logger.LogWarning(ex, "切换产线失败 line={LineName}", lineName);
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                _isApplyingLine = true;
+                SelectedLineName = _store.Current.LineName;
+                _isApplyingLine = false;
+                StatusMessage = $"切换产线失败：{ex.Message}";
+            });
+        }
+        finally
+        {
+            _isSwitchingLine = false;
         }
     }
 
-    public void Reload() => LoadFrom(_store.Current);
+    public void Reload()
+    {
+        if (_isSwitchingLine)
+        {
+            return;
+        }
+
+        LoadFrom(_store.Current);
+    }
+
+    async Task ApplyLoadedSettingsOnMainThreadAsync(AppSettings settings, string successMessage)
+    {
+        await MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            _isApplyingLine = true;
+            LoadFrom(settings);
+            _isApplyingLine = false;
+            StatusMessage = successMessage;
+        });
+    }
 
     [RelayCommand]
     void AddSubscribeTopic()
@@ -162,18 +222,18 @@ public partial class SettingsViewModel : ObservableObject
 
         try
         {
-            var path = LineConfigPaths.GetExcelPath(SelectedLineName);
-            LineExcelConfigService.EnsureLineFile(path, SelectedLineName);
-
-            var settings = _store.Current;
-            settings.LineName = SelectedLineName;
-            LineExcelConfigService.Apply(settings, path);
+            var lineName = SelectedLineName;
+            var settings = LineExcelConfigService.LoadLineExcel(
+                lineName,
+                LineConfigPaths.GetLineExcelPath(lineName),
+                LineConfigPaths.ResolveShippedLineExcelPath(lineName));
             await _store.SaveAsync(settings);
-            LoadFrom(settings);
-            _dashboard.Reload();
             var plcCount = settings.Tags.Count(t => !t.IsManual);
             var manualCount = settings.Tags.Count(t => t.IsManual);
-            StatusMessage = $"已从 Excel 载入：{settings.LineName}，PLC {plcCount} 个，手动 {manualCount} 个。";
+            await ApplyLoadedSettingsOnMainThreadAsync(
+                settings,
+                $"已从 Excel 载入：{settings.LineName}，PLC {plcCount} 个，手动 {manualCount} 个。");
+            _dashboard.Reload();
         }
         catch (Exception ex)
         {
@@ -195,9 +255,8 @@ public partial class SettingsViewModel : ObservableObject
             var settings = BuildPendingSettings();
             settings.Tags = _store.Current.Tags;
             settings.MqttPayload = _store.Current.MqttPayload;
-            var path = LineConfigPaths.GetExcelPath(SelectedLineName);
-            LineExcelConfigService.Export(settings, path);
-            StatusMessage = $"已保存到 Excel：{path}";
+            await _store.SaveAsync(settings);
+            StatusMessage = $"已保存到 Excel：{LineConfigPaths.GetLineExcelPath(settings.LineName)}";
             await Task.CompletedTask;
         }
         catch (Exception ex)
@@ -235,16 +294,17 @@ public partial class SettingsViewModel : ObservableObject
                 await stream.CopyToAsync(fileStream);
             }
 
-            var destPath = LineConfigPaths.GetExcelPath(SelectedLineName);
+            var destPath = LineConfigPaths.GetLineExcelPath(SelectedLineName);
             LineExcelConfigService.ImportToLineFile(tempPath, destPath, SelectedLineName);
             File.Delete(tempPath);
 
-            settings.LineName = SelectedLineName;
-            LineExcelConfigService.Apply(settings, destPath);
+            settings = LineExcelConfigService.LoadLineExcel(
+                SelectedLineName,
+                destPath,
+                LineConfigPaths.ResolveShippedLineExcelPath(SelectedLineName));
             await _store.SaveAsync(settings);
-            LoadFrom(settings);
+            await ApplyLoadedSettingsOnMainThreadAsync(settings, $"已导入并保存到产线文件：{destPath}");
             _dashboard.Reload();
-            StatusMessage = $"已导入并保存到产线文件：{destPath}";
         }
         catch (Exception ex)
         {
@@ -267,23 +327,47 @@ public partial class SettingsViewModel : ObservableObject
         settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
         settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 60_000, 200, 60_000);
         settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
-        settings.TemperaturePrecision = ParseInt(TemperaturePrecision, 1, 0, 4);
+        settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
         settings.UseSimulator = UseSimulator;
         settings.Plc.Host = PlcHost.Trim();
         settings.Plc.Port = ParseInt(PlcPort, 502, 1, 65535);
         settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
         settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
         settings.Mqtt.Host = MqttHost.Trim();
-        settings.Mqtt.Port = ParseInt(MqttPort, 1883, 1, 65535);
+        settings.Mqtt.Port = ParseInt(MqttPort, LineMqttDefaults.Port, 1, 65535);
         settings.Mqtt.ClientId = MqttClientId.Trim();
         settings.Mqtt.Username = MqttUsername.Trim();
         settings.Mqtt.Password = MqttPassword;
         settings.Mqtt.UseTls = MqttUseTls;
         settings.Mqtt.Qos = ParseInt(MqttQos, 0, 0, 2);
         settings.Mqtt.Topic = string.IsNullOrWhiteSpace(MqttTopic)
-            ? "monitor/{deviceId}/telemetry"
+            ? LineMqttDefaults.ResolvePublishTopic(settings.LineName)
             : MqttTopic.Trim();
         return settings;
+    }
+
+    bool TryValidateMqttSettings(out string message)
+    {
+        if (string.IsNullOrWhiteSpace(MqttClientId))
+        {
+            message = "请填写 MQTT ClientId（先河 XHRRJFHJ，华迪 HDRRJFHJ）。";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(MqttUsername))
+        {
+            message = "请填写 MQTT 用户名。";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(MqttPassword))
+        {
+            message = "请填写 MQTT 密码。";
+            return false;
+        }
+
+        message = string.Empty;
+        return true;
     }
 
     [RelayCommand]
@@ -291,6 +375,12 @@ public partial class SettingsViewModel : ObservableObject
     {
         try
         {
+            if (!TryValidateMqttSettings(out var validationMessage))
+            {
+                StatusMessage = validationMessage;
+                return;
+            }
+
             var running = IsServiceRunning();
 
             var settings = _store.Current;
@@ -311,7 +401,7 @@ public partial class SettingsViewModel : ObservableObject
             settings.LineName = SelectedLineName;
             settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 60_000, 200, 60_000);
             settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
-            settings.TemperaturePrecision = ParseInt(TemperaturePrecision, 1, 0, 4);
+            settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
             settings.UseSimulator = UseSimulator;
             settings.StartWithWindows = StartWithWindows;
             settings.AutoStartAcquisition = AutoStartAcquisition;
@@ -322,19 +412,19 @@ public partial class SettingsViewModel : ObservableObject
             settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
             settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
             settings.Mqtt.Host = MqttHost.Trim();
-            settings.Mqtt.Port = ParseInt(MqttPort, 1883, 1, 65535);
+            settings.Mqtt.Port = ParseInt(MqttPort, LineMqttDefaults.Port, 1, 65535);
             settings.Mqtt.ClientId = MqttClientId.Trim();
             settings.Mqtt.Username = MqttUsername.Trim();
             settings.Mqtt.Password = MqttPassword;
             settings.Mqtt.UseTls = MqttUseTls;
             settings.Mqtt.Qos = ParseInt(MqttQos, 0, 0, 2);
             settings.Mqtt.Topic = string.IsNullOrWhiteSpace(MqttTopic)
-                ? "monitor/{deviceId}/telemetry"
+                ? LineMqttDefaults.ResolvePublishTopic(settings.LineName)
                 : MqttTopic.Trim();
 
             _startup.Apply(settings.StartWithWindows);
-            LineConfigPaths.SaveCurrentLine(settings);
             await _store.SaveAsync(settings);
+            await NotifyRuntimeReloadAsync();
             _dashboard.Reload();
             StatusMessage = running
                 ? "设置已保存。部分项需停止采集/订阅后重新启动才会生效。"
@@ -376,7 +466,9 @@ public partial class SettingsViewModel : ObservableObject
         PlcTimeoutMs = settings.Plc.TimeoutMs.ToString();
         MqttHost = settings.Mqtt.Host;
         MqttPort = settings.Mqtt.Port.ToString();
-        MqttClientId = settings.Mqtt.ClientId;
+        MqttClientId = string.IsNullOrWhiteSpace(settings.Mqtt.ClientId)
+            ? LineMqttDefaults.ResolveClientIdForLine(settings.LineName)
+            : settings.Mqtt.ClientId;
         MqttUsername = settings.Mqtt.Username;
         MqttPassword = settings.Mqtt.Password;
         MqttUseTls = settings.Mqtt.UseTls;
@@ -406,4 +498,25 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     bool IsServiceRunning() => _acquisition.IsRunning || _subscription.IsRunning;
+
+    async Task NotifyRuntimeReloadAsync()
+    {
+#if WINDOWS
+        if (!MauiProgram.UsesWindowsBackgroundService)
+        {
+            return;
+        }
+
+        try
+        {
+            await new MonitorIpcClient().SendAsync(new MonitorIpcRequest
+            {
+                Command = MonitorIpcCommand.ReloadSettings
+            });
+        }
+        catch
+        {
+        }
+#endif
+    }
 }

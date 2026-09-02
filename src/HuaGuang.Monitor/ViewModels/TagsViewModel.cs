@@ -10,12 +10,12 @@ namespace HuaGuang.Monitor.ViewModels;
 public partial class TagsViewModel : ObservableObject
 {
     readonly SettingsStore _store;
-    readonly AcquisitionService _acquisition;
+    readonly IMonitorAcquisition _acquisition;
     readonly DashboardViewModel _dashboard;
 
     string? _reloadSignature;
 
-    public TagsViewModel(SettingsStore store, AcquisitionService acquisition, DashboardViewModel dashboard)
+    public TagsViewModel(SettingsStore store, IMonitorAcquisition acquisition, DashboardViewModel dashboard)
     {
         _store = store;
         _acquisition = acquisition;
@@ -47,7 +47,7 @@ public partial class TagsViewModel : ObservableObject
         }
 
         _reloadSignature = signature;
-        TagGroups.Clear();
+        GroupedCollectionHelper.ClearConfigGroups(TagGroups);
         var tags = storeTags.Select(tag => new TagConfigViewModel(tag)).ToList();
 
         foreach (var group in tags
@@ -115,10 +115,40 @@ public partial class TagsViewModel : ObservableObject
         }
 
         _store.Current.Tags.RemoveAll(t => t.Id == tag.Id);
-        LineConfigPaths.SaveCurrentLine(_store.Current);
         await _store.SaveAsync(_store.Current);
-        Reload();
+
+        if (!TryRemoveTagFromGroups(item))
+        {
+            Reload(force: true);
+        }
+        else
+        {
+            UpdateSummary(_store.Current.Tags);
+            _reloadSignature = BuildReloadSignature(_store.Current.Tags);
+        }
+
         _dashboard.Reload();
         StatusMessage = $"已删除 {tag.Name}";
+    }
+
+    bool TryRemoveTagFromGroups(TagConfigViewModel item)
+    {
+        foreach (var group in TagGroups)
+        {
+            if (!group.Contains(item))
+            {
+                continue;
+            }
+
+            group.Remove(item);
+            if (group.Count == 0)
+            {
+                TagGroups.Remove(group);
+            }
+
+            return true;
+        }
+
+        return false;
     }
 }

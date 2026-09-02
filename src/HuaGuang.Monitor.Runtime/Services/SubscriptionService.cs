@@ -1,26 +1,30 @@
 using System.Text.Json;
 using HuaGuang.Monitor.Messaging;
 using HuaGuang.Monitor.Models;
+using HuaGuang.Monitor.Services.Logging;
+using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Protocol;
 
 namespace HuaGuang.Monitor.Services;
 
-public sealed class SubscriptionService : IAsyncDisposable
+public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
 {
     const int MaxTrackedDevices = 64;
     static readonly TimeSpan DeviceRetention = TimeSpan.FromMinutes(30);
     const int MaxPayloadLength = 4096;
 
     readonly SettingsStore _settingsStore;
+    readonly ILogger<SubscriptionService> _logger;
     readonly MqttClientFactory _factory = new();
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
     readonly SemaphoreSlim _gate = new(1, 1);
     IMqttClient? _client;
 
-    public SubscriptionService(SettingsStore settingsStore)
+    public SubscriptionService(SettingsStore settingsStore, ILogger<SubscriptionService> logger)
     {
         _settingsStore = settingsStore;
+        _logger = logger;
     }
 
     public bool IsRunning { get; private set; }
@@ -70,6 +74,11 @@ public sealed class SubscriptionService : IAsyncDisposable
             IsRunning = true;
             LastError = string.Empty;
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            _logger.LogInformation(
+                "启动订阅 line={LineName} topics={Topics} mqtt={Mqtt}",
+                settings.LineName,
+                string.Join(", ", topics),
+                LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
         }
         finally
         {
@@ -87,6 +96,7 @@ public sealed class SubscriptionService : IAsyncDisposable
             _devices.Clear();
             await DisconnectAsync().ConfigureAwait(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            _logger.LogInformation("订阅已停止");
         }
         finally
         {
@@ -115,6 +125,9 @@ public sealed class SubscriptionService : IAsyncDisposable
             await ConnectAsync(settings, topics).ConfigureAwait(false);
             LastError = string.Empty;
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            _logger.LogInformation(
+                "订阅主题已刷新 topics={Topics}",
+                string.Join(", ", topics));
         }
         finally
         {
@@ -144,8 +157,13 @@ public sealed class SubscriptionService : IAsyncDisposable
             return Task.CompletedTask;
         };
 
-        var options = MqttConnectionFactory.BuildOptions(settings.Mqtt, "sub");
-        await client.ConnectAsync(options, CancellationToken.None).ConfigureAwait(false);
+        var options = MqttConnectionFactory.BuildOptions(settings.Mqtt, settings.LineName);
+        await MqttConnectionFactory.ConnectClientAsync(
+            client,
+            options,
+            settings.Mqtt,
+            MqttTimeouts.Connect,
+            CancellationToken.None).ConfigureAwait(false);
 
         var qos = settings.Mqtt.Qos switch
         {
@@ -164,6 +182,10 @@ public sealed class SubscriptionService : IAsyncDisposable
 
         _client = client;
         ActiveSubscribeTopics = topics;
+        _logger.LogInformation(
+            "MQTT 订阅已连接 topics={Topics} mqtt={Mqtt}",
+            string.Join(", ", topics),
+            LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
     }
 
     /// <summary>Diagnostics only: inject telemetry without a live MQTT broker.</summary>
@@ -233,6 +255,11 @@ public sealed class SubscriptionService : IAsyncDisposable
         catch (Exception ex)
         {
             LastError = $"解析遥测失败：{ex.Message}";
+            _logger.LogWarning(
+                ex,
+                "解析遥测失败 topic={Topic} payload={Payload}",
+                message.Topic,
+                LogFormatting.Truncate(message.ConvertPayloadToString()));
             DevicesUpdated?.Invoke(this, EventArgs.Empty);
         }
     }

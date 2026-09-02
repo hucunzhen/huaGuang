@@ -1,5 +1,7 @@
 using System.Net.Sockets;
 using HuaGuang.Monitor.Models;
+using HuaGuang.Monitor.Services.Logging;
+using Microsoft.Extensions.Logging;
 using NModbus;
 
 namespace HuaGuang.Monitor.Protocols;
@@ -7,10 +9,13 @@ namespace HuaGuang.Monitor.Protocols;
 public sealed class ModbusTcpPlcClient : IPlcClient
 {
     readonly object _gate = new();
+    readonly ILogger<ModbusTcpPlcClient> _logger;
     TcpClient? _tcpClient;
     IModbusMaster? _master;
     byte _station = 1;
     int _timeoutMs = 2000;
+
+    public ModbusTcpPlcClient(ILogger<ModbusTcpPlcClient> logger) => _logger = logger;
 
     public bool IsConnected => _tcpClient is { Connected: true } && _master is not null;
 
@@ -18,25 +23,55 @@ public sealed class ModbusTcpPlcClient : IPlcClient
     {
         await DisconnectAsync().ConfigureAwait(false);
 
+        var timeoutMs = Math.Clamp(settings.TimeoutMs, 500, 10_000);
         var client = new TcpClient { NoDelay = true };
+
         try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(Math.Max(500, settings.TimeoutMs));
-            await client.ConnectAsync(settings.Host, settings.Port, timeoutCts.Token).ConfigureAwait(false);
-            client.ReceiveTimeout = settings.TimeoutMs;
-            client.SendTimeout = settings.TimeoutMs;
+            var connectTask = client.ConnectAsync(settings.Host, settings.Port);
+            var completed = await Task.WhenAny(connectTask, Task.Delay(timeoutMs, cancellationToken)).ConfigureAwait(false);
+            if (completed != connectTask)
+            {
+                try
+                {
+                    client.Close();
+                }
+                catch
+                {
+                    // 强制关闭以中断仍在进行的 TCP 连接
+                }
+
+                throw new TimeoutException($"PLC 连接超时（{timeoutMs} ms）：{settings.Host}:{settings.Port}");
+            }
+
+            await connectTask.ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            client.ReceiveTimeout = timeoutMs;
+            client.SendTimeout = timeoutMs;
 
             lock (_gate)
             {
                 _tcpClient = client;
                 _master = new ModbusFactory().CreateMaster(client);
                 _station = settings.Station;
-                _timeoutMs = Math.Clamp(settings.TimeoutMs, 200, 10_000);
+                _timeoutMs = timeoutMs;
             }
+
+            _logger.LogInformation("PLC 已连接 {Plc}", LogFormatting.DescribePlc(settings));
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "PLC 连接失败 {Plc}", LogFormatting.DescribePlc(settings));
+            try
+            {
+                client.Close();
+            }
+            catch
+            {
+                // 忽略清理时的二次异常
+            }
+
             client.Dispose();
             throw;
         }
@@ -44,8 +79,10 @@ public sealed class ModbusTcpPlcClient : IPlcClient
 
     public Task DisconnectAsync()
     {
+        var wasConnected = false;
         lock (_gate)
         {
+            wasConnected = _tcpClient is { Connected: true };
             try
             {
                 _master?.Dispose();
@@ -66,6 +103,11 @@ public sealed class ModbusTcpPlcClient : IPlcClient
             }
 
             _tcpClient = null;
+        }
+
+        if (wasConnected)
+        {
+            _logger.LogInformation("PLC 已断开");
         }
 
         return Task.CompletedTask;
@@ -107,6 +149,7 @@ public sealed class ModbusTcpPlcClient : IPlcClient
 
     void AbortOnTimeout()
     {
+        _logger.LogWarning("PLC 读超时，强制断开连接");
         lock (_gate)
         {
             try

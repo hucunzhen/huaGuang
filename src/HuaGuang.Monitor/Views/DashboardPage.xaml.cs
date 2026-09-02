@@ -1,21 +1,31 @@
+using System.ComponentModel;
+using HuaGuang.Monitor.Services;
 using HuaGuang.Monitor.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace HuaGuang.Monitor.Views;
 
 public partial class DashboardPage : MonitorPageBase
 {
+    readonly IScannerInputMethodGuard _inputMethodGuard;
     DashboardViewModel? _viewModel;
+    IDisposable? _englishInputScope;
 
-    public DashboardPage() : this(MauiProgram.Services.GetRequiredService<DashboardViewModel>())
+    public DashboardPage() : this(
+        MauiProgram.Services.GetRequiredService<DashboardViewModel>(),
+        MauiProgram.Services.GetRequiredService<IScannerInputMethodGuard>())
     {
     }
 
-    public DashboardPage(DashboardViewModel viewModel)
+    public DashboardPage(DashboardViewModel viewModel, IScannerInputMethodGuard inputMethodGuard)
     {
         InitializeComponent();
+        _inputMethodGuard = inputMethodGuard;
         BindingContext = viewModel;
         _viewModel = viewModel;
-        viewModel.RequestProductSkuFocus = FocusProductSkuEntry;
+        viewModel.RequestScannerFocus = FocusScannerInputEntry;
+        viewModel.RequestScannerInputMethodCycle = CycleScannerEnglishInput;
+        viewModel.PropertyChanged += OnViewModelPropertyChanged;
     }
 
     protected override async void OnAppearing()
@@ -24,34 +34,102 @@ public partial class DashboardPage : MonitorPageBase
         if (BindingContext is DashboardViewModel viewModel)
         {
             _viewModel = viewModel;
-            viewModel.RequestProductSkuFocus = FocusProductSkuEntry;
-            viewModel.Reload();
+            viewModel.RequestScannerFocus = FocusScannerInputEntry;
+            viewModel.RequestScannerInputMethodCycle = CycleScannerEnglishInput;
+            viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            viewModel.RefreshOnAppear();
             await viewModel.TryAutoStartAsync();
+            if (viewModel.ShowScannerInput)
+            {
+                BeginScannerEnglishInput();
+            }
         }
     }
 
-    async void OnProductSkuCompleted(object? sender, EventArgs e)
+    protected override void OnDisappearing()
     {
-        if (_viewModel?.SubmitProductSkuCommand.CanExecute(null) == true)
+        EndScannerEnglishInput();
+        if (_viewModel is not null)
         {
-            await _viewModel.SubmitProductSkuCommand.ExecuteAsync(null);
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        }
+
+        base.OnDisappearing();
+    }
+
+    void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(DashboardViewModel.ShowScannerInput))
+        {
+            return;
+        }
+
+        if (_viewModel?.ShowScannerInput == true)
+        {
+            BeginScannerEnglishInput();
+            return;
+        }
+
+        EndScannerEnglishInput();
+    }
+
+    async void OnScannerInputCompleted(object? sender, EventArgs e)
+    {
+        if (_viewModel?.SubmitScannerInputCommand.CanExecute(null) == true)
+        {
+            await _viewModel.SubmitScannerInputCommand.ExecuteAsync(null);
+        }
+
+        EndScannerEnglishInput();
+        if (_viewModel?.ShowScannerInput == true)
+        {
+            CycleScannerEnglishInput();
         }
     }
 
-    void FocusProductSkuEntry()
+    void CycleScannerEnglishInput()
     {
-        _ = FocusProductSkuEntryDelayedAsync();
+        EndScannerEnglishInput();
+        if (_viewModel?.ShowScannerInput == true)
+        {
+            BeginScannerEnglishInput();
+        }
     }
 
-    async Task FocusProductSkuEntryDelayedAsync()
+    void OnScannerInputEntryFocused(object? sender, FocusEventArgs e) => BeginScannerEnglishInput();
+
+    void FocusScannerInputEntry()
     {
-        if (_viewModel?.ShowProductSkuInput != true)
+        _ = FocusScannerInputEntryDelayedAsync();
+    }
+
+    async Task FocusScannerInputEntryDelayedAsync()
+    {
+        if (_viewModel?.ShowScannerInput != true)
         {
             return;
         }
 
         await Task.Delay(150);
-        ProductSkuEntry?.Focus();
+        ScannerInputEntry?.Focus();
+        BeginScannerEnglishInput();
+    }
+
+    void BeginScannerEnglishInput()
+    {
+        if (_viewModel?.ShowScannerInput != true || _englishInputScope is not null)
+        {
+            return;
+        }
+
+        _englishInputScope = _inputMethodGuard.EnterEnglishInputMode(ScannerInputEntry);
+    }
+
+    void EndScannerEnglishInput()
+    {
+        _englishInputScope?.Dispose();
+        _englishInputScope = null;
     }
 
     void OnFullScreenClicked(object? sender, EventArgs e) => ToggleFullScreen();

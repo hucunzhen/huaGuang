@@ -10,14 +10,7 @@ internal interface IScanMonotonicClock
 
 internal static class ScanMonotonicClock
 {
-    public static IScanMonotonicClock Create()
-    {
-#if ANDROID
-        return new Platforms.Android.AndroidScanMonotonicClock();
-#else
-        return new StopwatchScanMonotonicClock();
-#endif
-    }
+    public static IScanMonotonicClock Create() => new StopwatchScanMonotonicClock();
 }
 
 internal sealed class StopwatchScanMonotonicClock : IScanMonotonicClock

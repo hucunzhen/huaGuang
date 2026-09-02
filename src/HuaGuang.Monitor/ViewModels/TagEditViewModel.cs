@@ -9,15 +9,15 @@ namespace HuaGuang.Monitor.ViewModels;
 public partial class TagEditViewModel : ObservableObject, IQueryAttributable
 {
     readonly SettingsStore _store;
-    readonly AcquisitionService _acquisition;
-    readonly SubscriptionService _subscription;
+    readonly IMonitorAcquisition _acquisition;
+    readonly IMonitorSubscription _subscription;
     readonly DashboardViewModel _dashboard;
     string? _tagId;
 
     public TagEditViewModel(
         SettingsStore store,
-        AcquisitionService acquisition,
-        SubscriptionService subscription,
+        IMonitorAcquisition acquisition,
+        IMonitorSubscription subscription,
         DashboardViewModel dashboard)
     {
         _store = store;
@@ -50,12 +50,16 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPlcSource))]
     [NotifyPropertyChangedFor(nameof(IsManualSource))]
+    [NotifyPropertyChangedFor(nameof(ShowScannerInputOption))]
     string selectedSourceType = "PLC 采集";
     [ObservableProperty] string manualValue = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ResolvedHint))]
     string xinjeAddress = "D0";
-    [ObservableProperty] string dataTypeName = nameof(TagDataType.Float32);
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowPrecision))]
+    [NotifyPropertyChangedFor(nameof(ShowScannerInputOption))]
+    string dataTypeName = nameof(TagDataType.Float32);
     [ObservableProperty] string byteOrderName = nameof(Models.ByteOrder.CDAB);
     [ObservableProperty] string scale = "1";
     [ObservableProperty] string offset = "0";
@@ -63,19 +67,32 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     [ObservableProperty] string mqttField = string.Empty;
     [ObservableProperty] string selectedDisplayCategoryOption = "自动推断";
     [ObservableProperty] string statusMessage = string.Empty;
+    [ObservableProperty] bool useScannerInput;
 
     public bool IsPlcSource => SelectedSourceType == "PLC 采集";
     public bool IsManualSource => SelectedSourceType == "手动输入";
+    public bool ShowScannerInputOption =>
+        IsManualSource && DataTypeName == nameof(TagDataType.String);
     public bool ShowPrecision =>
         DataTypeName != nameof(TagDataType.String) && DataTypeName != nameof(TagDataType.Bool);
 
-    partial void OnDataTypeNameChanged(string value) => OnPropertyChanged(nameof(ShowPrecision));
+    partial void OnDataTypeNameChanged(string value)
+    {
+        OnPropertyChanged(nameof(ShowPrecision));
+        OnPropertyChanged(nameof(ShowScannerInputOption));
+        if (value != nameof(TagDataType.String))
+        {
+            UseScannerInput = false;
+        }
+    }
 
     partial void OnSelectedSourceTypeChanged(string value)
     {
+        OnPropertyChanged(nameof(ShowScannerInputOption));
         if (value == "PLC 采集" && DataTypeName == nameof(TagDataType.String))
         {
             DataTypeName = nameof(TagDataType.Float32);
+            UseScannerInput = false;
         }
     }
 
@@ -118,12 +135,16 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 SelectedDisplayCategoryOption = tag.DisplayCategory is { } category
                     ? TagDisplayCategoryHelper.ToLabel(category)
                     : "自动推断";
+                UseScannerInput = tag.UseScannerInput;
                 return;
             }
         }
 
         ResetForNew();
     }
+
+    [RelayCommand]
+    Task GoBackAsync() => Shell.Current.GoToAsync("..");
 
     [RelayCommand]
     async Task SaveAsync()
@@ -167,6 +188,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
             : TagDisplayCategoryHelper.TryParseLabel(SelectedDisplayCategoryOption, out var category)
                 ? category
                 : TagDisplayCategoryHelper.InferCategory(tag);
+        tag.UseScannerInput = UseScannerInput && IsManualSource && dataType == TagDataType.String;
 
         if (IsManualSource)
         {
@@ -223,7 +245,6 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
 
         await _store.SaveAsync(_store.Current);
-        LineConfigPaths.SaveCurrentLine(_store.Current);
         _dashboard.Reload();
         await Shell.Current.GoToAsync("..");
     }
@@ -245,6 +266,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         DisplayPrecision = string.Empty;
         MqttField = string.Empty;
         SelectedDisplayCategoryOption = "自动推断";
+        UseScannerInput = false;
         StatusMessage = string.Empty;
     }
 

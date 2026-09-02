@@ -41,13 +41,13 @@
             </Grid>
             <Label Text="首页可切换「全部」或单个主题查看设备；运行中也可在首页直接添加主题。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsSubscribeSettings}" />
-            <Label Text="产线（Excel 配置，每条产线一个 xlsx）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="产线（Excel 配置「产线名称」决定当前产线；配置文件见下方路径）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Picker ItemsSource="{Binding LineNames}" SelectedItem="{Binding SelectedLineName}" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="{Binding LineExcelPath}" TextColor="#6E8499" FontSize="11" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Button Text="从 Excel 载入产线" Command="{Binding LoadLineFromExcelCommand}" IsVisible="{Binding IsAcquisitionSettings}" />
             <Button Text="保存当前配置到 Excel" Command="{Binding SaveLineToExcelCommand}" BackgroundColor="#1F3A52" IsVisible="{Binding IsAcquisitionSettings}" />
             <Button Text="从其他 Excel 文件导入…" Command="{Binding ImportLineExcelFromFileCommand}" BackgroundColor="#1F3A52" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="每条产线一个 xlsx（程序目录 lines\ 或 AppData），含「配置」「MQTT报文」「字段映射」「点表」「显示分组说明」。点表列「显示分组」控制监控页分组与颜色；留空则自动推断。保存设置时同步写回；切换产线自动载入。"
+            <Label Text="全部配置保存在 lines 目录下对应产线 xlsx（与仓库 config/lines 同源）；点表仅以此 Excel 为准，不会自动追加代码内置点位。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="设备编号" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding DeviceId}" Placeholder="LINE-01" IsVisible="{Binding IsAcquisitionSettings}" />
@@ -59,9 +59,9 @@
             <Entry Text="{Binding TemperaturePublishThresholdC}" Keyboard="Numeric" Placeholder="0" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="0 = 每次扫描都发布；大于 0 时，温度变化达到阈值才发布，但最长不超过一个扫描周期。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="温度精度（小数位）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding TemperaturePrecision}" Keyboard="Numeric" Placeholder="1" />
-            <Label Text="全局默认精度（0–4）。各点位可在「点位 → 编辑」单独设置；未设置时使用此值。"
+            <Label Text="精度（小数位）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding TemperaturePrecision}" Keyboard="Numeric" Placeholder="2" />
+            <Label Text="全局默认显示与 MQTT 小数位（0–4）。各点位可在「点位 → 编辑」单独设置；未设置时使用此值。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
             <HorizontalStackLayout Spacing="10" IsVisible="{Binding IsAcquisitionSettings}">
                 <CheckBox IsChecked="{Binding UseSimulator}" Color="#2EC4B6" VerticalOptions="Center" />
@@ -101,10 +101,10 @@
             <Label Text="MQTT" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
             <Label Text="Broker 地址" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttHost}" Placeholder="127.0.0.1" />
-            <Label Text="端口（默认 1883）" TextColor="#8AA0B5" FontSize="12" />
+            <Label Text="端口（默认 1888）" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttPort}" Keyboard="Numeric" />
-            <Label Text="ClientId（可空，自动生成）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttClientId}" />
+            <Label Text="ClientId（先河 XHRRJFHJ，华迪 HDRRJFHJ）" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding MqttClientId}" Placeholder="XHRRJFHJ" />
             <Label Text="用户名" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttUsername}" />
             <Label Text="密码" TextColor="#8AA0B5" FontSize="12" />

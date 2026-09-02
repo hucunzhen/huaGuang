@@ -16,7 +16,7 @@ public static class MonitorSelfTests
     }
 
     public static IReadOnlyList<DiagnosticResult> RunIntegrationTests(
-        SubscriptionService subscription,
+        IMonitorSubscription subscription,
         DashboardViewModel dashboard) =>
     [
         Run("遥测 JSON 解析", () => TestTelemetryParse(subscription)),
@@ -62,7 +62,7 @@ public static class MonitorSelfTests
         }
     }
 
-    static void TestTelemetryParse(SubscriptionService subscription)
+    static void TestTelemetryParse(IMonitorSubscription subscription)
     {
         subscription.InjectTelemetry(
             "monitor/test-line/telemetry",
@@ -88,7 +88,7 @@ public static class MonitorSelfTests
         }
     }
 
-    static void TestSubscribeUpdates(SubscriptionService subscription)
+    static void TestSubscribeUpdates(IMonitorSubscription subscription)
     {
         for (var i = 0; i < 200; i++)
         {
@@ -112,7 +112,7 @@ public static class MonitorSelfTests
         }
     }
 
-    static void TestMultiDeviceSubscribe(SubscriptionService subscription)
+    static void TestMultiDeviceSubscribe(IMonitorSubscription subscription)
     {
         subscription.InjectTelemetry(
             "monitor/line-a/telemetry",
@@ -144,7 +144,7 @@ public static class MonitorSelfTests
         }
     }
 
-    static void TestDeviceCacheLimit(SubscriptionService subscription)
+    static void TestDeviceCacheLimit(IMonitorSubscription subscription)
     {
         for (var i = 0; i < 80; i++)
         {
