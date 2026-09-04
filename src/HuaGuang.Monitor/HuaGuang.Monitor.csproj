@@ -33,8 +33,8 @@
 		<ApplicationId>com.industrial.monitor</ApplicationId>
 
 		<!-- Versions: DisplayVersion=版本号, ApplicationVersion=修订号(Android versionCode) -->
-		<ApplicationDisplayVersion>1.1.6</ApplicationDisplayVersion>
-		<ApplicationVersion>3</ApplicationVersion>
+		<ApplicationDisplayVersion>1.1.7</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
 		<WindowsPackageType>None</WindowsPackageType>
@@ -170,6 +170,7 @@
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
 		<PackageReference Include="MQTTnet" Version="5.2.0.1603" />
 		<PackageReference Include="NModbus" Version="3.0.83" />
+		<PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
 	</ItemGroup>
 
 	<!-- Release 发布完成后自动调用 Inno Setup 生成安装包（需本机安装 ISCC） -->

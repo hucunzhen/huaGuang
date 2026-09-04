@@ -97,6 +97,12 @@ public sealed class EqualWidthRowLayout : ContentView
 
     void Rebuild()
     {
+        if (!MainThread.IsMainThread)
+        {
+            MainThread.BeginInvokeOnMainThread(Rebuild);
+            return;
+        }
+
         _grid.Children.Clear();
         _grid.ColumnDefinitions.Clear();
         _grid.ColumnSpacing = ItemSpacing;

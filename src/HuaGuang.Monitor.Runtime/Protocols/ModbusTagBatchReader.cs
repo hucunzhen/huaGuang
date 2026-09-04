@@ -286,7 +286,7 @@ internal static class ModbusTagBatchReader
 
             {
 
-                var tagStart = (ushort)(start + item.Offset);
+                var tagStart = (ushort)(block.StartAddress + item.Offset);
 
                 var tagEnd = (ushort)(tagStart + item.RegisterCount - 1);
 
@@ -534,5 +534,39 @@ internal static class ModbusTagBatchReader
 
         ByteOrder ByteOrder);
 
+    internal static IReadOnlyCollection<string> GetPlannedTagNames(IReadOnlyList<PlcTag> tags)
+    {
+        var resolved = tags.Select(Resolve).ToList();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var block in PlanRegisterBlocks(resolved))
+        {
+            foreach (var item in block.Items)
+            {
+                names.Add(item.Name);
+            }
+        }
+
+        return names;
+    }
+
+    internal static IReadOnlyList<PlannedRegisterChunk> GetPlannedRegisterChunks(IReadOnlyList<PlcTag> tags)
+    {
+        var resolved = tags.Select(Resolve).ToList();
+        var chunks = new List<PlannedRegisterChunk>();
+        foreach (var block in PlanRegisterBlocks(resolved))
+        {
+            chunks.Add(new PlannedRegisterChunk(
+                block.StartAddress,
+                block.RegisterCount,
+                block.Items.Select(item => item.Name).ToList()));
+        }
+
+        return chunks;
+    }
+
+    internal readonly record struct PlannedRegisterChunk(
+        ushort StartAddress,
+        ushort RegisterCount,
+        IReadOnlyList<string> TagNames);
 }
 

@@ -75,7 +75,7 @@ public static class MonitorSelfTests
               "quality": "Good",
               "tags": {
                 "车速": 45.2,
-                "热溶胶盘温度（热熔胶机1）": 180.5
+                "油温机温度": 180.5
               }
             }
             """);

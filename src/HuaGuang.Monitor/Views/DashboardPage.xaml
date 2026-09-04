@@ -266,6 +266,7 @@
 
                     <Button Text="{Binding ToggleText}"
                             Command="{Binding ToggleCommand}"
+                            IsEnabled="{Binding IsToggleBusy, Converter={StaticResource InverseBoolConverter}}"
                             Padding="12,8"
                             MinimumWidthRequest="88"
                             VerticalOptions="Center"
@@ -344,6 +345,7 @@
 
                 <Button Text="{Binding ToggleText}"
                         Command="{Binding ToggleCommand}"
+                        IsEnabled="{Binding IsToggleBusy, Converter={StaticResource InverseBoolConverter}}"
                         Padding="12,8"
                         MinimumWidthRequest="88"
                         VerticalOptions="Center"

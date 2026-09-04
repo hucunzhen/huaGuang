@@ -18,6 +18,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     static bool _autoStartAttempted;
     List<string> _cachedDeviceKeys = [];
     readonly Dictionary<string, TagRowViewModel> _rowLookup = new(StringComparer.Ordinal);
+    readonly Dictionary<string, TagRowViewModel> _rowLookupByName = new(StringComparer.Ordinal);
     readonly Dictionary<string, Dictionary<string, TagRowViewModel>> _multiRowLookup = new(StringComparer.Ordinal);
 
     public DashboardViewModel(
@@ -64,6 +65,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty] string scannerInputDraft = string.Empty;
     [ObservableProperty] bool showScannerInput;
     [ObservableProperty] string scannerInputTitle = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanToggle))]
+    bool isToggleBusy;
+
+    public bool CanToggle => !IsToggleBusy;
 
     PlcTag? _activeScannerTag;
 
@@ -112,11 +119,29 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         ApplyLiveAcquisitionData();
     }
 
+    public async Task RefreshOnAppearAsync()
+    {
+        try
+        {
+            await _settings.LoadAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "刷新配置失败");
+        }
+
+        await MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            RebuildRows();
+            RefreshOnAppear();
+        }).ConfigureAwait(false);
+    }
+
     public async Task TryAutoStartAsync()
     {
         RefreshStatus();
 
-        if (_autoStartAttempted || !_settings.Current.AutoStartAcquisition || MauiProgram.UsesWindowsBackgroundService)
+        if (_autoStartAttempted || !_settings.Current.AutoStartAcquisition || MauiProgram.IsWindowsBackgroundServiceAvailable())
         {
             return;
         }
@@ -143,47 +168,87 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
+            LastError = ex.Message;
             _logger.LogWarning(ex, "自动启动失败");
         }
 
-        RefreshStatus();
+        RefreshStatus(preserveLastError: !string.IsNullOrWhiteSpace(LastError));
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanToggle))]
     async Task ToggleAsync()
     {
+        IsToggleBusy = true;
+        ToggleCommand.NotifyCanExecuteChanged();
+        LastError = string.Empty;
+        var previousToggleText = ToggleText;
+        ToggleText = IsSubscribeMode ? "连接中..." : "启动中...";
         try
         {
+            await _settings.LoadAsync().ConfigureAwait(false);
+
+            if (!IsRunning && MauiProgram.IsWindowsBackgroundServiceAvailable())
+            {
+                await _settings.SaveAsync(_settings.Current).ConfigureAwait(false);
+                try
+                {
+                    await RuntimeSettingsSync.ReloadBackgroundServiceAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "后台配置同步失败，继续尝试启动");
+                    LastError = ex.Message;
+                }
+            }
+
             if (IsRunning)
             {
                 if (IsSubscribeMode)
                 {
-                    await _subscription.StopAsync();
+                    await _subscription.StopAsync().ConfigureAwait(false);
                 }
                 else
                 {
-                    await _acquisition.StopAsync();
+                    await _acquisition.StopAsync().ConfigureAwait(false);
                 }
             }
             else
             {
-                RebuildRows();
+                await MainThread.InvokeOnMainThreadAsync(RebuildRows).ConfigureAwait(false);
                 if (IsSubscribeMode)
                 {
-                    await _subscription.StartAsync();
+                    await _subscription.StartAsync().ConfigureAwait(false);
                 }
                 else
                 {
-                    await _acquisition.StartAsync();
+                    await _acquisition.StartAsync().ConfigureAwait(false);
                 }
             }
         }
         catch (Exception ex)
         {
+            LastError = ex.Message;
             _logger.LogWarning(ex, "启动/停止失败");
         }
+        finally
+        {
+            IsToggleBusy = false;
+            var toggleError = LastError;
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                RefreshStatus(preserveLastError: !string.IsNullOrWhiteSpace(toggleError));
+                if (!string.IsNullOrWhiteSpace(toggleError))
+                {
+                    LastError = toggleError;
+                }
 
-        RefreshStatus();
+                ToggleCommand.NotifyCanExecuteChanged();
+                if (!string.IsNullOrWhiteSpace(toggleError))
+                {
+                    ToggleText = previousToggleText;
+                }
+            });
+        }
     }
 
     [RelayCommand]
@@ -434,14 +499,26 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         {
             foreach (var snapshot in snapshots)
             {
-                if (_rowLookup.TryGetValue(snapshot.TagId, out var row))
+                if (!TryResolveRow(snapshot, out var row))
                 {
-                    row.Apply(snapshot);
+                    continue;
                 }
+
+                row.Apply(snapshot);
             }
 
             RefreshStatus();
         });
+    }
+
+    bool TryResolveRow(TagSnapshot snapshot, out TagRowViewModel row)
+    {
+        if (_rowLookup.TryGetValue(snapshot.TagId, out row!))
+        {
+            return true;
+        }
+
+        return _rowLookupByName.TryGetValue(snapshot.Name, out row!);
     }
 
     void OnSubscriptionDevicesUpdated(object? sender, EventArgs e) =>
@@ -461,7 +538,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         });
 
     void OnServiceConnectionChanged(object? sender, EventArgs e) =>
-        MainThread.BeginInvokeOnMainThread(RefreshStatus);
+        MainThread.BeginInvokeOnMainThread(() => RefreshStatus());
 
     void RebuildTopicFilters()
     {
@@ -507,6 +584,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     void RebuildGroupedRows(IReadOnlyList<TagRowViewModel> rows)
     {
         _rowLookup.Clear();
+        _rowLookupByName.Clear();
         GroupedCollectionHelper.ClearDashboardGroups(TagGroups);
         SwitchStatusTags.Clear();
 
@@ -514,6 +592,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         {
             SwitchStatusTags.Add(row);
             _rowLookup[row.Id] = row;
+            _rowLookupByName[row.Name] = row;
         }
 
         foreach (var group in rows
@@ -522,10 +601,11 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                      .OrderBy(g => TagDisplayCategoryHelper.GetSortOrder(g.Key)))
         {
             var groupViewModel = new TagGroupViewModel(group.Key);
-            foreach (var row in group)
+            foreach (var row in CurrentInjectionFormatting.OrderByDisplay(group.Key, group, item => item.Name))
             {
                 groupViewModel.Tags.Add(row);
                 _rowLookup[row.Id] = row;
+                _rowLookupByName[row.Name] = row;
             }
 
             TagGroups.Add(groupViewModel);
@@ -547,10 +627,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         var settings = _settings.Current;
         foreach (var snapshot in _acquisition.LastSnapshots.Values)
         {
-            if (_rowLookup.TryGetValue(snapshot.TagId, out var row))
+            if (!TryResolveRow(snapshot, out var row))
             {
-                row.Apply(snapshot);
+                continue;
             }
+
+            row.Apply(snapshot);
         }
 
         foreach (var tag in settings.Tags.Where(tag => tag.Enabled && tag.IsManual))
@@ -584,6 +666,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     void ClearGroupedRows()
     {
         _rowLookup.Clear();
+        _rowLookupByName.Clear();
         GroupedCollectionHelper.ClearDashboardGroups(TagGroups);
         SwitchStatusTags.Clear();
         ShowEmptyTagsHint = true;
@@ -714,7 +797,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                      .OrderBy(g => TagDisplayCategoryHelper.GetSortOrder(g.Key)))
         {
             var groupViewModel = new TagGroupViewModel(group.Key);
-            foreach (var row in group)
+            foreach (var row in CurrentInjectionFormatting.OrderByDisplay(group.Key, group, item => item.Name))
             {
                 groupViewModel.Tags.Add(row);
             }
@@ -944,8 +1027,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         return $"采集模式 · {mode} · {runState}";
     }
 
-    void RefreshStatus()
+    void RefreshStatus(bool preserveLastError = false)
     {
+        var preservedError = preserveLastError ? LastError : null;
         var settings = _settings.Current;
         IsSubscribeMode = settings.OperationMode == AppOperationMode.Subscribe;
         IsAcquisitionMode = !IsSubscribeMode;
@@ -961,6 +1045,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 ? $"已订阅：{string.Join("，", _subscription.ActiveSubscribeTopics)}"
                 : $"订阅主题：{string.Join("，", topics)}";
             ModeText = BuildModeText();
+            LastError = preservedError ?? _subscription.LastError;
             EmptyTagsHint = _subscription.IsRunning
                 ? "等待遥测数据…"
                 : "请启动订阅。";
@@ -982,6 +1067,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         DeviceId = settings.DeviceId;
         TopicPreview = $"发布主题：{settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase)}";
         ModeText = BuildModeText();
+        LastError = preservedError ?? _acquisition.LastError;
         EmptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
 
         ShowRemoteDevicePicker = false;

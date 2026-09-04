@@ -143,8 +143,22 @@ public sealed class ModbusTcpPlcClient : IPlcClient
             tags,
             timeoutMs,
             AbortOnTimeout);
-        return Task.FromResult<IReadOnlyDictionary<string, object?>>(
-            values.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal));
+        var result = values.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal);
+        foreach (var tag in tags)
+        {
+            if (tag.IsManual || string.IsNullOrWhiteSpace(tag.Name) || result.ContainsKey(tag.Name))
+            {
+                continue;
+            }
+
+            _logger.LogWarning(
+                "批量读未返回点位 {TagName}（{Address}），改为单独读取",
+                tag.Name,
+                tag.DisplayAddress);
+            result[tag.Name] = ReadCore(tag);
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, object?>>(result);
     }
 
     void AbortOnTimeout()

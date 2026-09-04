@@ -31,9 +31,33 @@ public static class AppPaths
 
 public sealed class WindowsAppDataPaths : IAppDataPaths
 {
-    public string UserDataDirectory => ResolveExistingOrDefault();
+    public string UserDataDirectory => ResolveSharedDirectory();
 
-    public static string ResolveExistingOrDefault()
+    public static string ResolveSharedDirectory()
+    {
+        var programDataDir = GetProgramDataDirectory();
+        var legacyDir = GetLegacyUserDirectory();
+        Directory.CreateDirectory(programDataDir);
+
+        // 服务可能先创建 logs 目录，不能因此跳过从 LocalAppData 迁移产线 Excel。
+        if (!HasLineConfig(programDataDir))
+        {
+            if (HasLineConfig(legacyDir) || HasUserData(legacyDir))
+            {
+                CopyDirectory(legacyDir, programDataDir);
+            }
+        }
+
+        return programDataDir;
+    }
+
+    static string GetProgramDataDirectory() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            AppPaths.PackageId,
+            "Data");
+
+    static string GetLegacyUserDirectory()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var candidates = new[]
@@ -44,15 +68,46 @@ public sealed class WindowsAppDataPaths : IAppDataPaths
 
         foreach (var candidate in candidates)
         {
-            if (Directory.Exists(candidate) &&
-                (File.Exists(Path.Combine(candidate, "history.db")) ||
-                 Directory.Exists(Path.Combine(candidate, "lines")) ||
-                 Directory.Exists(Path.Combine(candidate, "logs"))))
+            if (Directory.Exists(candidate))
             {
                 return candidate;
             }
         }
 
         return candidates[0];
+    }
+
+    static bool HasLineConfig(string directory)
+    {
+        var linesDir = Path.Combine(directory, "lines");
+        if (!Directory.Exists(linesDir))
+        {
+            return false;
+        }
+
+        return Directory.EnumerateFiles(linesDir, "*.xlsx")
+            .Any(path => !Path.GetFileName(path).StartsWith("~", StringComparison.Ordinal));
+    }
+
+    static bool HasUserData(string directory) =>
+        Directory.Exists(directory) &&
+        (HasLineConfig(directory) ||
+         File.Exists(Path.Combine(directory, "history.db")) ||
+         Directory.Exists(Path.Combine(directory, "logs")));
+
+    static void CopyDirectory(string sourceDir, string targetDir)
+    {
+        Directory.CreateDirectory(targetDir);
+        foreach (var directory in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(directory.Replace(sourceDir, targetDir, StringComparison.OrdinalIgnoreCase));
+        }
+
+        foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var targetFile = file.Replace(sourceDir, targetDir, StringComparison.OrdinalIgnoreCase);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
+            File.Copy(file, targetFile, overwrite: true);
+        }
     }
 }

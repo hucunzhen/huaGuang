@@ -13,12 +13,23 @@ public static class MauiProgram
 	public static IServiceProvider Services { get; private set; } = default!;
 	public static bool UsesWindowsBackgroundService { get; private set; }
 
+	public static bool IsWindowsBackgroundServiceAvailable() =>
+#if WINDOWS
+		MonitorIpcClient.IsServiceAvailable();
+#else
+		false;
+#endif
+
 	public static MauiApp CreateMauiApp()
 	{
 #if WINDOWS
 		AppPaths.Configure(new WindowsAppDataPaths());
 #else
 		AppPaths.Configure(new MauiAppDataPaths());
+#endif
+
+#if ANDROID
+		ScanMonotonicClock.ConfigureFactory(static () => new Platforms.Android.AndroidScanMonotonicClock());
 #endif
 
 		var builder = MauiApp.CreateBuilder();
@@ -42,7 +53,7 @@ public static class MauiProgram
 
 		builder.Services.AddSingleton<SettingsStore>();
 #if WINDOWS
-		UsesWindowsBackgroundService = MonitorIpcClient.IsServiceAvailable();
+		UsesWindowsBackgroundService = MonitorIpcClient.WaitForServiceAvailable(TimeSpan.FromSeconds(5));
 #endif
 
 		RegisterMonitorRuntime(builder.Services);
@@ -109,13 +120,13 @@ public static class MauiProgram
 	static void RegisterMonitorRuntime(IServiceCollection services)
 	{
 #if WINDOWS
-		if (UsesWindowsBackgroundService)
-		{
-			services.AddMonitorRuntimeRemote();
-			return;
-		}
+		services.AddMonitorRuntimeCore(AppPaths.LogDirectory);
+		services.AddSingleton<IBackgroundRuntimeLauncher, Platforms.Windows.WindowsBackgroundRuntimeLauncher>();
+		services.AddMonitorRuntimeAdaptive();
+		return;
 #endif
 		services.AddMonitorRuntimeCore(AppPaths.LogDirectory);
+		services.AddSingleton<IBackgroundRuntimeLauncher, NoOpBackgroundRuntimeLauncher>();
 		services.AddMonitorRuntimeLocal();
 	}
 }

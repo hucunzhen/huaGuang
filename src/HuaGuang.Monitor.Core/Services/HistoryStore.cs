@@ -230,7 +230,8 @@ public sealed class HistoryStore
         HistoryQuery query,
         int temperaturePrecision,
         IReadOnlyList<string>? preferredTagOrder = null,
-        IReadOnlyList<HistoryTableColumn>? fixedColumns = null)
+        IReadOnlyList<HistoryTableColumn>? fixedColumns = null,
+        IReadOnlyDictionary<string, string?>? tagUnitHints = null)
     {
         var samples = await QueryAsync(query).ConfigureAwait(false);
         if (samples.Count == 0)
@@ -284,6 +285,17 @@ public sealed class HistoryStore
                     if (!tagUnits.ContainsKey(tagName) && !string.IsNullOrWhiteSpace(unit))
                     {
                         tagUnits[tagName] = unit;
+                    }
+                }
+            }
+
+            if (tagUnitHints is not null)
+            {
+                foreach (var pair in tagUnitHints)
+                {
+                    if (!tagUnits.ContainsKey(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                    {
+                        tagUnits[pair.Key] = pair.Value;
                     }
                 }
             }
@@ -344,10 +356,13 @@ public sealed class HistoryStore
         {
             foreach (var name in preferredTagOrder)
             {
-                if (names.Remove(name))
+                if (ordered.Contains(name, StringComparer.Ordinal))
                 {
-                    ordered.Add(name);
+                    continue;
                 }
+
+                ordered.Add(name);
+                names.Remove(name);
             }
         }
 
@@ -474,6 +489,85 @@ public sealed class HistoryStore
             while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 results.Add(reader.GetString(0));
+            }
+
+            return results;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> GetDistinctTagNamesAsync(HistoryQuery query)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT DISTINCT t.tag_name
+                FROM tag_values t
+                INNER JOIN telemetry_samples s ON s.id = t.sample_id
+                WHERE s.recorded_at >= $from AND s.recorded_at <= $to
+                """;
+            command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
+            command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
+            if (!string.IsNullOrWhiteSpace(query.DeviceId))
+            {
+                command.CommandText += " AND s.device_id = $device_id";
+                command.Parameters.AddWithValue("$device_id", query.DeviceId);
+            }
+
+            command.CommandText += " ORDER BY t.tag_name;";
+
+            var results = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                results.Add(reader.GetString(0));
+            }
+
+            return results;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyDictionary<string, string?>> GetDistinctTagUnitsAsync(HistoryQuery query)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await using var connection = OpenConnection();
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT t.tag_name, MAX(COALESCE(t.unit, '')) AS unit
+                FROM tag_values t
+                INNER JOIN telemetry_samples s ON s.id = t.sample_id
+                WHERE s.recorded_at >= $from AND s.recorded_at <= $to
+                """;
+            command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
+            command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
+            if (!string.IsNullOrWhiteSpace(query.DeviceId))
+            {
+                command.CommandText += " AND s.device_id = $device_id";
+                command.Parameters.AddWithValue("$device_id", query.DeviceId);
+            }
+
+            command.CommandText += " GROUP BY t.tag_name ORDER BY t.tag_name;";
+
+            var results = new Dictionary<string, string?>(StringComparer.Ordinal);
+            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                var unit = reader.GetString(1);
+                results[reader.GetString(0)] = string.IsNullOrWhiteSpace(unit) ? null : unit;
             }
 
             return results;

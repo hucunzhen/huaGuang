@@ -3,6 +3,7 @@ namespace HuaGuang.Monitor.Ipc;
 public static class MonitorIpcConstants
 {
     public const string PipeName = "HuaGuang.Monitor.Runtime.v1";
+    public const int TcpPort = 18788;
     public const string ServiceName = "HuaGuangMonitor";
     public const string ServiceDisplayName = "工业监控采集服务";
 }
@@ -25,6 +26,8 @@ public sealed class MonitorIpcRequest
     public string? TopicFilter { get; set; }
     public string? Topic { get; set; }
     public string? Payload { get; set; }
+    /// <summary>Start 时可选，与界面当前运行模式一致，避免磁盘配置滞后。</summary>
+    public string? OperationMode { get; set; }
 }
 
 public sealed class MonitorIpcResponse

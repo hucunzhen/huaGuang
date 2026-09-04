@@ -7,14 +7,16 @@ namespace HuaGuang.Monitor.Services;
 public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
 {
     readonly MonitorIpcClient _client = new();
+    readonly SettingsStore _settings;
     readonly ILogger<RemoteMonitorAcquisition> _logger;
     readonly object _gate = new();
     readonly Dictionary<string, TagSnapshot> _snapshots = new(StringComparer.Ordinal);
     readonly System.Timers.Timer _pollTimer;
     MonitorRuntimeState? _state;
 
-    public RemoteMonitorAcquisition(ILogger<RemoteMonitorAcquisition> logger)
+    public RemoteMonitorAcquisition(SettingsStore settings, ILogger<RemoteMonitorAcquisition> logger)
     {
+        _settings = settings;
         _logger = logger;
         _pollTimer = new System.Timers.Timer(800) { AutoReset = true };
         _pollTimer.Elapsed += (_, _) => _ = PollAsync();
@@ -46,10 +48,14 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
         _ = SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.RequestPublish });
 
     public Task StartAsync() =>
-        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Start });
+        SendAsync(new MonitorIpcRequest
+        {
+            Command = MonitorIpcCommand.Start,
+            OperationMode = _settings.Current.OperationMode.ToString()
+        }, MonitorIpcClient.CommandTimeout);
 
     public Task StopAsync() =>
-        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Stop });
+        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Stop }, MonitorIpcClient.CommandTimeout);
 
     async Task PollAsync()
     {
@@ -84,7 +90,7 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
                         TagId = item.TagId,
                         Name = item.Name,
                         Unit = item.Unit,
-                        Value = item.Value,
+                        Value = JsonValueNormalizer.Normalize(item.Value),
                         Quality = item.Quality,
                         Timestamp = item.Timestamp
                     };
@@ -104,9 +110,9 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
         }
     }
 
-    async Task SendAsync(MonitorIpcRequest request)
+    async Task SendAsync(MonitorIpcRequest request, TimeSpan? timeout = null)
     {
-        var response = await _client.SendAsync(request).ConfigureAwait(false);
+        var response = await _client.SendAsync(request, timeout).ConfigureAwait(false);
         if (!response.Success)
         {
             throw new InvalidOperationException(response.Error ?? "后台服务命令失败");
@@ -126,14 +132,16 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
 public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposable
 {
     readonly MonitorIpcClient _client = new();
+    readonly SettingsStore _settings;
     readonly ILogger<RemoteMonitorSubscription> _logger;
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
     readonly System.Timers.Timer _pollTimer;
     string? _topicFilter;
     MonitorRuntimeState? _state;
 
-    public RemoteMonitorSubscription(ILogger<RemoteMonitorSubscription> logger)
+    public RemoteMonitorSubscription(SettingsStore settings, ILogger<RemoteMonitorSubscription> logger)
     {
+        _settings = settings;
         _logger = logger;
         _pollTimer = new System.Timers.Timer(800) { AutoReset = true };
         _pollTimer.Elapsed += (_, _) => _ = PollAsync();
@@ -166,13 +174,17 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
     }
 
     public Task StartAsync() =>
-        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Start });
+        SendAsync(new MonitorIpcRequest
+        {
+            Command = MonitorIpcCommand.Start,
+            OperationMode = _settings.Current.OperationMode.ToString()
+        }, MonitorIpcClient.CommandTimeout);
 
     public Task StopAsync() =>
-        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Stop });
+        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Stop }, MonitorIpcClient.CommandTimeout);
 
     public Task RefreshTopicsAsync() =>
-        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.RefreshTopics });
+        SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.RefreshTopics }, MonitorIpcClient.CommandTimeout);
 
     public void InjectTelemetry(string topic, string payload) =>
         _ = SendAsync(new MonitorIpcRequest
@@ -221,7 +233,10 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
                     PlcHost = dto.PlcHost,
                     Simulator = dto.Simulator,
                     ReceivedAt = dto.ReceivedAt,
-                    Tags = new Dictionary<string, object?>(dto.Tags, StringComparer.Ordinal)
+                    Tags = dto.Tags.ToDictionary(
+                        pair => pair.Key,
+                        pair => JsonValueNormalizer.Normalize(pair.Value),
+                        StringComparer.Ordinal)
                 };
                 _devices[device.DeviceKey] = device;
                 changed = true;
@@ -243,9 +258,9 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
         }
     }
 
-    async Task SendAsync(MonitorIpcRequest request)
+    async Task SendAsync(MonitorIpcRequest request, TimeSpan? timeout = null)
     {
-        var response = await _client.SendAsync(request).ConfigureAwait(false);
+        var response = await _client.SendAsync(request, timeout).ConfigureAwait(false);
         if (!response.Success)
         {
             throw new InvalidOperationException(response.Error ?? "后台服务命令失败");

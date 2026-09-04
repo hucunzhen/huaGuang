@@ -11,21 +11,42 @@ public static class LineMqttDefaults
 
     public const string XianheClientId = "XHRRJFHJ";
     public const string HuadiClientId = "HDRRJFHJ";
+    public const string SafenClientId = "SFHFJ";
+    public const string PingbanClientId = "PBHFJ";
+    public const string CyhyClientId = "CYHYFJ";
 
     public const string XianhePublishTopic = "/RRJFHJ/XHRRJFHJ/properties/report";
     public const string HuadiPublishTopic = "/RRJFHJ/HDRRJFHJ/properties/report";
+    public const string SafenPublishTopic = "/RRJFHJ/SFHFJ/properties/report";
+    public const string PingbanPublishTopic = "/RRJFHJ/PBHFJ/properties/report";
+    public const string CyhyPublishTopic = "/RRJFHJ/CYHYFJ/properties/report";
 
     public static IReadOnlyList<string> SubscribeTopics { get; } =
     [
         XianhePublishTopic,
-        HuadiPublishTopic
+        HuadiPublishTopic,
+        SafenPublishTopic,
+        PingbanPublishTopic,
+        CyhyPublishTopic
     ];
 
-    public static string ResolvePublishTopic(string? lineName) =>
-        lineName == "华迪热熔胶复合机" ? HuadiPublishTopic : XianhePublishTopic;
+    public static string ResolvePublishTopic(string? lineName) => lineName switch
+    {
+        "华迪热熔胶复合机" => HuadiPublishTopic,
+        "撒粉复合机" => SafenPublishTopic,
+        "平板复合机" => PingbanPublishTopic,
+        "C型火焰复合机" => CyhyPublishTopic,
+        _ => XianhePublishTopic
+    };
 
-    public static string ResolveClientIdForLine(string? lineName) =>
-        lineName == "华迪热熔胶复合机" ? HuadiClientId : XianheClientId;
+    public static string ResolveClientIdForLine(string? lineName) => lineName switch
+    {
+        "华迪热熔胶复合机" => HuadiClientId,
+        "撒粉复合机" => SafenClientId,
+        "平板复合机" => PingbanClientId,
+        "C型火焰复合机" => CyhyClientId,
+        _ => XianheClientId
+    };
 
     public static void ApplyBroker(MqttSettings mqtt)
     {
@@ -121,6 +142,6 @@ public static class LineMqttDefaults
             return true;
         }
 
-        return clientId is "先河热熔胶复合机" or "华迪热熔胶复合机";
+        return clientId is "先河热熔胶复合机" or "华迪热熔胶复合机" or "撒粉复合机" or "平板复合机" or "C型火焰复合机";
     }
 }

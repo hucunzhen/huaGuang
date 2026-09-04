@@ -15,6 +15,9 @@ public static class TagDisplayCategoryHelper
         if (tag.DataType == TagDataType.Bool || value is bool)
             return TagDisplayCategory.Switch;
 
+        if (CurrentInjectionFormatting.IsRelatedTag(tag))
+            return TagDisplayCategory.Temperature;
+
         if (tag.IsManual)
             return TagDisplayCategory.Setting;
 

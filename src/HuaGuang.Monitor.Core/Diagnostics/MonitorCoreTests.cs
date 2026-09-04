@@ -24,14 +24,19 @@ public static class MonitorCoreTests
         Run("Excel 配置读写", TestLineExcelRoundTrip),
         Run("Excel 点表局部修补", TestPatchLineExcelRunStatusAndPrecision),
         Run("Excel 维护保留点表", TestLineFileMaintenancePreservesCustomTags),
+        Run("Excel 字段映射补全", TestPatchEmptyMqttFieldMappings),
         Run("Excel 配置补全点位", TestLineExcelRevisionMerge),
+        Run("废弃热熔胶机点位清理", TestDeprecatedGlueMachineTagsRemoved),
         Run("MQTT 报文映射", TestMqttPayloadMapping),
         Run("properties 上报格式", TestPropertiesPayloadFormat),
+        Run("订阅 properties 解析", TestSubscribePropertiesParse),
+        Run("MQTT 主题设备号", TestMqttTopicDeviceId),
         Run("产线 MQTT 默认", TestLineMqttDefaults),
         Run("字段映射参考", TestReferenceFieldMapping),
         Run("点位显示分类", TestTagDisplayCategory),
         Run("历史数据存储", TestHistoryStoreRoundTrip),
         Run("设置启动不覆盖", TestSettingsSurviveStartupLoad),
+        Run("点位稳定 Id", TestStableTagIdentity),
     ];
 
     static DiagnosticResult Run(string name, Action test)
@@ -86,18 +91,18 @@ public static class MonitorCoreTests
         var catalog = new List<PlcTag>
         {
             new() { Name = "车速", Enabled = true },
-            new() { Name = "热溶胶盘温度（热熔胶机1）", Enabled = true },
+            new() { Name = "油温机温度", Enabled = true },
             new() { Name = "门幅", Enabled = true }
         };
         var remote = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["门幅"] = 1200,
             ["车速"] = 45.2,
-            ["热溶胶盘温度（热熔胶机1）"] = 180.5
+            ["油温机温度"] = 180.5
         };
 
         var ordered = TagDisplayOrder.OrderRemoteTags(remote, catalog).Select(entry => entry.Name).ToList();
-        AssertTrue(ordered.SequenceEqual(["车速", "热溶胶盘温度（热熔胶机1）", "门幅"]));
+        AssertTrue(ordered.SequenceEqual(["车速", "油温机温度", "门幅"]));
 
         var profile = new MqttPayloadProfile();
         var catalogWithMqtt = new List<PlcTag>
@@ -166,17 +171,43 @@ public static class MonitorCoreTests
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["运行状态"] = 1,
-            ["热溶胶盘温度（热熔胶机1）"] = 95.2,
-            ["胶管温度（热熔胶机1）"] = 150.4
+            ["油温机温度"] = 95.2,
+            ["车速"] = 45.2
         };
 
         var payload = MqttPayloadMapper.BuildPayload(settings, values, true);
         using var doc = JsonDocument.Parse(payload);
         var properties = doc.RootElement.GetProperty("properties");
-        AssertTrue(properties.GetProperty("run_status").GetInt32() == 1);
-        AssertTrue(Math.Abs(properties.GetProperty("rrjwd1").GetDouble() - 95.2) < 0.001);
-        AssertTrue(Math.Abs(properties.GetProperty("jgwd1").GetDouble() - 150.4) < 0.001);
+        AssertTrue(properties.GetProperty("run_status").GetString() == "开");
+        AssertTrue(Math.Abs(properties.GetProperty("ywjwd").GetDouble() - 95.2) < 0.001);
+        AssertTrue(Math.Abs(properties.GetProperty("speed").GetDouble() - 45.2) < 0.001);
         AssertTrue(doc.RootElement.EnumerateObject().Count() == 1);
+    }
+
+    static void TestSubscribePropertiesParse()
+    {
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
+        var payload = """
+                      {
+                        "properties": {
+                          "run_status": "开",
+                          "speed": 45.2,
+                          "ywjwd": 95.2
+                        }
+                      }
+                      """;
+        using var doc = JsonDocument.Parse(payload);
+        var parsed = MqttPayloadMapper.Parse(doc.RootElement, settings.MqttPayload);
+        AssertTrue(parsed.Tags.Count == 3);
+        AssertTrue(parsed.Tags["run_status"]?.ToString() == "开");
+        AssertTrue(MqttTopicDeviceId.Extract("/RRJFHJ/XHRRJFHJ/properties/report") == "XHRRJFHJ");
+    }
+
+    static void TestMqttTopicDeviceId()
+    {
+        AssertTrue(MqttTopicDeviceId.Extract("/RRJFHJ/HDRRJFHJ/properties/report") == "HDRRJFHJ");
+        AssertTrue(MqttTopicDeviceId.Extract("monitor/test-line/telemetry") == "test-line");
     }
 
     static void TestLineMqttDefaults()
@@ -194,7 +225,7 @@ public static class MonitorCoreTests
         LineCatalog.Apply(huadi, LineCatalog.Huadi.Name);
         AssertTrue(huadi.Mqtt.Topic == LineMqttDefaults.HuadiPublishTopic);
         AssertTrue(huadi.Mqtt.ClientId == LineMqttDefaults.HuadiClientId);
-        AssertTrue(huadi.SubscribeTopics.Count == 2);
+        AssertTrue(huadi.SubscribeTopics.Count == LineMqttDefaults.SubscribeTopics.Count);
 
         var legacy = new AppSettings
         {
@@ -291,7 +322,9 @@ public static class MonitorCoreTests
         var linePath = Path.Combine(Path.GetTempPath(), $"huaguang-line-{Guid.NewGuid():N}.xlsx");
         try
         {
-            LineExcelConfigService.EnsureLineFile(linePath, LineCatalog.Xianhe.Name);
+            LineExcelConfigService.Export(
+                LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name),
+                linePath);
             LineExcelConfigService.ImportToLineFile(referencePath, linePath, LineCatalog.Xianhe.Name);
 
             var loaded = new AppSettings();
@@ -423,7 +456,7 @@ public static class MonitorCoreTests
             AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").DataType == TagDataType.Int16);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").DisplayCategory == TagDisplayCategory.Switch);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").DisplayCategory == TagDisplayCategory.Process);
-            AssertTrue(loaded.Tags.First(tag => tag.Name == "热溶胶盘温度（热熔胶机1）").DisplayCategory == TagDisplayCategory.Temperature);
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "油温机温度").DisplayCategory == TagDisplayCategory.Temperature);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
             AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
             AssertTrue(loaded.SubscribeTopics.Count == 2);
@@ -531,6 +564,83 @@ public static class MonitorCoreTests
         }
     }
 
+    static void TestPatchEmptyMqttFieldMappings()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-map-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var settings = LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name);
+            LineExcelConfigService.Export(settings, tempPath);
+
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                var mappingSheet = workbook.Worksheet(LineExcelConfigService.FieldMappingSheetName);
+                foreach (var name in new[] { "当前工作胶盘温度", "胶辊型号", "门幅" })
+                {
+                    var row = mappingSheet.RowsUsed()
+                        .First(r => r.Cell(2).GetString().Trim() == name);
+                    row.Cell(1).Clear();
+                }
+
+                workbook.SaveAs(tempPath);
+            }
+
+            AssertTrue(LineExcelConfigService.PatchEmptyMqttFieldMappings(tempPath));
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "当前工作胶盘温度").MqttField == "rrjwd1");
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").MqttField == "jgxh");
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "门幅").MqttField == "mf");
+
+            using var verifyWorkbook = new XLWorkbook(tempPath);
+            var verifySheet = verifyWorkbook.Worksheet(LineExcelConfigService.FieldMappingSheetName);
+            var verifyRow = verifySheet.RowsUsed()
+                .First(r => r.Cell(2).GetString().Trim() == "当前工作胶盘温度");
+            AssertTrue(verifyRow.Cell(1).GetString().Trim() == "rrjwd1");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestDeprecatedGlueMachineTagsRemoved()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-deprecated-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var settings = new AppSettings();
+            LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
+            settings.Tags.Add(new PlcTag
+            {
+                Name = "热溶胶盘温度（热熔胶机1）",
+                XinjeAddress = "D6000",
+                DataType = TagDataType.Float32,
+                Enabled = true
+            });
+            XinjeXd5eMapper.ApplyTo(settings.Tags[^1]);
+            LineExcelConfigService.Export(settings, tempPath);
+
+            LineExcelConfigService.RemoveDeprecatedTagsFromFile(tempPath);
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            AssertFalse(loaded.Tags.Any(tag => DeprecatedLineTags.IsPerMachineGlueTemperature(tag.Name)));
+            AssertTrue(loaded.Tags.Any(tag => tag.Name == "当前注胶机编号"));
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
     static void TestLineExcelRevisionMerge()
     {
         var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-rev-{Guid.NewGuid():N}.xlsx");
@@ -562,6 +672,7 @@ public static class MonitorCoreTests
             LineExcelConfigService.Apply(loaded, tempPath);
             AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version);
             AssertFalse(loaded.Tags.Any(tag => tag.Name == "产品货号"));
+            AssertTrue(loaded.Tags.Any(tag => tag.Name == "当前注胶机编号"));
         }
         finally
         {
@@ -583,7 +694,8 @@ public static class MonitorCoreTests
         AssertTrue(TagDisplayCategoryHelper.InferCategory(temperature) == TagDisplayCategory.Temperature);
         AssertTrue(TagDisplayCategoryHelper.InferCategory(speed) == TagDisplayCategory.Process);
         AssertTrue(TagDisplayCategoryHelper.InferCategory(manual) == TagDisplayCategory.Setting);
-        AssertTrue(TagDisplayCategoryHelper.InferCategory(new PlcTag { Name = "备注", DataType = TagDataType.String }, true) == TagDisplayCategory.Switch);
+        var currentInjection = new PlcTag { Name = "当前注胶机编号", DataType = TagDataType.Int16 };
+        AssertTrue(TagDisplayCategoryHelper.InferCategory(currentInjection) == TagDisplayCategory.Temperature);
         AssertTrue(TagDisplayCategoryHelper.TryParseLabel("开关状态", out var parsed) && parsed == TagDisplayCategory.Switch);
         AssertTrue(TagDisplayCategoryHelper.Resolve(new PlcTag { Name = "自定义", DisplayCategory = TagDisplayCategory.Other }) == TagDisplayCategory.Other);
     }
@@ -637,7 +749,7 @@ public static class MonitorCoreTests
             var detail = store.GetDetailAsync(sampleId, 1).GetAwaiter().GetResult();
             AssertTrue(detail is not null);
             AssertTrue(detail!.Tags.Count == 2);
-            AssertTrue(detail.Tags.Any(tag => tag.DisplayValue == "运行中"));
+            AssertTrue(detail.Tags.Any(tag => tag.DisplayValue == "开"));
 
             var table = store.QueryTableAsync(new HistoryQuery
             {
@@ -648,26 +760,74 @@ public static class MonitorCoreTests
             AssertTrue(table.Rows.Count == 1);
             AssertTrue(table.Columns.Count == 2);
             AssertTrue(table.Rows[0].Cells[0] == "45.2");
-            AssertTrue(table.Rows[0].Cells[1] == "运行中");
+            AssertTrue(table.Rows[0].Cells[1] == "开");
 
-            var matchingCount = store.CountMatchingAsync(new HistoryQuery
+            var tableWithPreferredOnly = store.QueryTableAsync(new HistoryQuery
             {
                 From = DateTimeOffset.Now.AddHours(-1),
-                To = DateTimeOffset.Now.AddHours(1)
+                To = DateTimeOffset.Now.AddHours(1),
+                Limit = 10
+            }, 1, ["车速", "运行状态", "新增点位"], tagUnitHints: new Dictionary<string, string?>
+            {
+                ["新增点位"] = "bar"
             }).GetAwaiter().GetResult();
-            AssertTrue(matchingCount == 1);
+            AssertTrue(tableWithPreferredOnly.Columns.Count == 3);
+            AssertTrue(tableWithPreferredOnly.Columns.Any(column => column.TagName == "新增点位"));
+            AssertTrue(tableWithPreferredOnly.Rows[0].Cells[2] == "—");
 
-            AssertTrue(store.DeleteSampleAsync(sampleId).GetAwaiter().GetResult());
-            AssertTrue(store.GetDetailAsync(sampleId, 1).GetAwaiter().GetResult() is null);
+            var deviceATags = store.GetDistinctTagNamesAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1),
+                DeviceId = "测试设备"
+            }).GetAwaiter().GetResult();
+            AssertTrue(deviceATags.SequenceEqual(["车速", "运行状态"], StringComparer.Ordinal));
 
             var secondId = store.AppendAsync(new HistorySampleWriteRequest
             {
                 DeviceId = "另一设备",
                 OperationMode = request.OperationMode,
                 Quality = request.Quality,
-                Tags = request.Tags
+                Tags =
+                [
+                    new TagSnapshot
+                    {
+                        TagId = "pressure",
+                        Name = "压力",
+                        Unit = "MPa",
+                        Value = 1.2,
+                        Quality = "Good",
+                        Timestamp = DateTimeOffset.Now
+                    }
+                ]
             }).GetAwaiter().GetResult();
             AssertTrue(secondId > 0);
+
+            var allTags = store.GetDistinctTagNamesAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1)
+            }).GetAwaiter().GetResult();
+            AssertTrue(allTags.SequenceEqual(["压力", "车速", "运行状态"], StringComparer.Ordinal));
+
+            var deviceBTags = store.GetDistinctTagNamesAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1),
+                DeviceId = "另一设备"
+            }).GetAwaiter().GetResult();
+            AssertTrue(deviceBTags.SequenceEqual(["压力"], StringComparer.Ordinal));
+
+            var matchingCount = store.CountMatchingAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1)
+            }).GetAwaiter().GetResult();
+            AssertTrue(matchingCount == 2);
+
+            AssertTrue(store.DeleteSampleAsync(sampleId).GetAwaiter().GetResult());
+            AssertTrue(store.GetDetailAsync(sampleId, 1).GetAwaiter().GetResult() is null);
+
             var deleted = store.DeleteMatchingAsync(new HistoryQuery
             {
                 From = DateTimeOffset.Now.AddHours(-1),
@@ -722,6 +882,40 @@ public static class MonitorCoreTests
             AssertTrue(loaded.Mqtt.Host == "10.0.0.99");
             AssertTrue(loaded.AutoStartAcquisition == false);
             AssertTrue(loaded.HistoryRetentionDays == 30);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    static void TestStableTagIdentity()
+    {
+        var lineName = LineCatalog.LineNames[0];
+        var root = Path.Combine(Path.GetTempPath(), $"huaguang-tagid-{Guid.NewGuid():N}");
+        var configPath = Path.Combine(root, "lines", $"{lineName}.xlsx");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+            var settings = new AppSettings
+            {
+                LineName = lineName,
+                Tags =
+                [
+                    new PlcTag { Name = "车速", Enabled = true, XinjeAddress = "D100", DataType = TagDataType.Float32 }
+                ]
+            };
+            PlcTagIdentity.AssignStableIds(settings);
+            LineExcelConfigService.Export(settings, configPath);
+
+            var first = LineExcelConfigService.LoadLineExcel(lineName, configPath, configPath);
+            var second = LineExcelConfigService.LoadLineExcel(lineName, configPath, configPath);
+            var expected = PlcTagIdentity.CreateStableId(lineName, "车速");
+            AssertTrue(first.Tags[0].Id == expected);
+            AssertTrue(second.Tags[0].Id == expected);
         }
         finally
         {

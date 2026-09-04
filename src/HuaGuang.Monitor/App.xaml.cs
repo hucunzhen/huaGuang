@@ -15,6 +15,8 @@ public partial class App : Application
 		var window = new Window(new AppShell());
 #if WINDOWS
 		Platforms.Windows.WindowsAppIcon.Apply(window);
+		window.Destroying += (_, _) => Platforms.Windows.WindowsRuntimeHandoff.TryHandoffAcquisitionToService();
+		AppDomain.CurrentDomain.ProcessExit += (_, _) => Platforms.Windows.WindowsRuntimeHandoff.TryHandoffAcquisitionToService();
 #endif
 		return window;
 	}

@@ -38,7 +38,7 @@ public partial class DashboardPage : MonitorPageBase
             viewModel.RequestScannerInputMethodCycle = CycleScannerEnglishInput;
             viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             viewModel.PropertyChanged += OnViewModelPropertyChanged;
-            viewModel.RefreshOnAppear();
+            await viewModel.RefreshOnAppearAsync();
             await viewModel.TryAutoStartAsync();
             if (viewModel.ShowScannerInput)
             {

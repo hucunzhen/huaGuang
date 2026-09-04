@@ -5,6 +5,15 @@ var outputDir = args.Length > 0 && !args[0].StartsWith('-')
     ? Path.GetFullPath(args[0])
     : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "config", "lines"));
 
+if (args.Contains("--export-mapping-ref"))
+{
+    var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+    var referencePath = Path.Combine(repoRoot, "config", MqttFieldMappingCatalog.ReferenceFileName);
+    LineExcelConfigService.ExportReferenceFieldMapping(referencePath, LineCatalog.Xianhe.Name);
+    Console.WriteLine(referencePath);
+    return 0;
+}
+
 if (args.Contains("--inspect"))
 {
     var files = args.Where(arg => arg.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)).ToArray();

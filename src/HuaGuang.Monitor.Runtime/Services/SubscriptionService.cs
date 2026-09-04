@@ -80,6 +80,15 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
                 string.Join(", ", topics),
                 LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
         }
+        catch (Exception ex)
+        {
+            IsRunning = false;
+            ActiveSubscribeTopics = [];
+            LastError = ex.Message;
+            ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            _logger.LogWarning(ex, "启动订阅失败");
+            throw;
+        }
         finally
         {
             _gate.Release();
@@ -213,9 +222,12 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             var settings = _settingsStore.Current;
             var profile = settings.MqttPayload ?? new MqttPayloadProfile();
             var parsed = MqttPayloadMapper.Parse(root, profile);
-            var deviceId = parsed.DeviceId ?? ExtractDeviceIdFromTopic(message.Topic);
+            var deviceId = parsed.DeviceId
+                ?? ReadOptionalDeviceId(root)
+                ?? MqttTopicDeviceId.Extract(message.Topic);
             if (string.IsNullOrWhiteSpace(deviceId))
             {
+                _logger.LogWarning("忽略遥测：无法解析 deviceId topic={Topic}", message.Topic);
                 return;
             }
 
@@ -239,6 +251,14 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             foreach (var pair in parsed.Tags)
             {
                 state.Tags[pair.Key] = pair.Value;
+            }
+
+            if (state.Tags.Count == 0)
+            {
+                _logger.LogWarning(
+                    "遥测未解析到点位 topic={Topic} tagsPath={TagsPath}",
+                    message.Topic,
+                    profile.TagsPath);
             }
 
             _devices[deviceKey] = state;
@@ -312,11 +332,15 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         }
     }
 
-    static string? ExtractDeviceIdFromTopic(string topic)
-    {
-        var parts = topic.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length >= 2 ? parts[^2] : null;
-    }
+    static string? ReadOptionalDeviceId(JsonElement root) =>
+        TryReadString(root, "deviceId");
+
+    static string? TryReadString(JsonElement root, string name) =>
+        root.ValueKind == JsonValueKind.Object &&
+        root.TryGetProperty(name, out var element) &&
+        element.ValueKind == JsonValueKind.String
+            ? element.GetString()
+            : null;
 
     async Task DisconnectAsync()
     {

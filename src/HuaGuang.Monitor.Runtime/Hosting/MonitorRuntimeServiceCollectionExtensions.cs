@@ -42,8 +42,19 @@ public static class MonitorRuntimeServiceCollectionExtensions
 
     public static IServiceCollection AddMonitorRuntimeRemote(this IServiceCollection services)
     {
-        services.AddSingleton<IMonitorAcquisition, RemoteMonitorAcquisition>();
-        services.AddSingleton<IMonitorSubscription, RemoteMonitorSubscription>();
+        services.AddSingleton<RemoteMonitorAcquisition>();
+        services.AddSingleton<RemoteMonitorSubscription>();
+        services.AddSingleton<IMonitorAcquisition>(sp => sp.GetRequiredService<RemoteMonitorAcquisition>());
+        services.AddSingleton<IMonitorSubscription>(sp => sp.GetRequiredService<RemoteMonitorSubscription>());
+        return services;
+    }
+
+    public static IServiceCollection AddMonitorRuntimeAdaptive(this IServiceCollection services)
+    {
+        services.AddSingleton<RemoteMonitorAcquisition>();
+        services.AddSingleton<RemoteMonitorSubscription>();
+        services.AddSingleton<IMonitorAcquisition, AdaptiveMonitorAcquisition>();
+        services.AddSingleton<IMonitorSubscription, AdaptiveMonitorSubscription>();
         return services;
     }
 }

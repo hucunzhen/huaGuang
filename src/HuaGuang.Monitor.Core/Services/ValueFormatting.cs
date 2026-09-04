@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HuaGuang.Monitor.Models;
 
 namespace HuaGuang.Monitor.Services;
@@ -37,6 +38,11 @@ public static class ValueFormatting
             return RunStatusFormatting.GetStatusText(value);
         }
 
+        if (SwitchStatusFormatting.TryFormatDisplayText(tag, value, out var switchText))
+        {
+            return switchText;
+        }
+
         if (value is bool flag)
         {
             return flag ? "开" : "关";
@@ -58,6 +64,12 @@ public static class ValueFormatting
             case null:
                 number = 0;
                 return false;
+            case JsonElement element when element.ValueKind == JsonValueKind.Number:
+                number = element.GetDouble();
+                return true;
+            case JsonElement textElement when textElement.ValueKind == JsonValueKind.String &&
+                                              double.TryParse(textElement.GetString(), out number):
+                return true;
             case double d:
                 number = d;
                 return true;

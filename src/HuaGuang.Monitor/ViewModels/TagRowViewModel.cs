@@ -61,26 +61,11 @@ public partial class TagRowViewModel : ObservableObject
 
     public string BoolIndicatorText => ResolveSwitchIndicatorText();
 
-    string ResolveSwitchStatusText()
-    {
-        if (RunStatusFormatting.IsRunStatusTag(_tag))
-            return RunStatusFormatting.GetStatusText(Value);
+    string ResolveSwitchStatusText() =>
+        SwitchStatusFormatting.FormatDisplayText(_tag, Value);
 
-        return Value switch
-        {
-            bool flag => flag ? "运行中" : "已停止",
-            null => "—",
-            _ => DisplayValue
-        };
-    }
-
-    string ResolveSwitchIndicatorText()
-    {
-        if (RunStatusFormatting.IsRunStatusTag(_tag))
-            return RunStatusFormatting.GetIndicatorText(Value);
-
-        return Value is bool flag ? (flag ? "开" : "关") : "—";
-    }
+    string ResolveSwitchIndicatorText() =>
+        SwitchStatusFormatting.FormatIndicatorText(_tag, Value);
 
     Color ResolveSwitchAccentColor()
     {

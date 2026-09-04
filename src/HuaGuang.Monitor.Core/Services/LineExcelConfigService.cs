@@ -70,6 +70,8 @@ public static class LineExcelConfigService
     {
         Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
+        MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, settings.LineName);
+
         using var workbook = new XLWorkbook();
         WriteConfigSheet(workbook, settings);
         WriteMqttPayloadSheet(workbook, settings.MqttPayload);
@@ -162,6 +164,8 @@ public static class LineExcelConfigService
         ApplyConfigSheet(settings, workbook, expectedLineName, templateFilePath);
         ApplyMqttPayloadSheet(settings, workbook);
         settings.Tags = ReadTagsSheet(workbook);
+        DeprecatedLineTags.RemoveFrom(settings.Tags);
+        PlcTagIdentity.AssignStableIds(settings);
         ApplyFieldMappings(settings, workbook);
         settings.AddressCatalogVersion = LineCatalog.Version;
     }
@@ -197,6 +201,10 @@ public static class LineExcelConfigService
         }
 
         PatchRunStatusAndPrecision(filePath);
+        PatchCurrentInjectionDisplayGroup(filePath);
+        RemoveDeprecatedTagsFromFile(filePath);
+        MergeMissingCatalogTagsIntoFile(filePath);
+        PatchEmptyMqttFieldMappings(filePath);
         if (NeedsRevisionUpgrade(filePath))
         {
             UpdateLineConfigRevisionInPlace(filePath, LineCatalog.Version);
@@ -390,6 +398,224 @@ public static class LineExcelConfigService
         return changed;
     }
 
+    public static bool RemoveDeprecatedTagsFromFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        using var workbook = new XLWorkbook(filePath);
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var configSheet))
+        {
+            return false;
+        }
+
+        var map = ReadKeyValueSheet(configSheet);
+        var lineName = GetString(map, "产线名称", string.Empty);
+        if (string.IsNullOrWhiteSpace(lineName))
+        {
+            return false;
+        }
+
+        var settings = LoadLineExcelFromFile(filePath, templateFilePath: null, expectedLineName: lineName);
+        var removed = DeprecatedLineTags.RemoveFrom(settings.Tags);
+        if (removed == 0)
+        {
+            return false;
+        }
+
+        Export(settings, filePath);
+        return true;
+    }
+
+    public static bool MergeMissingCatalogTagsIntoFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        using var workbook = new XLWorkbook(filePath);
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var configSheet))
+        {
+            return false;
+        }
+
+        var map = ReadKeyValueSheet(configSheet);
+        var lineName = GetString(map, "产线名称", string.Empty);
+        if (string.IsNullOrWhiteSpace(lineName))
+        {
+            return false;
+        }
+
+        var settings = LoadLineExcelFromFile(filePath, templateFilePath: null, expectedLineName: lineName);
+        var before = settings.Tags.Count;
+        MergeMissingRequiredPlcTags(settings, LineCatalog.Resolve(lineName).Tags);
+        MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
+        if (settings.Tags.Count <= before)
+        {
+            return false;
+        }
+
+        Export(settings, filePath);
+        return true;
+    }
+
+    public static bool PatchCurrentInjectionDisplayGroup(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        using var workbook = new XLWorkbook(filePath);
+        if (!workbook.Worksheets.TryGetWorksheet(TagsSheetName, out var tagsSheet))
+        {
+            return false;
+        }
+
+        var categoryColumn = FindTagColumn(tagsSheet, "显示分组");
+        if (categoryColumn <= 0)
+        {
+            return false;
+        }
+
+        var groupLabel = TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Temperature);
+        var changed = false;
+        var lastRow = tagsSheet.LastRowUsed()?.RowNumber() ?? 1;
+        for (var row = 2; row <= lastRow; row++)
+        {
+            var name = tagsSheet.Cell(row, 1).GetString().Trim();
+            if (!CurrentInjectionFormatting.IsRelatedTag(new PlcTag { Name = name }))
+            {
+                continue;
+            }
+
+            var categoryCell = tagsSheet.Cell(row, categoryColumn);
+            if (categoryCell.GetString().Trim().Equals(groupLabel, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            categoryCell.Value = groupLabel;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            workbook.SaveAs(filePath);
+        }
+
+        return changed;
+    }
+
+    /// <summary>补全「字段映射」表中空的 id 列，不重写点表。</summary>
+    public static bool PatchEmptyMqttFieldMappings(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        using var workbook = new XLWorkbook(filePath);
+        if (!workbook.Worksheets.TryGetWorksheet(FieldMappingSheetName, out var mappingSheet))
+        {
+            return false;
+        }
+
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var configSheet))
+        {
+            return false;
+        }
+
+        var map = ReadKeyValueSheet(configSheet);
+        var lineName = GetString(map, "产线名称", string.Empty);
+        if (string.IsNullOrWhiteSpace(lineName))
+        {
+            lineName = Path.GetFileNameWithoutExtension(filePath);
+        }
+
+        var settings = new AppSettings { LineName = lineName };
+        if (workbook.Worksheets.TryGetWorksheet(TagsSheetName, out _))
+        {
+            settings.Tags = ReadTagsSheet(workbook);
+        }
+
+        ApplyFieldMappings(settings, workbook);
+
+        var before = settings.Tags.ToDictionary(tag => tag.Name, tag => tag.MqttField, StringComparer.Ordinal);
+        MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
+        var changed = settings.Tags.Any(tag =>
+            !string.Equals(before.GetValueOrDefault(tag.Name), tag.MqttField, StringComparison.Ordinal));
+
+        if (!changed)
+        {
+            return false;
+        }
+
+        var idColumn = FindMappingColumn(mappingSheet, "id", "mqtt字段", "mqtt_field", "字段", "键");
+        var nameColumn = FindMappingColumn(mappingSheet, "name", "名称", "点位名称", "点位", "点表名称");
+        if (idColumn <= 0 || nameColumn <= 0)
+        {
+            return false;
+        }
+
+        var mqttByName = settings.Tags.ToDictionary(tag => tag.Name, tag => tag.MqttField, StringComparer.Ordinal);
+        var lastRow = mappingSheet.LastRowUsed()?.RowNumber() ?? 1;
+        for (var row = 2; row <= lastRow; row++)
+        {
+            var name = mappingSheet.Cell(row, nameColumn).GetString().Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            if (!mqttByName.TryGetValue(name, out var mqttField) ||
+                string.IsNullOrWhiteSpace(mqttField))
+            {
+                continue;
+            }
+
+            var idCell = mappingSheet.Cell(row, idColumn);
+            if (!string.IsNullOrWhiteSpace(idCell.GetString()))
+            {
+                continue;
+            }
+
+            idCell.Value = mqttField;
+        }
+
+        workbook.SaveAs(filePath);
+        return true;
+    }
+
+    public static void ExportReferenceFieldMapping(string filePath, string lineName = "先河热熔胶复合机")
+    {
+        var settings = CreateSeedSettings(lineName);
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+
+        using var workbook = new XLWorkbook();
+        WriteFieldMappingSheet(workbook, settings.Tags);
+        workbook.SaveAs(filePath);
+    }
+
+    static int FindMappingColumn(IXLWorksheet sheet, params string[] candidates)
+    {
+        var lastColumn = sheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+        for (var col = 1; col <= lastColumn; col++)
+        {
+            var header = sheet.Cell(1, col).GetString().Trim();
+            if (candidates.Any(candidate =>
+                    string.Equals(header, candidate, StringComparison.OrdinalIgnoreCase)))
+            {
+                return col;
+            }
+        }
+
+        return -1;
+    }
+
     public static void MergeMissingCatalogTags(AppSettings settings, IReadOnlyList<PlcTag> catalogTags)
     {
         var existing = settings.Tags.ToDictionary(tag => tag.Name, StringComparer.Ordinal);
@@ -400,7 +626,7 @@ public static class LineExcelConfigService
                 continue;
             }
 
-            settings.Tags.Add(new PlcTag
+            var added = new PlcTag
             {
                 Name = catalogTag.Name,
                 Unit = catalogTag.Unit,
@@ -413,8 +639,18 @@ public static class LineExcelConfigService
                 MqttField = catalogTag.MqttField,
                 DisplayCategory = catalogTag.DisplayCategory,
                 Enabled = catalogTag.Enabled
-            });
+            };
+            PlcTagIdentity.AssignStableId(added, settings.LineName);
+            settings.Tags.Add(added);
         }
+    }
+
+    /// <summary>仅补全 catalog 新增且必须存在的 PLC 点位，不恢复用户已删的手动点位。</summary>
+    public static void MergeMissingRequiredPlcTags(AppSettings settings, IReadOnlyList<PlcTag> catalogTags)
+    {
+        var requiredNames = new HashSet<string>(StringComparer.Ordinal) { "当前注胶机编号" };
+        var required = catalogTags.Where(tag => requiredNames.Contains(tag.Name)).ToList();
+        MergeMissingCatalogTags(settings, required);
     }
 
     static bool NeedsFormatUpgrade(string filePath)
@@ -665,7 +901,7 @@ public static class LineExcelConfigService
         var rows = new (TagDisplayCategory Category, string Description, string Presentation)[]
         {
             (TagDisplayCategory.Switch, "Bool / 运行停止类点位", "大圆点 + 运行中/已停止，绿/红高亮"),
-            (TagDisplayCategory.Temperature, "名称含「温度」或单位 ℃", "橙色分组 + 左侧色条"),
+            (TagDisplayCategory.Temperature, "名称含「温度」或单位 ℃；当前注胶机编号与当前工作温度同组", "橙色分组 + 左侧色条"),
             (TagDisplayCategory.Process, "车速、间隙、张力等工艺数值", "青色分组 + 左侧色条"),
             (TagDisplayCategory.Setting, "手动输入：型号、货号、门幅、厚度等", "蓝色分组 + 左侧色条"),
             (TagDisplayCategory.Other, "未归入以上分组的点位", "灰色分组 + 左侧色条"),

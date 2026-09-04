@@ -46,7 +46,19 @@ public sealed class SettingsStore
         RunStatusFormatting.MigrateTags(Current.Tags);
         NormalizeMqttPayloadProfile();
 
-        if (Current.AddressCatalogVersion < LineCatalog.Version)
+        var catalogTags = LineCatalog.Resolve(Current.LineName).Tags;
+        var tagCountBeforeMerge = Current.Tags.Count;
+        LineExcelConfigService.MergeMissingRequiredPlcTags(Current, catalogTags);
+        MqttFieldMappingCatalog.ApplyDefaults(Current.Tags, Current.LineName);
+        if (Current.Tags.Count > tagCountBeforeMerge)
+        {
+            _logger.LogInformation(
+                "已合并缺失 catalog 点位 line={LineName} added={AddedCount}",
+                Current.LineName,
+                Current.Tags.Count - tagCountBeforeMerge);
+            await SaveAsync(Current).ConfigureAwait(false);
+        }
+        else if (Current.AddressCatalogVersion < LineCatalog.Version)
         {
             Current.AddressCatalogVersion = LineCatalog.Version;
             await SaveAsync(Current).ConfigureAwait(false);

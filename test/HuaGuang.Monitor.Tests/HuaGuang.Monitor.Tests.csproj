@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\HuaGuang.Monitor.Core\HuaGuang.Monitor.Core.csproj" />
+    <ProjectReference Include="..\..\src\HuaGuang.Monitor.Runtime\HuaGuang.Monitor.Runtime.csproj" />
   </ItemGroup>
 
 </Project>

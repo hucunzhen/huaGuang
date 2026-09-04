@@ -48,14 +48,9 @@ public static class MqttPayloadMapper
             return null;
         }
 
-        if (RunStatusFormatting.IsRunStatusTag(tag))
+        if (SwitchStatusFormatting.TryFormatMqttText(tag, value, out var switchText))
         {
-            return RunStatusFormatting.TryGetCode(value) ?? 0;
-        }
-
-        if (tag.DataType == TagDataType.Bool || value is bool)
-        {
-            return value is bool flag && flag ? 1 : 0;
+            return switchText;
         }
 
         if (ValueFormatting.SupportsPrecision(tag) && ValueFormatting.TryAsDouble(value, out var number))
@@ -116,10 +111,7 @@ public static class MqttPayloadMapper
         if (TryGetByPath(root, profile.TagsPath, out var tagsElement) &&
             tagsElement.ValueKind == JsonValueKind.Object)
         {
-            foreach (var property in tagsElement.EnumerateObject())
-            {
-                result.Tags[property.Name] = JsonElementToObject(property.Value);
-            }
+            AppendTags(result, tagsElement);
         }
         else if (string.IsNullOrWhiteSpace(profile.TagsPath) && root.ValueKind == JsonValueKind.Object)
         {
@@ -134,8 +126,43 @@ public static class MqttPayloadMapper
                 result.Tags[property.Name] = JsonElementToObject(property.Value);
             }
         }
+        else if (result.Tags.Count == 0)
+        {
+            TryAppendAlternateTagPaths(root, profile.TagsPath, result);
+        }
 
         return result;
+    }
+
+    static void TryAppendAlternateTagPaths(JsonElement root, string? primaryPath, TelemetryParseResult result)
+    {
+        foreach (var path in new[] { "properties", "tags", "data.tags", "data" })
+        {
+            if (string.Equals(path, primaryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!TryGetByPath(root, path, out var tagsElement) ||
+                tagsElement.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            AppendTags(result, tagsElement);
+            if (result.Tags.Count > 0)
+            {
+                return;
+            }
+        }
+    }
+
+    static void AppendTags(TelemetryParseResult result, JsonElement tagsElement)
+    {
+        foreach (var property in tagsElement.EnumerateObject())
+        {
+            result.Tags[property.Name] = JsonElementToObject(property.Value);
+        }
     }
 
     public static PlcTag? MatchCatalogTag(string remoteFieldKey, IReadOnlyList<PlcTag> catalogTags, MqttPayloadProfile profile)
@@ -291,17 +318,7 @@ public static class MqttPayloadMapper
         current[parts[^1]] = value;
     }
 
-    static object? JsonElementToObject(JsonElement element) => element.ValueKind switch
-    {
-        JsonValueKind.String => element.GetString(),
-        JsonValueKind.Number => element.TryGetInt64(out var integer) && !element.GetRawText().Contains('.')
-            ? integer
-            : element.GetDouble(),
-        JsonValueKind.True => true,
-        JsonValueKind.False => false,
-        JsonValueKind.Null => null,
-        _ => element.GetRawText()
-    };
+    static object? JsonElementToObject(JsonElement element) => JsonValueNormalizer.FromJsonElement(element);
 }
 
 public sealed class TelemetryParseResult

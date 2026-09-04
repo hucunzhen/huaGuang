@@ -29,56 +29,62 @@ public sealed class MonitorIpcServer : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("IPC 服务已启动 pipe={PipeName}", MonitorIpcConstants.PipeName);
+        _logger.LogInformation(
+            "IPC 服务已启动 pipe={PipeName} tcp=127.0.0.1:{TcpPort}",
+            MonitorIpcConstants.PipeName,
+            MonitorIpcConstants.TcpPort);
+
+        var pipeTask = RunPipeServerAsync(stoppingToken);
+        var tcpTask = MonitorIpcTcpTransport.RunServerAsync(DispatchAsync, _logger, stoppingToken);
+        await Task.WhenAll(pipeTask, tcpTask).ConfigureAwait(false);
+    }
+
+    async Task RunPipeServerAsync(CancellationToken stoppingToken)
+    {
+        var handlers = new List<Task>();
         while (!stoppingToken.IsCancellationRequested)
         {
-            await using var pipe = new NamedPipeServerStream(
-                MonitorIpcConstants.PipeName,
-                PipeDirection.InOut,
-                NamedPipeServerStream.MaxAllowedServerInstances,
-                PipeTransmissionMode.Byte,
-                PipeOptions.Asynchronous);
-
+            var pipe = MonitorIpcPipeFactory.CreateServerStream();
             try
             {
                 await pipe.WaitForConnectionAsync(stoppingToken).ConfigureAwait(false);
-                await HandleClientAsync(pipe, stoppingToken).ConfigureAwait(false);
+                handlers.RemoveAll(static task => task.IsCompleted);
+                handlers.Add(HandlePipeClientAsync(pipe, stoppingToken));
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                await pipe.DisposeAsync().ConfigureAwait(false);
                 break;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "IPC 连接处理失败");
+                await pipe.DisposeAsync().ConfigureAwait(false);
+                _logger.LogWarning(ex, "IPC 管道等待连接失败");
             }
+        }
+
+        if (handlers.Count > 0)
+        {
+            await Task.WhenAll(handlers).ConfigureAwait(false);
         }
     }
 
-    async Task HandleClientAsync(NamedPipeServerStream pipe, CancellationToken cancellationToken)
+    async Task HandlePipeClientAsync(NamedPipeServerStream pipe, CancellationToken stoppingToken)
     {
-        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
-        var requestLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(requestLine))
-        {
-            return;
-        }
-
-        MonitorIpcResponse response;
         try
         {
-            var request = JsonSerializer.Deserialize<MonitorIpcRequest>(requestLine, MonitorIpcJson.Options)
-                ?? throw new InvalidOperationException("无效请求");
-            response = await DispatchAsync(request, cancellationToken).ConfigureAwait(false);
+            await using (pipe)
+            {
+                await MonitorIpcStreamSession.HandleAsync(pipe, DispatchAsync, stoppingToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {
-            response = new MonitorIpcResponse { Success = false, Error = ex.Message };
+            _logger.LogWarning(ex, "IPC 管道连接处理失败");
         }
-
-        var responseLine = JsonSerializer.Serialize(response, MonitorIpcJson.Options) + "\n";
-        var bytes = Encoding.UTF8.GetBytes(responseLine);
-        await pipe.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
     }
 
     async Task<MonitorIpcResponse> DispatchAsync(MonitorIpcRequest request, CancellationToken cancellationToken)
@@ -88,33 +94,41 @@ public sealed class MonitorIpcServer : BackgroundService
         switch (request.Command)
         {
             case MonitorIpcCommand.Ping:
-                return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
+                return Ok(new MonitorRuntimeState
+                {
+                    OperationMode = _settings.Current.OperationMode.ToString(),
+                    IsRunning = _acquisition.IsRunning || _subscription.IsRunning
+                });
 
             case MonitorIpcCommand.GetStatus:
                 return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
 
             case MonitorIpcCommand.Start:
-                if (_settings.Current.OperationMode == AppOperationMode.Subscribe)
+                await _settings.LoadAsync().ConfigureAwait(false);
+                if (ResolveSubscribeStart(request, _settings.Current))
                 {
+                    if (_acquisition.IsRunning)
+                    {
+                        await _acquisition.StopAsync().ConfigureAwait(false);
+                    }
+
                     await _subscription.StartAsync().ConfigureAwait(false);
                 }
                 else
                 {
+                    if (_subscription.IsRunning)
+                    {
+                        await _subscription.StopAsync().ConfigureAwait(false);
+                    }
+
                     await _acquisition.StartAsync().ConfigureAwait(false);
                 }
 
                 return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
 
             case MonitorIpcCommand.Stop:
-                if (_settings.Current.OperationMode == AppOperationMode.Subscribe)
-                {
-                    await _subscription.StopAsync().ConfigureAwait(false);
-                }
-                else
-                {
-                    await _acquisition.StopAsync().ConfigureAwait(false);
-                }
-
+                await _acquisition.StopAsync().ConfigureAwait(false);
+                await _subscription.StopAsync().ConfigureAwait(false);
                 return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
 
             case MonitorIpcCommand.ReloadSettings:
@@ -141,13 +155,39 @@ public sealed class MonitorIpcServer : BackgroundService
     static MonitorIpcResponse Ok(MonitorRuntimeState state) =>
         new() { Success = true, State = state };
 
+    static bool ResolveSubscribeStart(MonitorIpcRequest request, AppSettings settings)
+    {
+        if (!string.IsNullOrWhiteSpace(request.OperationMode) &&
+            Enum.TryParse<AppOperationMode>(request.OperationMode, ignoreCase: true, out var requested))
+        {
+            return requested == AppOperationMode.Subscribe;
+        }
+
+        return settings.OperationMode == AppOperationMode.Subscribe;
+    }
+
+    static bool ResolveSubscribeStatus(AppSettings settings, AcquisitionService acquisition, SubscriptionService subscription)
+    {
+        if (subscription.IsRunning)
+        {
+            return true;
+        }
+
+        if (acquisition.IsRunning)
+        {
+            return false;
+        }
+
+        return settings.OperationMode == AppOperationMode.Subscribe;
+    }
+
     static MonitorRuntimeState BuildState(
         SettingsStore settings,
         AcquisitionService acquisition,
         SubscriptionService subscription,
         string? topicFilter)
     {
-        var isSubscribe = settings.Current.OperationMode == AppOperationMode.Subscribe;
+        var isSubscribe = ResolveSubscribeStatus(settings.Current, acquisition, subscription);
         var state = new MonitorRuntimeState
         {
             OperationMode = settings.Current.OperationMode.ToString(),

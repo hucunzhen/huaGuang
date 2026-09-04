@@ -3,7 +3,7 @@ using HuaGuang.Monitor.Models;
 namespace HuaGuang.Monitor.Services;
 
 /// <summary>
-/// 运行状态点位：0=已停止，1=运行中，2=待机。
+/// 运行状态点位：0=关，1=开，2=待机。
 /// </summary>
 public static class RunStatusFormatting
 {
@@ -34,6 +34,13 @@ public static class RunStatusFormatting
         double number => (int)Math.Round(number),
         float number => (int)Math.Round(number),
         decimal number => (int)Math.Round(number),
+        string text => text switch
+        {
+            "开" or "ON" or "on" => 1,
+            "关" or "OFF" or "off" => 0,
+            "待机" => 2,
+            _ => int.TryParse(text, out var parsed) ? parsed : null
+        },
         _ => int.TryParse(Convert.ToString(value), out var parsed) ? parsed : null
     };
 
@@ -42,8 +49,8 @@ public static class RunStatusFormatting
 
     public static string GetStatusText(int code) => code switch
     {
-        0 => "已停止",
-        1 => "运行中",
+        0 => "关",
+        1 => "开",
         2 => "待机",
         _ => $"未知({code})"
     };
@@ -53,8 +60,8 @@ public static class RunStatusFormatting
 
     public static string GetIndicatorText(int code) => code switch
     {
-        0 => "停",
-        1 => "运",
+        0 => "关",
+        1 => "开",
         2 => "待",
         _ => "?"
     };

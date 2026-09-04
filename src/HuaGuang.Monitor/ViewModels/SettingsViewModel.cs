@@ -502,7 +502,7 @@ public partial class SettingsViewModel : ObservableObject
     async Task NotifyRuntimeReloadAsync()
     {
 #if WINDOWS
-        if (!MauiProgram.UsesWindowsBackgroundService)
+        if (!MauiProgram.IsWindowsBackgroundServiceAvailable())
         {
             return;
         }

@@ -111,14 +111,7 @@ public static class LineConfigPaths
         return true;
     }
 
-    static bool UsesInstallLinesDirectory()
-    {
-#if WINDOWS
-        return IsDirectoryWritable(InstallLinesDirectory);
-#else
-        return false;
-#endif
-    }
+    static bool UsesInstallLinesDirectory() => false;
 
     static bool IsDirectoryWritable(string directory)
     {

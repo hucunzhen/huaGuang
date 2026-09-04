@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
 
 namespace HuaGuang.Monitor.ViewModels;
@@ -17,6 +18,7 @@ public partial class HistoryViewModel : ObservableObject
     DateTimeOffset _queryTo;
     string? _queryDeviceFilter;
     List<string> _preferredTags = [];
+    Dictionary<string, string?> _tagUnitHints = new(StringComparer.Ordinal);
     List<HistoryTableColumn> _fixedColumns = [];
 
     public HistoryViewModel(HistoryStore store, SettingsStore settings)
@@ -36,6 +38,7 @@ public partial class HistoryViewModel : ObservableObject
     public ObservableCollection<string> DeviceOptions { get; } = [];
 
     [ObservableProperty] ObservableCollection<HistoryTableRow> tableRows = [];
+    [ObservableProperty] ObservableCollection<HistoryTableColumn> tableColumns = [];
     [ObservableProperty] string headerLine = string.Empty;
     [ObservableProperty] double tableContentMinWidth;
     [ObservableProperty] string selectedRange = "最近 24 小时";
@@ -80,6 +83,8 @@ public partial class HistoryViewModel : ObservableObject
         IsBusy = true;
         try
         {
+            await _settings.LoadAsync().ConfigureAwait(false);
+
             var (from, to) = ResolveQueryRange();
             _queryFrom = from;
             _queryTo = to;
@@ -90,11 +95,22 @@ public partial class HistoryViewModel : ObservableObject
             var countQuery = BuildCountQuery();
             _totalCount = await _store.CountMatchingAsync(countQuery).ConfigureAwait(false);
             var devices = await _store.GetDeviceIdsAsync().ConfigureAwait(false);
-            _preferredTags = _settings.Current.Tags
+            var distinctTags = await _store.GetDistinctTagNamesAsync(countQuery).ConfigureAwait(false);
+            var distinctUnits = await _store.GetDistinctTagUnitsAsync(countQuery).ConfigureAwait(false);
+            _preferredTags = MergeTagNames(
+                _settings.Current.Tags.Where(tag => tag.Enabled).Select(tag => tag.Name),
+                distinctTags);
+            _tagUnitHints = _settings.Current.Tags
                 .Where(tag => tag.Enabled)
-                .Select(tag => tag.Name)
-                .Take(HistoryTableFormatting.MaxColumns)
-                .ToList();
+                .GroupBy(tag => tag.Name, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First().Unit, StringComparer.Ordinal);
+            foreach (var pair in distinctUnits)
+            {
+                if (!_tagUnitHints.ContainsKey(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                {
+                    _tagUnitHints[pair.Key] = pair.Value;
+                }
+            }
 
             var table = await LoadPageAsync(0).ConfigureAwait(false);
 
@@ -103,8 +119,9 @@ public partial class HistoryViewModel : ObservableObject
                 ApplyFilterOptions(devices, _queryDeviceFilter);
                 TableRows = new ObservableCollection<HistoryTableRow>(table.Rows);
                 _fixedColumns = table.Columns.ToList();
+                TableColumns = new ObservableCollection<HistoryTableColumn>(_fixedColumns);
                 HeaderLine = table.HeaderLine;
-                TableContentMinWidth = HistoryTableFormatting.EstimateContentWidth(table.HeaderLine);
+                TableContentMinWidth = HistoryTableFormatting.EstimateContentWidth(_fixedColumns.Count);
                 ShowEmpty = TableRows.Count == 0;
                 UpdateSummary();
                 StatusMessage = string.Empty;
@@ -123,6 +140,41 @@ public partial class HistoryViewModel : ObservableObject
 
     partial void OnSelectedRangeChanged(string value) =>
         ShowCustomTimeFilters = value == "自定义时间";
+
+    partial void OnSelectedDeviceChanged(string value)
+    {
+        if (_suppressFilterRefresh || IsBusy || string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        _ = RefreshAsync();
+    }
+
+    static List<string> MergeTagNames(
+        IEnumerable<string> preferredOrder,
+        IReadOnlyList<string> recordedTags)
+    {
+        var merged = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in preferredOrder)
+        {
+            if (seen.Add(name))
+            {
+                merged.Add(name);
+            }
+        }
+
+        foreach (var name in recordedTags)
+        {
+            if (seen.Add(name))
+            {
+                merged.Add(name);
+            }
+        }
+
+        return merged;
+    }
 
     [RelayCommand]
     async Task LoadMoreAsync()
@@ -173,7 +225,8 @@ public partial class HistoryViewModel : ObservableObject
             },
             _settings.Current.TemperaturePrecision,
             _preferredTags,
-            _fixedColumns.Count > 0 ? _fixedColumns : null).ConfigureAwait(false);
+            _fixedColumns.Count > 0 ? _fixedColumns : null,
+            _tagUnitHints).ConfigureAwait(false);
 
     void UpdateLoadMoreState(int? lastBatchCount = null)
     {
@@ -362,9 +415,11 @@ public partial class HistoryViewModel : ObservableObject
     void ClearDisplayedTable()
     {
         TableRows.Clear();
+        TableColumns.Clear();
         HeaderLine = string.Empty;
         TableContentMinWidth = 0;
         _fixedColumns = [];
+        _tagUnitHints = new Dictionary<string, string?>(StringComparer.Ordinal);
         _currentOffset = 0;
         _totalCount = 0;
         CanLoadMore = false;

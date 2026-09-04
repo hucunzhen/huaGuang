@@ -4,6 +4,7 @@
              xmlns:views="clr-namespace:HuaGuang.Monitor.Views"
              xmlns:vm="clr-namespace:HuaGuang.Monitor.ViewModels"
              xmlns:services="clr-namespace:HuaGuang.Monitor.Services"
+             xmlns:models="clr-namespace:HuaGuang.Monitor.Models"
              x:Class="HuaGuang.Monitor.Views.HistoryPage"
              x:Name="ThisPage"
              x:DataType="vm:HistoryViewModel"
@@ -90,82 +91,136 @@
             </Grid>
         </Grid>
 
-        <Grid Grid.Row="2" RowDefinitions="Auto,*">
+        <Grid Grid.Row="2" RowDefinitions="*,Auto">
             <ScrollView Grid.Row="0"
-                        Orientation="Horizontal"
-                        HorizontalScrollBarVisibility="Default"
+                        Orientation="Vertical"
                         IsVisible="{Binding ShowEmpty, Converter={StaticResource InverseBoolConverter}}">
-                <Border Stroke="#1F3A52"
-                        StrokeThickness="1"
-                        BackgroundColor="#152536"
-                        Padding="8,6">
-                    <Label Text="{Binding HeaderLine}"
-                           FontFamily="Consolas"
-                           FontAttributes="Bold"
-                           TextColor="#8AA0B5"
-                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                           LineBreakMode="NoWrap"
-                           MinimumWidthRequest="{Binding TableContentMinWidth}" />
-                </Border>
+                <ScrollView Orientation="Horizontal"
+                            HorizontalScrollBarVisibility="Always"
+                            VerticalScrollBarVisibility="Never">
+                    <VerticalStackLayout MinimumWidthRequest="{Binding TableContentMinWidth}"
+                                       Spacing="2">
+                        <Border Stroke="#1F3A52"
+                                StrokeThickness="1"
+                                BackgroundColor="#152536"
+                                Padding="8,6">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <HorizontalStackLayout Spacing="{x:Static services:HistoryTableFormatting.ColumnSpacing}">
+                                    <Label Text="时间"
+                                           WidthRequest="{x:Static services:HistoryTableFormatting.TimeColumnWidth}"
+                                           FontFamily="Consolas"
+                                           FontAttributes="Bold"
+                                           TextColor="#8AA0B5"
+                                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                                           VerticalOptions="Center" />
+                                    <Label Text="设备"
+                                           WidthRequest="{x:Static services:HistoryTableFormatting.DeviceColumnWidth}"
+                                           FontFamily="Consolas"
+                                           FontAttributes="Bold"
+                                           TextColor="#8AA0B5"
+                                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                                           VerticalOptions="Center" />
+                                    <HorizontalStackLayout Spacing="{x:Static services:HistoryTableFormatting.ColumnSpacing}"
+                                                           BindableLayout.ItemsSource="{Binding Source={x:Reference ThisPage}, Path=BindingContext.TableColumns}">
+                                        <BindableLayout.ItemTemplate>
+                                            <DataTemplate x:DataType="models:HistoryTableColumn">
+                                                <Label Text="{Binding HeaderText}"
+                                                       WidthRequest="{x:Static services:HistoryTableFormatting.TagColumnWidth}"
+                                                       FontFamily="Consolas"
+                                                       FontAttributes="Bold"
+                                                       TextColor="#8AA0B5"
+                                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                                                       LineBreakMode="WordWrap"
+                                                       MaxLines="2"
+                                                       VerticalOptions="Center" />
+                                            </DataTemplate>
+                                        </BindableLayout.ItemTemplate>
+                                    </HorizontalStackLayout>
+                                </HorizontalStackLayout>
+                                <BoxView Grid.Column="1"
+                                         WidthRequest="{x:Static services:HistoryTableFormatting.DeleteColumnWidth}"
+                                         Color="Transparent" />
+                            </Grid>
+                        </Border>
+
+                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding TableRows}"
+                                             Spacing="2">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="models:HistoryTableRow">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                                        <Border Grid.Column="0"
+                                                Stroke="#1F3A52"
+                                                StrokeThickness="1"
+                                                BackgroundColor="#101C28"
+                                                Padding="8,4">
+                                            <HorizontalStackLayout Spacing="{x:Static services:HistoryTableFormatting.ColumnSpacing}">
+                                                <Label Text="{Binding RecordedAtText}"
+                                                       WidthRequest="{x:Static services:HistoryTableFormatting.TimeColumnWidth}"
+                                                       FontFamily="Consolas"
+                                                       TextColor="White"
+                                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                                                       LineBreakMode="TailTruncation"
+                                                       VerticalOptions="Center" />
+                                                <Label Text="{Binding DeviceId}"
+                                                       WidthRequest="{x:Static services:HistoryTableFormatting.DeviceColumnWidth}"
+                                                       FontFamily="Consolas"
+                                                       TextColor="White"
+                                                       FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                                                       LineBreakMode="TailTruncation"
+                                                       VerticalOptions="Center" />
+                                                <HorizontalStackLayout Spacing="{x:Static services:HistoryTableFormatting.ColumnSpacing}"
+                                                                       BindableLayout.ItemsSource="{Binding Cells}">
+                                                    <BindableLayout.ItemTemplate>
+                                                        <DataTemplate x:DataType="x:String">
+                                                            <Label Text="{Binding .}"
+                                                                   WidthRequest="{x:Static services:HistoryTableFormatting.TagColumnWidth}"
+                                                                   FontFamily="Consolas"
+                                                                   TextColor="White"
+                                                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
+                                                                   LineBreakMode="TailTruncation"
+                                                                   VerticalOptions="Center" />
+                                                        </DataTemplate>
+                                                    </BindableLayout.ItemTemplate>
+                                                </HorizontalStackLayout>
+                                            </HorizontalStackLayout>
+                                        </Border>
+                                        <Button Grid.Column="1"
+                                                Text="删"
+                                                WidthRequest="{x:Static services:HistoryTableFormatting.DeleteColumnWidth}"
+                                                VerticalOptions="Center"
+                                                Padding="4,2"
+                                                FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                                                BackgroundColor="#3A1F1F"
+                                                TextColor="#FF6B6B"
+                                                Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.DeleteRowCommand}"
+                                                CommandParameter="{Binding .}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
+                </ScrollView>
             </ScrollView>
 
-            <CollectionView Grid.Row="1"
-                            ItemsSource="{Binding TableRows}"
-                            SelectionMode="None"
-                            RemainingItemsThreshold="5"
-                            RemainingItemsThresholdReachedCommand="{Binding LoadMoreCommand}"
-                            IsVisible="{Binding ShowEmpty, Converter={StaticResource InverseBoolConverter}}">
-                <CollectionView.ItemTemplate>
-                    <DataTemplate x:DataType="services:HistoryTableRow">
-                        <Grid ColumnDefinitions="*,Auto"
-                              ColumnSpacing="4"
-                              Padding="0,2">
-                            <ScrollView Orientation="Horizontal"
-                                        HorizontalScrollBarVisibility="Never">
-                                <Border Stroke="#1F3A52"
-                                        StrokeThickness="1"
-                                        BackgroundColor="#101C28"
-                                        Padding="8,4">
-                                    <Label Text="{Binding LineText}"
-                                           FontFamily="Consolas"
-                                           TextColor="White"
-                                           FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}"
-                                           LineBreakMode="NoWrap"
-                                           MinimumWidthRequest="{Binding Source={x:Reference ThisPage}, Path=BindingContext.TableContentMinWidth}" />
-                                </Border>
-                            </ScrollView>
-                            <Button Grid.Column="1"
-                                    Text="删"
-                                    WidthRequest="44"
-                                    VerticalOptions="Center"
-                                    Padding="4,2"
-                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                                    BackgroundColor="#3A1F1F"
-                                    TextColor="#FF6B6B"
-                                    Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.DeleteRowCommand}"
-                                    CommandParameter="{Binding .}" />
-                        </Grid>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-                <CollectionView.Footer>
-                    <VerticalStackLayout Padding="8,6" Spacing="6">
-                        <Button Text="加载更多"
-                                Command="{Binding LoadMoreCommand}"
-                                IsVisible="{Binding CanLoadMore}"
-                                Padding="12,6"
-                                FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
-                        <ActivityIndicator IsRunning="{Binding IsLoadingMore}"
-                                           IsVisible="{Binding IsLoadingMore}"
-                                           Color="#2EC4B6"
-                                           HorizontalOptions="Center" />
-                        <Label Text="已加载全部记录"
-                               TextColor="#6E8499"
-                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                               HorizontalOptions="Center"
-                               IsVisible="{Binding CanLoadMore, Converter={StaticResource InverseBoolConverter}}" />
-                    </VerticalStackLayout>
-                </CollectionView.Footer>
-            </CollectionView>
+            <VerticalStackLayout Grid.Row="1"
+                                 Padding="8,6"
+                                 Spacing="6"
+                                 IsVisible="{Binding ShowEmpty, Converter={StaticResource InverseBoolConverter}}">
+                <Button Text="加载更多"
+                        Command="{Binding LoadMoreCommand}"
+                        IsVisible="{Binding CanLoadMore}"
+                        Padding="12,6"
+                        FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                <ActivityIndicator IsRunning="{Binding IsLoadingMore}"
+                                   IsVisible="{Binding IsLoadingMore}"
+                                   Color="#2EC4B6"
+                                   HorizontalOptions="Center" />
+                <Label Text="已加载全部记录"
+                       TextColor="#6E8499"
+                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
+                       HorizontalOptions="Center"
+                       IsVisible="{Binding CanLoadMore, Converter={StaticResource InverseBoolConverter}}" />
+            </VerticalStackLayout>
 
             <Label Grid.RowSpan="2"
                    Text="当前筛选条件下没有历史记录。"

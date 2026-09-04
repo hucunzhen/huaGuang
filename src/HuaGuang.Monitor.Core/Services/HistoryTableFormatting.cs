@@ -2,11 +2,18 @@ namespace HuaGuang.Monitor.Services;
 
 public static class HistoryTableFormatting
 {
-    public const int MaxColumns = 16;
+    /// <summary>历史表格最多显示的点位列数（支持横向滚动）。</summary>
+    public const int MaxColumns = 64;
     public const int PageSize = 40;
     public const int TimeWidth = 14;
     public const int DeviceWidth = 10;
     public const int TagWidth = 8;
+
+    public const double ColumnSpacing = 8;
+    public const double TimeColumnWidth = 118;
+    public const double DeviceColumnWidth = 88;
+    public const double TagColumnWidth = 76;
+    public const double DeleteColumnWidth = 48;
 
     public static string FormatHeaderLine(IReadOnlyList<HistoryTableColumn> columns)
     {
@@ -48,13 +55,46 @@ public static class HistoryTableFormatting
         return text.PadRight(width);
     }
 
-    /// <summary>Consolas 等宽字体下列表最小宽度（像素），供横向滚动容器使用。</summary>
-    public static double EstimateContentWidth(int tagColumnCount, double charWidth = 7.6)
+    /// <summary>表格内容区最小宽度（像素），供横向滚动容器使用。</summary>
+    public static double EstimateContentWidth(int tagColumnCount)
     {
-        var charCount = TimeWidth + 1 + DeviceWidth + 1 + tagColumnCount * (TagWidth + 1);
-        return Math.Max(320, charCount * charWidth);
+        if (tagColumnCount <= 0)
+        {
+            return TimeColumnWidth + ColumnSpacing + DeviceColumnWidth + DeleteColumnWidth;
+        }
+
+        return TimeColumnWidth
+               + ColumnSpacing
+               + DeviceColumnWidth
+               + ColumnSpacing
+               + tagColumnCount * TagColumnWidth
+               + (tagColumnCount - 1) * ColumnSpacing
+               + ColumnSpacing
+               + DeleteColumnWidth;
     }
 
     public static double EstimateContentWidth(string headerLine, double charWidth = 7.6) =>
-        Math.Max(320, headerLine.Length * charWidth);
+        EstimateContentWidth(Math.Max(0, CountTagColumns(headerLine)));
+
+    static int CountTagColumns(string headerLine)
+    {
+        if (string.IsNullOrWhiteSpace(headerLine))
+        {
+            return 0;
+        }
+
+        var prefix = Pad("时间", TimeWidth) + " " + Pad("设备", DeviceWidth);
+        if (headerLine.Length <= prefix.Length)
+        {
+            return 0;
+        }
+
+        var remainder = headerLine[prefix.Length..].Trim();
+        if (string.IsNullOrEmpty(remainder))
+        {
+            return 0;
+        }
+
+        return remainder.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+    }
 }

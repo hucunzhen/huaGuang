@@ -3,14 +3,19 @@ namespace HuaGuang.Monitor.Services;
 /// <summary>
 /// 单调时钟，用于扫描周期补偿（Android 上比 Stopwatch 更可靠）。
 /// </summary>
-internal interface IScanMonotonicClock
+public interface IScanMonotonicClock
 {
     double ElapsedMs { get; }
 }
 
-internal static class ScanMonotonicClock
+public static class ScanMonotonicClock
 {
-    public static IScanMonotonicClock Create() => new StopwatchScanMonotonicClock();
+    static Func<IScanMonotonicClock>? _factory;
+
+    public static void ConfigureFactory(Func<IScanMonotonicClock> factory) =>
+        _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+
+    public static IScanMonotonicClock Create() => _factory?.Invoke() ?? new StopwatchScanMonotonicClock();
 }
 
 internal sealed class StopwatchScanMonotonicClock : IScanMonotonicClock

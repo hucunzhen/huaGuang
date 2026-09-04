@@ -279,6 +279,19 @@ public class FitGrid : ContentView
         if (Handler is null)
         {
             DetachCollection(_subscribed);
+            _rebuildQueued = false;
+            foreach (var view in _itemViews)
+            {
+                view.BindingContext = null;
+                if (view.Parent is Layout parent)
+                {
+                    parent.Remove(view);
+                }
+            }
+
+            _itemViews.Clear();
+            _fillGrid.Children.Clear();
+            _collectionView.ItemsSource = null;
         }
     }
 
