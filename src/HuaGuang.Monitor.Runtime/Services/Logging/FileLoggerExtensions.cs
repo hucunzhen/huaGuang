@@ -9,11 +9,13 @@ public static class FileLoggerExtensions
         this ILoggingBuilder builder,
         string logDirectory,
         LogLevel minimumLevel = LogLevel.Information,
-        int retentionDays = 14)
+        int retentionDays = 14,
+        string? logFilePrefix = null)
     {
         Directory.CreateDirectory(logDirectory);
         LogRetention.Cleanup(logDirectory, retentionDays);
-        builder.AddProvider(new FileLoggerProvider(logDirectory, minimumLevel));
+        var prefix = string.IsNullOrWhiteSpace(logFilePrefix) ? AppPaths.RuntimeLogPrefix : logFilePrefix.Trim();
+        builder.AddProvider(new FileLoggerProvider(logDirectory, minimumLevel, prefix));
         return builder;
     }
 }
@@ -22,15 +24,17 @@ sealed class FileLoggerProvider : ILoggerProvider
 {
     readonly string _logDirectory;
     readonly LogLevel _minimumLevel;
+    readonly string _logFilePrefix;
 
-    public FileLoggerProvider(string logDirectory, LogLevel minimumLevel)
+    public FileLoggerProvider(string logDirectory, LogLevel minimumLevel, string logFilePrefix)
     {
         _logDirectory = logDirectory;
         _minimumLevel = minimumLevel;
+        _logFilePrefix = logFilePrefix;
     }
 
     public ILogger CreateLogger(string categoryName) =>
-        new FileLogger(categoryName, _logDirectory, _minimumLevel);
+        new FileLogger(categoryName, _logDirectory, _minimumLevel, _logFilePrefix);
 
     public void Dispose()
     {
@@ -42,12 +46,14 @@ sealed class FileLogger : ILogger
     readonly string _category;
     readonly string _logDirectory;
     readonly LogLevel _minimumLevel;
+    readonly string _logFilePrefix;
 
-    public FileLogger(string category, string logDirectory, LogLevel minimumLevel)
+    public FileLogger(string category, string logDirectory, LogLevel minimumLevel, string logFilePrefix)
     {
         _category = category;
         _logDirectory = logDirectory;
         _minimumLevel = minimumLevel;
+        _logFilePrefix = logFilePrefix;
     }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -72,7 +78,7 @@ sealed class FileLogger : ILogger
             return;
         }
 
-        RuntimeLogWriter.Write(_logDirectory, logLevel, _category, message, exception);
+        RuntimeLogWriter.Write(_logDirectory, _logFilePrefix, logLevel, _category, message, exception);
     }
 }
 
@@ -84,6 +90,7 @@ static class RuntimeLogWriter
 
     public static void Write(
         string logDirectory,
+        string logFilePrefix,
         LogLevel level,
         string category,
         string message,
@@ -97,23 +104,36 @@ static class RuntimeLogWriter
             line += Environment.NewLine + exception;
         }
 
-        lock (Gate)
+        try
         {
-            var filePath = ResolveLogFilePath(logDirectory);
-            File.AppendAllText(filePath, line + Environment.NewLine);
+            lock (Gate)
+            {
+                var filePath = ResolveLogFilePath(logDirectory, logFilePrefix);
+                using var stream = new FileStream(
+                    filePath,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.ReadWrite);
+                using var writer = new StreamWriter(stream);
+                writer.WriteLine(line);
+            }
+        }
+        catch
+        {
+            // 日志写入失败（权限/锁）时不能拖垮 UI 或后台服务。
         }
     }
 
-    static string ResolveLogFilePath(string logDirectory)
+    static string ResolveLogFilePath(string logDirectory, string logFilePrefix)
     {
-        var dateKey = DateTime.Now.ToString("yyyyMMdd");
+        var dateKey = $"{logFilePrefix}:{DateTime.Now:yyyyMMdd}";
         if (_currentDateKey == dateKey && _currentFilePath is not null)
         {
             return _currentFilePath;
         }
 
         _currentDateKey = dateKey;
-        _currentFilePath = Path.Combine(logDirectory, $"runtime-{dateKey}.log");
+        _currentFilePath = Path.Combine(logDirectory, $"{logFilePrefix}-{DateTime.Now:yyyyMMdd}.log");
         return _currentFilePath;
     }
 
@@ -136,8 +156,13 @@ static class LogRetention
         }
 
         var cutoff = DateTime.Now.AddDays(-retentionDays);
-        foreach (var file in Directory.EnumerateFiles(logDirectory, "runtime-*.log"))
+        foreach (var file in Directory.EnumerateFiles(logDirectory, "*-*.log"))
         {
+            var name = Path.GetFileName(file);
+            if (!name.StartsWith("runtime", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             try
             {
                 if (File.GetLastWriteTime(file) < cutoff)

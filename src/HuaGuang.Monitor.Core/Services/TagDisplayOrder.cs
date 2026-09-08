@@ -25,16 +25,20 @@ public static class TagDisplayOrder
 
         foreach (var pair in remoteTags.OrderBy(entry => entry.Key, StringComparer.Ordinal))
         {
-            var matched = MqttPayloadMapper.MatchCatalogTag(pair.Key, catalogTags, profile);
-            if (matched is not null)
+            if (TryResolveCatalogTag(pair.Key, catalogTags, profile, out var catalogTag))
             {
-                if (seen.Contains(matched.Name))
+                if (seen.Contains(catalogTag.Name))
                 {
                     continue;
                 }
 
-                seen.Add(matched.Name);
-                yield return (matched.Name, pair.Value, matched);
+                if (!catalogTag.Enabled)
+                {
+                    continue;
+                }
+
+                seen.Add(catalogTag.Name);
+                yield return (catalogTag.Name, pair.Value, catalogTag);
                 continue;
             }
 
@@ -45,6 +49,34 @@ public static class TagDisplayOrder
 
             yield return (pair.Key, pair.Value, null);
         }
+    }
+
+    public static bool TryResolveCatalogTag(
+        string remoteKey,
+        IReadOnlyList<PlcTag> catalogTags,
+        MqttPayloadProfile profile,
+        out PlcTag catalogTag)
+    {
+        var matched = MqttPayloadMapper.MatchCatalogTag(remoteKey, catalogTags, profile);
+        if (matched is not null)
+        {
+            catalogTag = matched;
+            return true;
+        }
+
+        if (MqttFieldMappingCatalog.TryResolveTagNameByField(remoteKey, out var tagName))
+        {
+            matched = catalogTags.FirstOrDefault(tag =>
+                tag.Name.Equals(tagName, StringComparison.Ordinal));
+            if (matched is not null)
+            {
+                catalogTag = matched;
+                return true;
+            }
+        }
+
+        catalogTag = null!;
+        return false;
     }
 
     static bool TryGetRemoteValue(

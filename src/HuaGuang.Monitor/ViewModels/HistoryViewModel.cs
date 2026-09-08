@@ -20,6 +20,8 @@ public partial class HistoryViewModel : ObservableObject
     List<string> _preferredTags = [];
     Dictionary<string, string?> _tagUnitHints = new(StringComparer.Ordinal);
     List<HistoryTableColumn> _fixedColumns = [];
+    IReadOnlyList<PlcTag> _catalogTags = [];
+    MqttPayloadProfile _mqttProfile = new();
 
     public HistoryViewModel(HistoryStore store, SettingsStore settings)
     {
@@ -72,8 +74,16 @@ public partial class HistoryViewModel : ObservableObject
         return Task.CompletedTask;
     }
 
+    /// <summary>切换回历史页时仅在尚未加载数据时自动刷新，避免重复重绘卡死。</summary>
+    public Task RefreshOnAppearAsync() =>
+        TableRows.Count == 0 && _settings.Current.EnableHistoryRecording
+            ? RefreshDataAsync()
+            : Task.CompletedTask;
+
     [RelayCommand]
-    async Task RefreshAsync()
+    Task RefreshAsync() => RefreshDataAsync();
+
+    async Task RefreshDataAsync()
     {
         if (IsBusy)
         {
@@ -83,7 +93,7 @@ public partial class HistoryViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await _settings.LoadAsync().ConfigureAwait(false);
+            await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
 
             var (from, to) = ResolveQueryRange();
             _queryFrom = from;
@@ -92,32 +102,32 @@ public partial class HistoryViewModel : ObservableObject
             _currentOffset = 0;
             _fixedColumns = [];
 
+            var catalogTags = _settings.Current.Tags;
+            var mqttProfile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
             var countQuery = BuildCountQuery();
             _totalCount = await _store.CountMatchingAsync(countQuery).ConfigureAwait(false);
             var devices = await _store.GetDeviceIdsAsync().ConfigureAwait(false);
-            var distinctTags = await _store.GetDistinctTagNamesAsync(countQuery).ConfigureAwait(false);
-            var distinctUnits = await _store.GetDistinctTagUnitsAsync(countQuery).ConfigureAwait(false);
-            _preferredTags = MergeTagNames(
-                _settings.Current.Tags.Where(tag => tag.Enabled).Select(tag => tag.Name),
-                distinctTags);
+            _catalogTags = catalogTags;
+            _mqttProfile = mqttProfile;
+            _preferredTags = _settings.Current.Tags
+                .Where(tag => tag.Enabled)
+                .Select(tag => tag.Name)
+                .ToList();
             _tagUnitHints = _settings.Current.Tags
                 .Where(tag => tag.Enabled)
                 .GroupBy(tag => tag.Name, StringComparer.Ordinal)
-                .ToDictionary(group => group.Key, group => group.First().Unit, StringComparer.Ordinal);
-            foreach (var pair in distinctUnits)
-            {
-                if (!_tagUnitHints.ContainsKey(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
-                {
-                    _tagUnitHints[pair.Key] = pair.Value;
-                }
-            }
+                .ToDictionary(group => group.Key, group => (string?)group.First().Unit, StringComparer.Ordinal);
 
             var table = await LoadPageAsync(0).ConfigureAwait(false);
 
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 ApplyFilterOptions(devices, _queryDeviceFilter);
-                TableRows = new ObservableCollection<HistoryTableRow>(table.Rows);
+                TableRows.Clear();
+                foreach (var row in table.Rows)
+                {
+                    TableRows.Add(row);
+                }
                 _fixedColumns = table.Columns.ToList();
                 TableColumns = new ObservableCollection<HistoryTableColumn>(_fixedColumns);
                 HeaderLine = table.HeaderLine;
@@ -143,43 +153,29 @@ public partial class HistoryViewModel : ObservableObject
 
     partial void OnSelectedDeviceChanged(string value)
     {
-        if (_suppressFilterRefresh || IsBusy || string.IsNullOrWhiteSpace(value))
+        if (_suppressFilterRefresh || string.IsNullOrWhiteSpace(value))
         {
             return;
         }
 
-        _ = RefreshAsync();
+        StatusMessage = "设备筛选已变更，点「刷新」加载。";
     }
 
-    static List<string> MergeTagNames(
-        IEnumerable<string> preferredOrder,
-        IReadOnlyList<string> recordedTags)
-    {
-        var merged = new List<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var name in preferredOrder)
-        {
-            if (seen.Add(name))
-            {
-                merged.Add(name);
-            }
-        }
+    partial void OnCanLoadMoreChanged(bool value) =>
+        LoadMoreCommand.NotifyCanExecuteChanged();
 
-        foreach (var name in recordedTags)
-        {
-            if (seen.Add(name))
-            {
-                merged.Add(name);
-            }
-        }
+    partial void OnIsBusyChanged(bool value) =>
+        LoadMoreCommand.NotifyCanExecuteChanged();
 
-        return merged;
-    }
+    partial void OnIsLoadingMoreChanged(bool value) =>
+        LoadMoreCommand.NotifyCanExecuteChanged();
 
-    [RelayCommand]
+    bool CanExecuteLoadMore() => CanLoadMore && !IsBusy && !IsLoadingMore;
+
+    [RelayCommand(CanExecute = nameof(CanExecuteLoadMore))]
     async Task LoadMoreAsync()
     {
-        if (IsBusy || IsLoadingMore || !CanLoadMore)
+        if (IsBusy || IsLoadingMore)
         {
             return;
         }
@@ -226,7 +222,9 @@ public partial class HistoryViewModel : ObservableObject
             _settings.Current.TemperaturePrecision,
             _preferredTags,
             _fixedColumns.Count > 0 ? _fixedColumns : null,
-            _tagUnitHints).ConfigureAwait(false);
+            _tagUnitHints,
+            _catalogTags,
+            _mqttProfile).ConfigureAwait(false);
 
     void UpdateLoadMoreState(int? lastBatchCount = null)
     {

@@ -12,6 +12,7 @@ public static class Program
 {
     public static void Main(string[] args)
     {
+        CrashExitLogger.RegisterEarly("service");
         AppPaths.Configure(new WindowsAppDataPaths());
         Directory.CreateDirectory(AppPaths.LogDirectory);
 
@@ -28,6 +29,8 @@ public static class Program
         builder.Services.AddHostedService<MonitorAutoStartWorker>();
 
         var host = builder.Build();
+        CrashExitLogger.Register(host.Services.GetRequiredService<ILoggerFactory>());
+        CrashExitLogger.SetContext(typeof(Program).Assembly.GetName().Version?.ToString(), "service");
         var logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ServiceStartup");
         logger.LogInformation(
             "工业监控后台服务启动 dataDir={DataDir} logFile={LogFile}",

@@ -19,12 +19,16 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
     readonly MqttClientFactory _factory = new();
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
     readonly SemaphoreSlim _gate = new(1, 1);
+    readonly CoalescedEvent _devicesUpdatedCoalescer;
     IMqttClient? _client;
 
     public SubscriptionService(SettingsStore settingsStore, ILogger<SubscriptionService> logger)
     {
         _settingsStore = settingsStore;
         _logger = logger;
+        _devicesUpdatedCoalescer = new CoalescedEvent(
+            TimeSpan.FromMilliseconds(300),
+            () => DevicesUpdated?.Invoke(this, EventArgs.Empty));
     }
 
     public bool IsRunning { get; private set; }
@@ -103,6 +107,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             IsRunning = false;
             ActiveSubscribeTopics = [];
             _devices.Clear();
+            _devicesUpdatedCoalescer.Flush();
             await DisconnectAsync().ConfigureAwait(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation("订阅已停止");
@@ -265,7 +270,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             PruneDevices();
             LastPayload = TruncatePayload(payload);
             LastError = string.Empty;
-            DevicesUpdated?.Invoke(this, EventArgs.Empty);
+            RequestDevicesUpdated();
             TelemetryReceived?.Invoke(this, new RemoteTelemetryEventArgs
             {
                 Device = state,
@@ -280,9 +285,11 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
                 "解析遥测失败 topic={Topic} payload={Payload}",
                 message.Topic,
                 LogFormatting.Truncate(message.ConvertPayloadToString()));
-            DevicesUpdated?.Invoke(this, EventArgs.Empty);
+            RequestDevicesUpdated();
         }
     }
+
+    void RequestDevicesUpdated() => _devicesUpdatedCoalescer.Request();
 
     static string TruncatePayload(string payload) =>
         payload.Length <= MaxPayloadLength
@@ -370,6 +377,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);
+        _devicesUpdatedCoalescer.Dispose();
         _gate.Dispose();
     }
 }

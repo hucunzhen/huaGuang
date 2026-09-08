@@ -3,8 +3,8 @@ using HuaGuang.Monitor.Models;
 namespace HuaGuang.Monitor.Services;
 
 /// <summary>
-/// 产线 MQTT 字段映射（参考 config/热熔胶复合机字段映射.xlsx）。
-/// id = 报文 JSON 键，name = 点表点位名称。
+/// 产线 MQTT 字段默认映射（参考 config/热熔胶复合机字段映射.xlsx）。
+/// 仅用于<strong>新建/导出</strong> Excel 或点表 MQTT 列为空时的补全；已配置的 Excel「字段映射」优先。
 /// </summary>
 public static class MqttFieldMappingCatalog
 {
@@ -26,10 +26,10 @@ public static class MqttFieldMappingCatalog
             ["卷曲张力"] = "jqzl",
             ["注胶量"] = "zjl",
             ["当前注胶机编号"] = "zjjbh",
-            // 当前工作温度沿用平台原 rrjwd1/jgwd1/jqwd1 键（替代已移除的热熔胶机1~3）
-            ["当前工作胶盘温度"] = "rrjwd1",
-            ["当前工作胶管温度"] = "jgwd1",
-            ["当前工作胶枪温度"] = "jqwd1",
+            // 平台当前工作温度键为 rrjwd/jgwd/jqwd
+            ["当前工作胶盘温度"] = "rrjwd",
+            ["当前工作胶管温度"] = "jgwd",
+            ["当前工作胶枪温度"] = "jqwd",
             ["胶辊型号"] = "jgxh",
             ["胶水型号"] = "jsxh",
             ["产品货号"] = "cphh",
@@ -122,6 +122,27 @@ public static class MqttFieldMappingCatalog
 
     public static bool TryResolveDefault(string tagName, out string mqttField) =>
         SharedByTagName.TryGetValue(tagName, out mqttField!);
+
+    public static bool TryResolveTagNameByField(string mqttField, out string tagName)
+    {
+        if (string.IsNullOrWhiteSpace(mqttField))
+        {
+            tagName = string.Empty;
+            return false;
+        }
+
+        foreach (var pair in SharedByTagName)
+        {
+            if (string.Equals(pair.Value, mqttField.Trim(), StringComparison.Ordinal))
+            {
+                tagName = pair.Key;
+                return true;
+            }
+        }
+
+        tagName = string.Empty;
+        return false;
+    }
 
     public static void ApplyDefaults(IList<PlcTag> tags, string? lineName = null)
     {

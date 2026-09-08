@@ -231,7 +231,9 @@ public sealed class HistoryStore
         int temperaturePrecision,
         IReadOnlyList<string>? preferredTagOrder = null,
         IReadOnlyList<HistoryTableColumn>? fixedColumns = null,
-        IReadOnlyDictionary<string, string?>? tagUnitHints = null)
+        IReadOnlyDictionary<string, string?>? tagUnitHints = null,
+        IReadOnlyList<PlcTag>? catalogTags = null,
+        MqttPayloadProfile? mqttProfile = null)
     {
         var samples = await QueryAsync(query).ConfigureAwait(false);
         if (samples.Count == 0)
@@ -262,10 +264,11 @@ public sealed class HistoryStore
                 {
                     var sampleId = reader.GetInt64(0);
                     var tagName = reader.GetString(1);
+                    var displayName = HistoryTagNameResolver.ResolveDisplayName(tagName, catalogTags, mqttProfile);
                     var unit = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
                     var tag = new PlcTag
                     {
-                        Name = tagName,
+                        Name = displayName,
                         Unit = unit,
                         DataType = InferDataType(reader.GetString(5))
                     };
@@ -281,10 +284,10 @@ public sealed class HistoryStore
                         valuesBySample[sampleId] = map;
                     }
 
-                    map[tagName] = display;
-                    if (!tagUnits.ContainsKey(tagName) && !string.IsNullOrWhiteSpace(unit))
+                    map[displayName] = display;
+                    if (!tagUnits.ContainsKey(displayName) && !string.IsNullOrWhiteSpace(unit))
                     {
-                        tagUnits[tagName] = unit;
+                        tagUnits[displayName] = unit;
                     }
                 }
             }
@@ -384,7 +387,11 @@ public sealed class HistoryStore
         }).ToList();
     }
 
-    public async Task<HistorySampleDetail?> GetDetailAsync(long sampleId, int temperaturePrecision)
+    public async Task<HistorySampleDetail?> GetDetailAsync(
+        long sampleId,
+        int temperaturePrecision,
+        IReadOnlyList<PlcTag>? catalogTags = null,
+        MqttPayloadProfile? mqttProfile = null)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -423,7 +430,7 @@ public sealed class HistoryStore
                 };
             }
 
-            var tags = new List<HistoryTagValueRow>();
+            var tagsByName = new Dictionary<string, HistoryTagValueRow>(StringComparer.Ordinal);
             await using (var tagCommand = connection.CreateCommand())
             {
                 tagCommand.CommandText =
@@ -437,9 +444,11 @@ public sealed class HistoryStore
                 await using var reader = await tagCommand.ExecuteReaderAsync().ConfigureAwait(false);
                 while (await reader.ReadAsync().ConfigureAwait(false))
                 {
+                    var storedName = reader.GetString(0);
+                    var displayName = HistoryTagNameResolver.ResolveDisplayName(storedName, catalogTags, mqttProfile);
                     var tag = new PlcTag
                     {
-                        Name = reader.GetString(0),
+                        Name = displayName,
                         Unit = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
                         DataType = InferDataType(reader.GetString(4))
                     };
@@ -447,15 +456,17 @@ public sealed class HistoryStore
                         reader.IsDBNull(2) ? null : reader.GetDouble(2),
                         reader.IsDBNull(3) ? null : reader.GetString(3),
                         reader.GetString(4));
-                    tags.Add(new HistoryTagValueRow
+                    tagsByName[displayName] = new HistoryTagValueRow
                     {
                         TagName = tag.Name,
                         Unit = string.IsNullOrWhiteSpace(tag.Unit) ? null : tag.Unit,
                         DisplayValue = ValueFormatting.FormatDisplay(tag, value, temperaturePrecision),
                         Quality = reader.IsDBNull(5) ? "Good" : reader.GetString(5)
-                    });
+                    };
                 }
             }
+
+            var tags = tagsByName.Values.OrderBy(row => row.TagName, StringComparer.Ordinal).ToList();
 
             return new HistorySampleDetail
             {
@@ -499,7 +510,10 @@ public sealed class HistoryStore
         }
     }
 
-    public async Task<IReadOnlyList<string>> GetDistinctTagNamesAsync(HistoryQuery query)
+    public async Task<IReadOnlyList<string>> GetDistinctTagNamesAsync(
+        HistoryQuery query,
+        IReadOnlyList<PlcTag>? catalogTags = null,
+        MqttPayloadProfile? mqttProfile = null)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -523,14 +537,18 @@ public sealed class HistoryStore
 
             command.CommandText += " ORDER BY t.tag_name;";
 
-            var results = new List<string>();
+            var results = new HashSet<string>(StringComparer.Ordinal);
             await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
             {
-                results.Add(reader.GetString(0));
+                var name = HistoryTagNameResolver.ResolveDisplayName(
+                    reader.GetString(0),
+                    catalogTags,
+                    mqttProfile);
+                results.Add(name);
             }
 
-            return results;
+            return results.OrderBy(name => name, StringComparer.Ordinal).ToList();
         }
         finally
         {
@@ -538,7 +556,10 @@ public sealed class HistoryStore
         }
     }
 
-    public async Task<IReadOnlyDictionary<string, string?>> GetDistinctTagUnitsAsync(HistoryQuery query)
+    public async Task<IReadOnlyDictionary<string, string?>> GetDistinctTagUnitsAsync(
+        HistoryQuery query,
+        IReadOnlyList<PlcTag>? catalogTags = null,
+        MqttPayloadProfile? mqttProfile = null)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -566,8 +587,16 @@ public sealed class HistoryStore
             await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
             {
+                var displayName = HistoryTagNameResolver.ResolveDisplayName(
+                    reader.GetString(0),
+                    catalogTags,
+                    mqttProfile);
                 var unit = reader.GetString(1);
-                results[reader.GetString(0)] = string.IsNullOrWhiteSpace(unit) ? null : unit;
+                var normalizedUnit = string.IsNullOrWhiteSpace(unit) ? null : unit;
+                if (!results.ContainsKey(displayName) || results[displayName] is null)
+                {
+                    results[displayName] = normalizedUnit;
+                }
             }
 
             return results;

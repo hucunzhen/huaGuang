@@ -4,8 +4,24 @@ namespace HuaGuang.Monitor.Services;
 
 public static class TagDisplayCategoryHelper
 {
-    public static TagDisplayCategory Resolve(PlcTag tag, object? value = null) =>
-        tag.DisplayCategory ?? InferCategory(tag, value);
+    public static TagDisplayCategory Resolve(PlcTag tag, object? value = null)
+    {
+        var inferred = InferCategory(tag, value);
+        if (tag.DisplayCategory is TagDisplayCategory configured)
+        {
+            if (ShouldPreferInferredCategory(inferred, configured))
+            {
+                return inferred;
+            }
+
+            return configured;
+        }
+
+        return inferred;
+    }
+
+    static bool ShouldPreferInferredCategory(TagDisplayCategory inferred, TagDisplayCategory configured) =>
+        inferred == TagDisplayCategory.Temperature && configured == TagDisplayCategory.Process;
 
     public static TagDisplayCategory InferCategory(PlcTag tag, object? value = null)
     {

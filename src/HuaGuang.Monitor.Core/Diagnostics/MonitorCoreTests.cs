@@ -16,6 +16,7 @@ public static class MonitorCoreTests
         Run("MQTT 主题匹配 #", TestTopicHashMatch),
         Run("订阅主题去重", TestSubscribeTopicNormalize),
         Run("点位显示顺序", TestTagDisplayOrder),
+        Run("当前工作温度订阅映射", TestCurrentInjectionRemoteTags),
         Run("信捷地址解析 D6000", TestXinjeAddress),
         Run("Float32 字节序", TestRegisterConverter),
         Run("数值显示精度", TestValueFormatting),
@@ -35,6 +36,7 @@ public static class MonitorCoreTests
         Run("字段映射参考", TestReferenceFieldMapping),
         Run("点位显示分类", TestTagDisplayCategory),
         Run("历史数据存储", TestHistoryStoreRoundTrip),
+        Run("订阅历史点位名称", TestSubscribeHistoryTagNames),
         Run("设置启动不覆盖", TestSettingsSurviveStartupLoad),
         Run("点位稳定 Id", TestStableTagIdentity),
     ];
@@ -119,6 +121,54 @@ public static class MonitorCoreTests
             .Select(entry => entry.Name)
             .ToList();
         AssertTrue(orderedMapped.SequenceEqual(["车速", "门幅"]));
+    }
+
+    static void TestCurrentInjectionRemoteTags()
+    {
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
+        var catalog = settings.Tags;
+        var remote = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["rrjwd"] = 0,
+            ["jgwd"] = 0,
+            ["jqwd"] = 0,
+            ["zjjbh"] = 2,
+            ["speed"] = 45.0
+        };
+
+        var ordered = TagDisplayOrder.OrderRemoteTags(remote, catalog, settings.MqttPayload)
+            .Select(entry => entry.Name)
+            .ToList();
+        AssertTrue(ordered.Contains("当前工作胶盘温度"));
+        AssertTrue(ordered.Contains("当前工作胶管温度"));
+        AssertTrue(ordered.Contains("当前工作胶枪温度"));
+        AssertTrue(ordered.Contains("当前注胶机编号"));
+
+        var tray = TagDisplayOrder.OrderRemoteTags(remote, catalog, settings.MqttPayload)
+            .First(entry => entry.Name == "当前工作胶盘温度");
+        AssertTrue(tray.Value is int zero && zero == 0);
+        AssertTrue(tray.CatalogTag?.DisplayCategory == TagDisplayCategory.Temperature);
+
+        var remoteByFieldOnly = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["rrjwd"] = 88.5,
+            ["jgwd"] = 87.0,
+            ["jqwd"] = 86.5
+        };
+        var catalogMissingMqttField = catalog.Select(tag => new PlcTag
+        {
+            Name = tag.Name,
+            Enabled = tag.Enabled,
+            Unit = tag.Unit,
+            DataType = tag.DataType,
+            DisplayCategory = tag.DisplayCategory,
+            MqttField = string.Empty
+        }).ToList();
+        var linked = TagDisplayOrder.OrderRemoteTags(remoteByFieldOnly, catalogMissingMqttField, settings.MqttPayload)
+            .First(entry => entry.Name == "当前工作胶盘温度");
+        AssertTrue(linked.CatalogTag is not null);
+        AssertTrue(TagDisplayCategoryHelper.Resolve(linked.CatalogTag!) == TagDisplayCategory.Temperature);
     }
 
     static void TestMqttPayloadMapping()
@@ -589,7 +639,7 @@ public static class MonitorCoreTests
 
             var loaded = new AppSettings();
             LineExcelConfigService.Apply(loaded, tempPath);
-            AssertTrue(loaded.Tags.First(tag => tag.Name == "当前工作胶盘温度").MqttField == "rrjwd1");
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "当前工作胶盘温度").MqttField == "rrjwd");
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").MqttField == "jgxh");
             AssertTrue(loaded.Tags.First(tag => tag.Name == "门幅").MqttField == "mf");
 
@@ -597,7 +647,7 @@ public static class MonitorCoreTests
             var verifySheet = verifyWorkbook.Worksheet(LineExcelConfigService.FieldMappingSheetName);
             var verifyRow = verifySheet.RowsUsed()
                 .First(r => r.Cell(2).GetString().Trim() == "当前工作胶盘温度");
-            AssertTrue(verifyRow.Cell(1).GetString().Trim() == "rrjwd1");
+            AssertTrue(verifyRow.Cell(1).GetString().Trim() == "rrjwd");
         }
         finally
         {
@@ -698,6 +748,13 @@ public static class MonitorCoreTests
         AssertTrue(TagDisplayCategoryHelper.InferCategory(currentInjection) == TagDisplayCategory.Temperature);
         AssertTrue(TagDisplayCategoryHelper.TryParseLabel("开关状态", out var parsed) && parsed == TagDisplayCategory.Switch);
         AssertTrue(TagDisplayCategoryHelper.Resolve(new PlcTag { Name = "自定义", DisplayCategory = TagDisplayCategory.Other }) == TagDisplayCategory.Other);
+        var misconfigured = new PlcTag
+        {
+            Name = "当前工作胶盘温度",
+            Unit = "℃",
+            DisplayCategory = TagDisplayCategory.Process
+        };
+        AssertTrue(TagDisplayCategoryHelper.Resolve(misconfigured) == TagDisplayCategory.Temperature);
     }
 
     static void TestHistoryStoreRoundTrip()
@@ -840,6 +897,109 @@ public static class MonitorCoreTests
             store.AppendAsync(request).GetAwaiter().GetResult();
             AssertTrue(store.DeleteAllAsync().GetAwaiter().GetResult() == 1);
             AssertTrue(store.GetStatsAsync().GetAwaiter().GetResult().SampleCount == 0);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(dbPath))
+            {
+                File.Delete(dbPath);
+            }
+        }
+    }
+
+    static void TestSubscribeHistoryTagNames()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"huaguang-history-subscribe-{Guid.NewGuid():N}.db");
+        try
+        {
+            var settings = new AppSettings();
+            LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
+            var catalogTags = settings.Tags;
+            var profile = settings.MqttPayload ?? MqttFieldMappingCatalog.CreatePropertiesPayloadProfile();
+
+            var remoteTags = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["rrjwd"] = 88.5,
+                ["speed"] = 45.0
+            };
+            var snapshots = HistoryTagNameResolver.CreateSubscribeSnapshots(
+                remoteTags,
+                catalogTags,
+                profile,
+                "Good",
+                DateTimeOffset.Now);
+            AssertTrue(snapshots.Any(snapshot => snapshot.Name == "当前工作胶盘温度"));
+            AssertTrue(snapshots.Any(snapshot => snapshot.Name == "车速"));
+            AssertTrue(!snapshots.Any(snapshot => snapshot.Name == "rrjwd"));
+
+            var disabledCatalog = settings.Tags.First(tag => tag.Name == "油温机温度");
+            disabledCatalog.Enabled = false;
+            var withExtra = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["rrjwd"] = 88.5,
+                ["ywjwd"] = 65.0,
+                ["unknown_field"] = 1.2
+            };
+            var allSnapshots = HistoryTagNameResolver.CreateSubscribeSnapshots(
+                withExtra,
+                settings.Tags,
+                profile,
+                "Good",
+                DateTimeOffset.Now);
+            AssertTrue(allSnapshots.Any(snapshot => snapshot.Name == "当前工作胶盘温度"));
+            AssertTrue(allSnapshots.Any(snapshot => snapshot.Name == "油温机温度"));
+            AssertTrue(allSnapshots.Any(snapshot => snapshot.Name == "unknown_field"));
+            AssertTrue(allSnapshots.Count == 3);
+
+            var store = new HistoryStore(dbPath);
+            store.InitializeAsync().GetAwaiter().GetResult();
+            store.AppendAsync(new HistorySampleWriteRequest
+            {
+                DeviceId = "remote-1",
+                OperationMode = AppOperationMode.Subscribe,
+                Quality = "Good",
+                Tags =
+                [
+                    new TagSnapshot
+                    {
+                        TagId = "rrjwd",
+                        Name = "rrjwd",
+                        Value = 88.5,
+                        Quality = "Good",
+                        Timestamp = DateTimeOffset.Now
+                    },
+                    new TagSnapshot
+                    {
+                        TagId = "speed",
+                        Name = "speed",
+                        Value = 45.0,
+                        Quality = "Good",
+                        Timestamp = DateTimeOffset.Now
+                    }
+                ]
+            }).GetAwaiter().GetResult();
+
+            var query = new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1),
+                Limit = 10
+            };
+            var distinctTags = store.GetDistinctTagNamesAsync(query, catalogTags, profile).GetAwaiter().GetResult();
+            AssertTrue(distinctTags.Contains("当前工作胶盘温度"));
+            AssertTrue(distinctTags.Contains("车速"));
+            AssertTrue(!distinctTags.Contains("rrjwd"));
+
+            var table = store.QueryTableAsync(
+                query,
+                settings.TemperaturePrecision,
+                ["当前工作胶盘温度", "车速"],
+                catalogTags: catalogTags,
+                mqttProfile: profile).GetAwaiter().GetResult();
+            AssertTrue(table.Rows.Count == 1);
+            AssertTrue(table.Rows[0].Cells[0] == "88.50");
+            AssertTrue(table.Rows[0].Cells[1] == "45.00");
         }
         finally
         {

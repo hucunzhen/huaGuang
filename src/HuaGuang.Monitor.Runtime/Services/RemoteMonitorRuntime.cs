@@ -136,6 +136,7 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
     readonly ILogger<RemoteMonitorSubscription> _logger;
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
     readonly System.Timers.Timer _pollTimer;
+    readonly CoalescedEvent _devicesUpdatedCoalescer;
     string? _topicFilter;
     MonitorRuntimeState? _state;
 
@@ -143,7 +144,10 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
     {
         _settings = settings;
         _logger = logger;
-        _pollTimer = new System.Timers.Timer(800) { AutoReset = true };
+        _devicesUpdatedCoalescer = new CoalescedEvent(
+            TimeSpan.FromMilliseconds(300),
+            () => DevicesUpdated?.Invoke(this, EventArgs.Empty));
+        _pollTimer = new System.Timers.Timer(1200) { AutoReset = true };
         _pollTimer.Elapsed += (_, _) => _ = PollAsync();
         _pollTimer.Start();
         _ = PollAsync();
@@ -223,22 +227,19 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
 
             foreach (var dto in _state.Devices)
             {
-                var device = new RemoteDeviceState
+                if (_devices.TryGetValue(dto.DeviceKey, out var existing))
                 {
-                    DeviceKey = dto.DeviceKey,
-                    DeviceId = dto.DeviceId,
-                    SourceTopic = dto.SourceTopic,
-                    Timestamp = dto.Timestamp,
-                    Quality = dto.Quality,
-                    PlcHost = dto.PlcHost,
-                    Simulator = dto.Simulator,
-                    ReceivedAt = dto.ReceivedAt,
-                    Tags = dto.Tags.ToDictionary(
-                        pair => pair.Key,
-                        pair => JsonValueNormalizer.Normalize(pair.Value),
-                        StringComparer.Ordinal)
-                };
-                _devices[device.DeviceKey] = device;
+                    if (RemoteDeviceStateHelper.HasSameContent(existing, dto))
+                    {
+                        continue;
+                    }
+
+                    RemoteDeviceStateHelper.ApplyDto(existing, dto);
+                    changed = true;
+                    continue;
+                }
+
+                _devices[dto.DeviceKey] = RemoteDeviceStateHelper.FromDto(dto);
                 changed = true;
             }
 
@@ -249,7 +250,7 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
 
             if (changed)
             {
-                DevicesUpdated?.Invoke(this, EventArgs.Empty);
+                _devicesUpdatedCoalescer.Request();
             }
         }
         catch (Exception ex)
@@ -274,7 +275,11 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
         }
     }
 
-    public void Dispose() => _pollTimer.Dispose();
+    public void Dispose()
+    {
+        _pollTimer.Dispose();
+        _devicesUpdatedCoalescer.Dispose();
+    }
 
     public ValueTask DisposeAsync()
     {

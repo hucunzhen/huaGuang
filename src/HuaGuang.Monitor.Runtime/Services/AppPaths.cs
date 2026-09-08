@@ -1,3 +1,6 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
+
 namespace HuaGuang.Monitor.Services;
 
 public interface IAppDataPaths
@@ -25,8 +28,21 @@ public static class AppPaths
 
     public static string LogDirectory => Path.Combine(UserDataDirectory, "logs");
 
+    /// <summary>日志文件名前缀：后台服务 <c>runtime</c>，UI 进程 <c>runtime-ui</c>。</summary>
+    public static string RuntimeLogPrefix { get; private set; } = "runtime";
+
+    public static void ConfigureRuntimeLogging(string logPrefix)
+    {
+        if (string.IsNullOrWhiteSpace(logPrefix))
+        {
+            throw new ArgumentException("Log prefix is required.", nameof(logPrefix));
+        }
+
+        RuntimeLogPrefix = logPrefix.Trim();
+    }
+
     public static string CurrentRuntimeLogFile =>
-        Path.Combine(LogDirectory, $"runtime-{DateTime.Now:yyyyMMdd}.log");
+        Path.Combine(LogDirectory, $"{RuntimeLogPrefix}-{DateTime.Now:yyyyMMdd}.log");
 }
 
 public sealed class WindowsAppDataPaths : IAppDataPaths
@@ -38,6 +54,9 @@ public sealed class WindowsAppDataPaths : IAppDataPaths
         var programDataDir = GetProgramDataDirectory();
         var legacyDir = GetLegacyUserDirectory();
         Directory.CreateDirectory(programDataDir);
+        EnsureInteractiveUsersCanWrite(programDataDir);
+        EnsureInteractiveUsersCanWrite(Path.Combine(programDataDir, "lines"));
+        EnsureInteractiveUsersCanWrite(Path.Combine(programDataDir, "logs"));
 
         // 服务可能先创建 logs 目录，不能因此跳过从 LocalAppData 迁移产线 Excel。
         if (!HasLineConfig(programDataDir))
@@ -108,6 +127,32 @@ public sealed class WindowsAppDataPaths : IAppDataPaths
             var targetFile = file.Replace(sourceDir, targetDir, StringComparison.OrdinalIgnoreCase);
             Directory.CreateDirectory(Path.GetDirectoryName(targetFile)!);
             File.Copy(file, targetFile, overwrite: true);
+        }
+    }
+
+    internal static void EnsureInteractiveUsersCanWrite(string directory)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(directory);
+            var dirInfo = new DirectoryInfo(directory);
+            var security = dirInfo.GetAccessControl();
+            var users = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+            security.AddAccessRule(new FileSystemAccessRule(
+                users,
+                FileSystemRights.Modify | FileSystemRights.Read | FileSystemRights.Write,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            dirInfo.SetAccessControl(security);
+        }
+        catch
+        {
         }
     }
 }

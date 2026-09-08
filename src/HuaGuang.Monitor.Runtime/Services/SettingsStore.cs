@@ -29,6 +29,29 @@ public sealed class SettingsStore
 
     public AppSettings Current { get; private set; }
 
+    /// <summary>配置变更序号；Save/Load 成功后递增，供 UI 判断是否需要重建监控卡片。</summary>
+    public int Revision { get; private set; }
+
+    ConfigFingerprint _loadedFingerprint;
+
+    readonly record struct ConfigFingerprint(
+        string ActiveLineName,
+        long ActiveLineFileUtcTicks,
+        long LineExcelUtcTicks,
+        int CatalogVersion);
+
+    public async Task<bool> LoadAsyncIfChanged()
+    {
+        var pending = CaptureConfigFingerprint();
+        if (pending == _loadedFingerprint && Current.Tags.Count > 0)
+        {
+            return false;
+        }
+
+        await LoadAsync().ConfigureAwait(false);
+        return true;
+    }
+
     public async Task LoadAsync()
     {
         LineConfigPaths.EnsureAllLineExcels();
@@ -71,6 +94,9 @@ public sealed class SettingsStore
             LineConfigPaths.GetLineExcelPath(Current.LineName),
             LogFormatting.DescribePlc(Current.Plc),
             LogFormatting.DescribeMqtt(Current.Mqtt, Current.LineName));
+
+        _loadedFingerprint = CaptureConfigFingerprint();
+        Revision++;
     }
 
     public Task SaveAsync(AppSettings settings)
@@ -81,6 +107,8 @@ public sealed class SettingsStore
         Current.AddressCatalogVersion = LineCatalog.Version;
         var excelPath = LineConfigPaths.GetLineExcelPath(Current.LineName);
         LineConfigPaths.SaveLine(Current);
+        _loadedFingerprint = CaptureConfigFingerprint();
+        Revision++;
         _logger.LogInformation(
             "配置已保存 line={LineName} excel={ExcelPath}",
             Current.LineName,
@@ -173,5 +201,20 @@ public sealed class SettingsStore
         var settings = new AppSettings();
         settings.LineName = LineCatalog.LineNames[0];
         return settings;
+    }
+
+    ConfigFingerprint CaptureConfigFingerprint()
+    {
+        var lineName = LineConfigPaths.ReadActiveLineName();
+        var excelPath = LineConfigPaths.GetLineExcelPath(lineName);
+        return new ConfigFingerprint(
+            lineName,
+            File.Exists(LineConfigPaths.ActiveLineFilePath)
+                ? File.GetLastWriteTimeUtc(LineConfigPaths.ActiveLineFilePath).Ticks
+                : 0,
+            File.Exists(excelPath)
+                ? File.GetLastWriteTimeUtc(excelPath).Ticks
+                : 0,
+            LineCatalog.Version);
     }
 }

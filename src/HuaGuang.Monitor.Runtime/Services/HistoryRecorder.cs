@@ -25,11 +25,10 @@ public sealed class HistoryRecorder : IAsyncDisposable
         _settings = settings;
         _acquisition = acquisition;
         _subscription = subscription;
-        _channel = Channel.CreateBounded<HistorySampleWriteRequest>(new BoundedChannelOptions(512)
+        _channel = Channel.CreateUnbounded<HistorySampleWriteRequest>(new UnboundedChannelOptions
         {
             SingleReader = true,
-            SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropOldest
+            SingleWriter = false
         });
         _writer = Task.Run(WriteLoopAsync);
         _acquisition.TagsUpdated += OnAcquisitionTagsUpdated;
@@ -70,16 +69,12 @@ public sealed class HistoryRecorder : IAsyncDisposable
             return;
         }
 
-        var snapshots = e.Device.Tags
-            .Select(pair => new TagSnapshot
-            {
-                TagId = pair.Key,
-                Name = pair.Key,
-                Value = pair.Value,
-                Quality = e.Device.Quality,
-                Timestamp = e.Device.Timestamp
-            })
-            .ToList();
+        var snapshots = HistoryTagNameResolver.CreateSubscribeSnapshots(
+            e.Device.Tags,
+            _settings.Current.Tags,
+            _settings.Current.MqttPayload ?? new MqttPayloadProfile(),
+            e.Device.Quality,
+            e.Device.Timestamp);
         if (snapshots.Count == 0)
         {
             return;

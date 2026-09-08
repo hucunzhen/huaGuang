@@ -22,8 +22,10 @@ public static class MauiProgram
 
 	public static MauiApp CreateMauiApp()
 	{
+		CrashExitLogger.RegisterEarly("ui");
 #if WINDOWS
 		AppPaths.Configure(new WindowsAppDataPaths());
+		AppPaths.ConfigureRuntimeLogging("runtime-ui");
 #else
 		AppPaths.Configure(new MauiAppDataPaths());
 #endif
@@ -53,7 +55,7 @@ public static class MauiProgram
 
 		builder.Services.AddSingleton<SettingsStore>();
 #if WINDOWS
-		UsesWindowsBackgroundService = MonitorIpcClient.WaitForServiceAvailable(TimeSpan.FromSeconds(5));
+		// 不在 WinUI 初始化阶段阻塞；服务探测延后到首屏加载后。
 #endif
 
 		RegisterMonitorRuntime(builder.Services);
@@ -93,6 +95,10 @@ public static class MauiProgram
 		var app = builder.Build();
 		Services = app.Services;
 		GlobalExceptionLogging.Register(Services);
+		CrashExitLogger.SetContext(AppVersionInfo.Display, "ui");
+#if WINDOWS
+		UsesWindowsBackgroundService = MonitorIpcClient.IsServiceAvailable();
+#endif
 		var startupLogger = Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 		startupLogger.LogInformation(
 			"应用启动 version={Version} dataDir={DataDir} logFile={LogFile} windowsService={UsesService}",
@@ -109,10 +115,8 @@ public static class MauiProgram
 			store.Current.DeviceId,
 			store.Current.UseSimulator);
 		Services.GetRequiredService<IStartupRegistration>().Apply(store.Current.StartWithWindows);
-		if (!UsesWindowsBackgroundService)
-		{
-			Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
-		}
+		// 始终初始化：后台服务在时由服务进程写入；仅 UI 采集/服务不可用时由本进程写入。
+		Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
 
 		return app;
 	}
@@ -120,12 +124,12 @@ public static class MauiProgram
 	static void RegisterMonitorRuntime(IServiceCollection services)
 	{
 #if WINDOWS
-		services.AddMonitorRuntimeCore(AppPaths.LogDirectory);
+		services.AddMonitorRuntimeCore(AppPaths.LogDirectory, addFileLogger: false);
 		services.AddSingleton<IBackgroundRuntimeLauncher, Platforms.Windows.WindowsBackgroundRuntimeLauncher>();
 		services.AddMonitorRuntimeAdaptive();
 		return;
 #endif
-		services.AddMonitorRuntimeCore(AppPaths.LogDirectory);
+		services.AddMonitorRuntimeCore(AppPaths.LogDirectory, addFileLogger: false);
 		services.AddSingleton<IBackgroundRuntimeLauncher, NoOpBackgroundRuntimeLauncher>();
 		services.AddMonitorRuntimeLocal();
 	}

@@ -20,6 +20,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     readonly Dictionary<string, TagRowViewModel> _rowLookup = new(StringComparer.Ordinal);
     readonly Dictionary<string, TagRowViewModel> _rowLookupByName = new(StringComparer.Ordinal);
     readonly Dictionary<string, Dictionary<string, TagRowViewModel>> _multiRowLookup = new(StringComparer.Ordinal);
+    int _appliedSettingsRevision = -1;
+    CancellationTokenSource? _subscriptionUiDebounce;
 
     public DashboardViewModel(
         IMonitorAcquisition acquisition,
@@ -88,8 +90,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     {
         CloseScannerInputIfTagMissing();
         RebuildTopicFilters();
-        RefreshStatus();
         RebuildRows();
+        _appliedSettingsRevision = _settings.Revision;
+        RefreshStatus();
         ApplyLiveAcquisitionData();
     }
 
@@ -121,9 +124,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
     public async Task RefreshOnAppearAsync()
     {
+        var configReloaded = false;
         try
         {
-            await _settings.LoadAsync().ConfigureAwait(false);
+            configReloaded = await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -132,7 +136,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
         await MainThread.InvokeOnMainThreadAsync(() =>
         {
-            RebuildRows();
+            if (configReloaded || _settings.Revision != _appliedSettingsRevision)
+            {
+                RebuildRows();
+                _appliedSettingsRevision = _settings.Revision;
+            }
+
             RefreshOnAppear();
         }).ConfigureAwait(false);
     }
@@ -521,21 +530,42 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         return _rowLookupByName.TryGetValue(snapshot.Name, out row!);
     }
 
-    void OnSubscriptionDevicesUpdated(object? sender, EventArgs e) =>
-        MainThread.BeginInvokeOnMainThread(() =>
-        {
-            if (HasDeviceListChanged())
-            {
-                RefreshRemoteDevices();
-                RebuildRemoteView();
-            }
-            else
-            {
-                UpdateRemoteView();
-            }
+    void OnSubscriptionDevicesUpdated(object? sender, EventArgs e)
+    {
+        _subscriptionUiDebounce?.Cancel();
+        _subscriptionUiDebounce = new CancellationTokenSource();
+        var token = _subscriptionUiDebounce.Token;
+        _ = DebounceSubscriptionUiAsync(token);
+    }
 
-            ModeText = BuildModeText();
-        });
+    async Task DebounceSubscriptionUiAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(250, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        MainThread.BeginInvokeOnMainThread(ApplySubscriptionUiUpdate);
+    }
+
+    void ApplySubscriptionUiUpdate()
+    {
+        if (HasDeviceListChanged())
+        {
+            RefreshRemoteDevices();
+            RebuildRemoteView();
+        }
+        else
+        {
+            UpdateRemoteView();
+        }
+
+        ModeText = BuildModeText();
+    }
 
     void OnServiceConnectionChanged(object? sender, EventArgs e) =>
         MainThread.BeginInvokeOnMainThread(() => RefreshStatus());
@@ -812,7 +842,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         var rows = new List<TagRowViewModel>();
         foreach (var (name, value, catalogTag) in OrderRemoteTags(device.Tags))
         {
-            var tag = catalogTag ?? CreateRemoteTag(name, value);
+            var tag = ResolveRemoteTag(name, value, catalogTag);
             var row = new TagRowViewModel(tag, precision, device.SourceTopic);
             row.Apply(new TagSnapshot
             {
@@ -919,6 +949,22 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         IEnumerable<(string Name, object? Value, PlcTag? CatalogTag)> orderedTags)
     {
         RebuildGroupedRows(BuildRowsForDevice(device));
+    }
+
+    PlcTag ResolveRemoteTag(string name, object? value, PlcTag? catalogTag)
+    {
+        if (catalogTag is not null)
+        {
+            return catalogTag;
+        }
+
+        var profile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
+        if (TagDisplayOrder.TryResolveCatalogTag(name, _settings.Current.Tags, profile, out var matched))
+        {
+            return matched;
+        }
+
+        return CreateRemoteTag(name, value);
     }
 
     static PlcTag CreateRemoteTag(string name, object? value) => new()
@@ -1079,6 +1125,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _subscriptionUiDebounce?.Cancel();
+        _subscriptionUiDebounce?.Dispose();
         _acquisition.TagsUpdated -= OnAcquisitionTagsUpdated;
         _acquisition.ConnectionChanged -= OnServiceConnectionChanged;
         _subscription.DevicesUpdated -= OnSubscriptionDevicesUpdated;

@@ -13,7 +13,8 @@ public static class MonitorRuntimeServiceCollectionExtensions
 {
     public static IServiceCollection AddMonitorRuntimeCore(
         this IServiceCollection services,
-        string logDirectory)
+        string logDirectory,
+        bool addFileLogger = true)
     {
         services.AddSingleton<IAcquisitionBackgroundGuard, NoOpAcquisitionBackgroundGuard>();
         services.AddSingleton(_ => new HistoryStore(AppPaths.HistoryDatabasePath));
@@ -28,7 +29,10 @@ public static class MonitorRuntimeServiceCollectionExtensions
         {
             builder.SetMinimumLevel(LogLevel.Information);
             builder.AddInMemoryRuntimeLogger(LogLevel.Information);
-            builder.AddRuntimeFileLogger(logDirectory);
+            if (addFileLogger)
+            {
+                builder.AddRuntimeFileLogger(logDirectory);
+            }
         });
         return services;
     }

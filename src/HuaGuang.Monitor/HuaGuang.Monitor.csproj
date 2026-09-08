@@ -33,11 +33,13 @@
 		<ApplicationId>com.industrial.monitor</ApplicationId>
 
 		<!-- Versions: DisplayVersion=版本号, ApplicationVersion=修订号(Android versionCode) -->
-		<ApplicationDisplayVersion>1.1.7</ApplicationDisplayVersion>
+		<ApplicationDisplayVersion>1.1.8</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
 		<WindowsPackageType>None</WindowsPackageType>
+		<!-- 解包 WinUI 3 需要 MSIX 工具链生成 PRI/资源，否则 XAML 可能在启动时 0xC000027B 崩溃。 -->
+		<EnableMsixTooling Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">true</EnableMsixTooling>
 
 		<!-- Android 11 = API 30；最低 24 可安装到 Android 11 工业平板，并避免 API 21–23 的 desugar 崩溃。 -->
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
@@ -85,9 +87,9 @@
 		      Condition="Exists('$(MSBuildProjectDirectory)\Resources\AppIcon\appicon.ico')" />
 	</Target>
 
-	<!-- Debug 不绑 RID / 自包含，否则 VS 附加不到 CoreCLR，会报“未引发 CoreCLR 启动事件”。 -->
+	<!-- Debug：.NET 仍走共享运行时便于 VS 调试；WinAppSDK 与 exe 同目录，避免系统 Runtime 版本不一致导致 XAML 0xC000027B。 -->
 	<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' and '$(Configuration)' == 'Debug'">
-		<WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+		<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
 		<SelfContained>false</SelfContained>
 		<DebugType>portable</DebugType>
 		<DebugSymbols>true</DebugSymbols>
@@ -99,6 +101,8 @@
 		<SelfContained>true</SelfContained>
 		<RuntimeIdentifierOverride>win-x64</RuntimeIdentifierOverride>
 		<PublishSingleFile>false</PublishSingleFile>
+		<PublishTrimmed>false</PublishTrimmed>
+		<PublishReadyToRun>false</PublishReadyToRun>
 	</PropertyGroup>
 
 	<!-- Android 调试关掉 Fast Deployment，真机（含 Android 11）更容易被调试器挂上。 -->

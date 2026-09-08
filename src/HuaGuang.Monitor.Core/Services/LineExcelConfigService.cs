@@ -648,7 +648,13 @@ public static class LineExcelConfigService
     /// <summary>仅补全 catalog 新增且必须存在的 PLC 点位，不恢复用户已删的手动点位。</summary>
     public static void MergeMissingRequiredPlcTags(AppSettings settings, IReadOnlyList<PlcTag> catalogTags)
     {
-        var requiredNames = new HashSet<string>(StringComparer.Ordinal) { "当前注胶机编号" };
+        var requiredNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "当前注胶机编号",
+            "当前工作胶盘温度",
+            "当前工作胶管温度",
+            "当前工作胶枪温度"
+        };
         var required = catalogTags.Where(tag => requiredNames.Contains(tag.Name)).ToList();
         MergeMissingCatalogTags(settings, required);
     }

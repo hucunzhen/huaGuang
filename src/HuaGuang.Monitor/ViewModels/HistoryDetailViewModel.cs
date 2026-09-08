@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
 
 namespace HuaGuang.Monitor.ViewModels;
@@ -36,7 +37,13 @@ public partial class HistoryDetailViewModel : ObservableObject, IQueryAttributab
 
         _sampleId = sampleId;
 
-        var detail = await _store.GetDetailAsync(sampleId, _settings.Current.TemperaturePrecision).ConfigureAwait(false);
+        await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
+
+        var detail = await _store.GetDetailAsync(
+            sampleId,
+            _settings.Current.TemperaturePrecision,
+            _settings.Current.Tags,
+            _settings.Current.MqttPayload ?? new MqttPayloadProfile()).ConfigureAwait(false);
         if (detail is null)
         {
             HeaderText = "找不到该条历史记录。";
