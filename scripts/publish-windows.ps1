@@ -69,6 +69,21 @@ $publishDir = Join-Path $root "src\HuaGuang.Monitor\bin\$Configuration\$framewor
 Sync-LineExcelToPublish -PublishDir $publishDir
 Sync-WindowIconToPublish -PublishDir $publishDir
 
+$fixScript = Join-Path $root "scripts\fix-old-windows.ps1"
+$compatScript = Join-Path $root "scripts\configure-old-windows-compat.ps1"
+foreach ($helper in @($fixScript, $compatScript)) {
+    if (Test-Path $helper) {
+        Copy-Item -LiteralPath $helper -Destination (Join-Path $publishDir (Split-Path -Leaf $helper)) -Force
+    }
+}
+$fixBat = @"
+@echo off
+chcp 65001 >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0fix-old-windows.ps1" -InstallDir "%~dp0"
+pause
+"@
+Set-Content -LiteralPath (Join-Path $publishDir "fix-old-windows.bat") -Value $fixBat -Encoding UTF8
+
 $serviceScript = Join-Path $PSScriptRoot "publish-windows-service.ps1"
 Write-Host "Publishing background service..." -ForegroundColor Cyan
 & $serviceScript -Configuration $Configuration

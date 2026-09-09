@@ -83,42 +83,8 @@ public static class MqttFieldMappingCatalog
         UseTagNameWhenFieldEmpty = false
     };
 
-    /// <summary>兼容旧名；现为 properties 容器报文。</summary>
+    /// <summary>现为 properties 容器报文。</summary>
     public static MqttPayloadProfile CreateFlatPayloadProfile() => CreatePropertiesPayloadProfile();
-
-    public static void NormalizeLegacyProfile(MqttPayloadProfile profile)
-    {
-        if (string.IsNullOrWhiteSpace(profile.TagsPath) ||
-            string.Equals(profile.TagsPath, "tags", StringComparison.OrdinalIgnoreCase))
-        {
-            profile.TagsPath = "properties";
-        }
-
-        if (string.Equals(profile.DeviceIdPath, "deviceId", StringComparison.OrdinalIgnoreCase))
-        {
-            profile.DeviceIdPath = string.Empty;
-        }
-
-        if (string.Equals(profile.TimestampPath, "timestamp", StringComparison.OrdinalIgnoreCase))
-        {
-            profile.TimestampPath = string.Empty;
-        }
-
-        if (string.Equals(profile.QualityPath, "quality", StringComparison.OrdinalIgnoreCase))
-        {
-            profile.QualityPath = string.Empty;
-        }
-
-        if (string.Equals(profile.PlcHostPath, "plcHost", StringComparison.OrdinalIgnoreCase))
-        {
-            profile.PlcHostPath = string.Empty;
-        }
-
-        if (string.Equals(profile.SimulatorPath, "simulator", StringComparison.OrdinalIgnoreCase))
-        {
-            profile.SimulatorPath = string.Empty;
-        }
-    }
 
     public static bool TryResolveDefault(string tagName, out string mqttField) =>
         SharedByTagName.TryGetValue(tagName, out mqttField!);
@@ -131,9 +97,10 @@ public static class MqttFieldMappingCatalog
             return false;
         }
 
+        var trimmed = mqttField.Trim();
         foreach (var pair in SharedByTagName)
         {
-            if (string.Equals(pair.Value, mqttField.Trim(), StringComparison.Ordinal))
+            if (string.Equals(pair.Value, trimmed, StringComparison.OrdinalIgnoreCase))
             {
                 tagName = pair.Key;
                 return true;

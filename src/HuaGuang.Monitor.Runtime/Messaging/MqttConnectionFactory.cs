@@ -9,7 +9,10 @@ static class MqttConnectionFactory
 {
     public static MqttClientOptions BuildOptions(MqttSettings settings, string? lineName = null)
     {
-        var clientId = LineMqttDefaults.ResolveClientId(settings, lineName);
+        _ = lineName;
+        var clientId = settings.ClientId?.Trim() ?? string.Empty;
+        var username = settings.Username?.Trim() ?? string.Empty;
+        var password = settings.Password ?? string.Empty;
 
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(settings.Host, settings.Port)
@@ -19,7 +22,6 @@ static class MqttConnectionFactory
             .WithKeepAlivePeriod(TimeSpan.FromSeconds(30))
             .WithProtocolVersion(MQTTnet.Formatter.MqttProtocolVersion.V311);
 
-        var (username, password) = LineMqttDefaults.ResolveCredentials(settings);
         if (!string.IsNullOrWhiteSpace(username))
         {
             builder.WithCredentials(username, password);
@@ -59,13 +61,13 @@ static class MqttConnectionFactory
             return;
         }
 
-        var (username, _) = LineMqttDefaults.ResolveCredentials(settings);
-        var userHint = string.IsNullOrWhiteSpace(username) ? "未配置用户名" : username;
+        var userHint = string.IsNullOrWhiteSpace(settings.Username) ? "未配置用户名" : settings.Username.Trim();
+        var tlsHint = settings.UseTls ? "TLS" : "明文";
         var clientHint = string.IsNullOrWhiteSpace(settings.ClientId) ? "未配置 ClientId" : settings.ClientId.Trim();
         var detail = string.IsNullOrWhiteSpace(result.ReasonString)
             ? result.ResultCode.ToString()
             : $"{result.ResultCode} — {result.ReasonString}";
         throw new InvalidOperationException(
-            $"MQTT 连接失败：{detail}（{settings.Host}:{settings.Port}，ClientId {clientHint}，账号 {userHint}）");
+            $"MQTT 连接失败：{detail}（{settings.Host}:{settings.Port}，ClientId {clientHint}，账号 {userHint}，{tlsHint}）");
     }
 }

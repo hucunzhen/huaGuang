@@ -17,21 +17,23 @@ public static class MonitorCoreTests
         Run("订阅主题去重", TestSubscribeTopicNormalize),
         Run("点位显示顺序", TestTagDisplayOrder),
         Run("当前工作温度订阅映射", TestCurrentInjectionRemoteTags),
+        Run("平台字段跨产线映射", TestPlatformFieldMappingWithoutCatalogTag),
+        Run("华迪订阅字段映射", TestHuadiSubscribeFieldMapping),
         Run("信捷地址解析 D6000", TestXinjeAddress),
         Run("Float32 字节序", TestRegisterConverter),
         Run("数值显示精度", TestValueFormatting),
         Run("产线点位数量", TestLineCatalog),
         Run("设置读写", TestSettingsRoundTrip),
         Run("Excel 配置读写", TestLineExcelRoundTrip),
-        Run("Excel 点表局部修补", TestPatchLineExcelRunStatusAndPrecision),
         Run("Excel 维护保留点表", TestLineFileMaintenancePreservesCustomTags),
         Run("Excel 字段映射补全", TestPatchEmptyMqttFieldMappings),
-        Run("Excel 配置补全点位", TestLineExcelRevisionMerge),
+        Run("Excel 加载不改写", TestLineExcelLoadPreservesContent),
         Run("废弃热熔胶机点位清理", TestDeprecatedGlueMachineTagsRemoved),
         Run("MQTT 报文映射", TestMqttPayloadMapping),
         Run("properties 上报格式", TestPropertiesPayloadFormat),
         Run("订阅 properties 解析", TestSubscribePropertiesParse),
         Run("MQTT 主题设备号", TestMqttTopicDeviceId),
+        Run("订阅设备号解析", TestSubscribeDeviceIdResolver),
         Run("产线 MQTT 默认", TestLineMqttDefaults),
         Run("字段映射参考", TestReferenceFieldMapping),
         Run("点位显示分类", TestTagDisplayCategory),
@@ -171,6 +173,78 @@ public static class MonitorCoreTests
         AssertTrue(TagDisplayCategoryHelper.Resolve(linked.CatalogTag!) == TagDisplayCategory.Temperature);
     }
 
+    static void TestPlatformFieldMappingWithoutCatalogTag()
+    {
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
+        var profile = settings.MqttPayload ?? MqttFieldMappingCatalog.CreatePropertiesPayloadProfile();
+        AssertTrue(!settings.Tags.Any(tag => tag.Name is "下展开转速率" or "注胶量"));
+
+        var remote = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["xzksl"] = 12.5,
+            ["zjl"] = 3.2
+        };
+
+        AssertTrue(TagDisplayOrder.TryResolveCatalogTag("xzksl", settings.Tags, profile, out var expandTag));
+        AssertTrue(expandTag.Name == "下展开转速率");
+        AssertTrue(TagDisplayOrder.TryResolveCatalogTag("zjl", settings.Tags, profile, out var injectionTag));
+        AssertTrue(injectionTag.Name == "注胶量");
+
+        var ordered = TagDisplayOrder.OrderRemoteTags(remote, settings.Tags, profile)
+            .Select(entry => entry.Name)
+            .ToList();
+        AssertTrue(ordered.Contains("下展开转速率"));
+        AssertTrue(ordered.Contains("注胶量"));
+        AssertTrue(!ordered.Contains("xzksl"));
+        AssertTrue(!ordered.Contains("zjl"));
+
+        var snapshots = HistoryTagNameResolver.CreateSubscribeSnapshots(
+            remote,
+            settings.Tags,
+            profile,
+            "Good",
+            DateTimeOffset.Now);
+        AssertTrue(snapshots.Any(snapshot => snapshot.Name == "下展开转速率"));
+        AssertTrue(snapshots.Any(snapshot => snapshot.Name == "注胶量"));
+    }
+
+    static void TestHuadiSubscribeFieldMapping()
+    {
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.Huadi.Name);
+        var profile = settings.MqttPayload ?? MqttFieldMappingCatalog.CreatePropertiesPayloadProfile();
+        var expandTag = settings.Tags.First(tag => tag.Name == "下展开转速率");
+        var injectionTag = settings.Tags.First(tag => tag.Name == "注胶量");
+        AssertTrue(expandTag.MqttField == "xzksl");
+        AssertTrue(injectionTag.MqttField == "zjl");
+
+        var remote = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["xzksl"] = 12.5,
+            ["zjl"] = 3.2
+        };
+        var ordered = TagDisplayOrder.OrderRemoteTags(remote, settings.Tags, profile, includeDisabledCatalogTags: true)
+            .Select(entry => entry.Name)
+            .ToList();
+        AssertTrue(ordered.Contains("下展开转速率"));
+        AssertTrue(ordered.Contains("注胶量"));
+
+        expandTag.Enabled = false;
+        injectionTag.Enabled = false;
+        ordered = TagDisplayOrder.OrderRemoteTags(remote, settings.Tags, profile, includeDisabledCatalogTags: true)
+            .Select(entry => entry.Name)
+            .ToList();
+        AssertTrue(ordered.Contains("下展开转速率"));
+        AssertTrue(ordered.Contains("注胶量"));
+
+        ordered = TagDisplayOrder.OrderRemoteTags(remote, settings.Tags, profile, includeDisabledCatalogTags: false)
+            .Select(entry => entry.Name)
+            .ToList();
+        AssertTrue(!ordered.Contains("下展开转速率"));
+        AssertTrue(!ordered.Contains("注胶量"));
+    }
+
     static void TestMqttPayloadMapping()
     {
         var settings = new AppSettings
@@ -260,6 +334,36 @@ public static class MonitorCoreTests
         AssertTrue(MqttTopicDeviceId.Extract("monitor/test-line/telemetry") == "test-line");
     }
 
+    static void TestSubscribeDeviceIdResolver()
+    {
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.Huadi.Name);
+        using var doc = JsonDocument.Parse("""
+            {
+              "deviceId": "华迪热熔胶复合机",
+              "properties": { "speed": 1 }
+            }
+            """);
+        var profile = settings.MqttPayload;
+        var parsed = MqttPayloadMapper.Parse(doc.RootElement, profile);
+
+        var huadiTopic = "/RRJFHJ/HDRRJFHJ/properties/report";
+        var xianheTopic = "/RRJFHJ/XHRRJFHJ/properties/report";
+        AssertTrue(SubscribeDeviceIdResolver.Resolve(huadiTopic, doc.RootElement, profile, parsed) == "华迪热熔胶复合机");
+        AssertTrue(SubscribeDeviceIdResolver.Resolve(xianheTopic, doc.RootElement, profile, parsed) == "华迪热熔胶复合机");
+
+        using var noPayloadDeviceId = JsonDocument.Parse("""
+            {
+              "properties": { "speed": 1 }
+            }
+            """);
+        var parsedNoId = MqttPayloadMapper.Parse(noPayloadDeviceId.RootElement, profile);
+        AssertTrue(SubscribeDeviceIdResolver.Resolve(huadiTopic, noPayloadDeviceId.RootElement, profile, parsedNoId) == "华迪热熔胶复合机");
+        AssertTrue(SubscribeDeviceIdResolver.Resolve(xianheTopic, noPayloadDeviceId.RootElement, profile, parsedNoId) == "先河热熔胶复合机");
+        AssertTrue(LineMqttDefaults.ResolveDeviceIdFromTopic(huadiTopic) == "华迪热熔胶复合机");
+        AssertTrue(LineMqttDefaults.ResolveDeviceDisplayName("华迪热熔胶复合机") == "华迪热熔胶复合机");
+    }
+
     static void TestLineMqttDefaults()
     {
         var xianhe = new AppSettings();
@@ -277,44 +381,11 @@ public static class MonitorCoreTests
         AssertTrue(huadi.Mqtt.ClientId == LineMqttDefaults.HuadiClientId);
         AssertTrue(huadi.SubscribeTopics.Count == LineMqttDefaults.SubscribeTopics.Count);
 
-        var legacy = new AppSettings
-        {
-            LineName = LineCatalog.Huadi.Name,
-            Mqtt = { Host = "127.0.0.1", Port = 1883, Topic = "monitor/{deviceId}/telemetry" },
-            SubscribeTopics = ["monitor/+/telemetry"]
-        };
-        LineMqttDefaults.MigrateLegacySettings(legacy);
-        AssertTrue(legacy.Mqtt.Host == LineMqttDefaults.Host);
-        AssertTrue(legacy.Mqtt.Topic == LineMqttDefaults.HuadiPublishTopic);
-        AssertTrue(legacy.SubscribeTopics[0] == LineMqttDefaults.XianhePublishTopic);
-
-        var hostOnly = new AppSettings
-        {
-            Mqtt = { Host = LineMqttDefaults.Host, Port = LineMqttDefaults.Port, Username = "", Password = "" }
-        };
-        LineMqttDefaults.MigrateLegacySettings(hostOnly);
-        AssertTrue(hostOnly.Mqtt.Username == LineMqttDefaults.Username);
-        AssertTrue(hostOnly.Mqtt.Password == LineMqttDefaults.Password);
-
-        var (username, password) = LineMqttDefaults.ResolveCredentials(hostOnly.Mqtt);
-        AssertTrue(username == LineMqttDefaults.Username);
-        AssertTrue(password == LineMqttDefaults.Password);
-
-        var legacyClient = new AppSettings
-        {
-            LineName = LineCatalog.Xianhe.Name,
-            DeviceId = LineCatalog.Xianhe.Name,
-            Mqtt = { ClientId = LineCatalog.Xianhe.Name }
-        };
-        LineMqttDefaults.MigrateLegacySettings(legacyClient);
-        AssertTrue(legacyClient.Mqtt.ClientId == LineMqttDefaults.XianheClientId);
-
         var customClient = new AppSettings
         {
             LineName = LineCatalog.Huadi.Name,
             Mqtt = { ClientId = "MY-DEVICE-01" }
         };
-        LineMqttDefaults.MigrateLegacySettings(customClient);
         AssertTrue(customClient.Mqtt.ClientId == "MY-DEVICE-01");
         AssertTrue(LineMqttDefaults.ResolveClientId(customClient.Mqtt, customClient.LineName) == "MY-DEVICE-01");
         AssertTrue(LineMqttDefaults.ResolveClientIdForLine(LineCatalog.Huadi.Name) == LineMqttDefaults.HuadiClientId);
@@ -520,54 +591,6 @@ public static class MonitorCoreTests
         }
     }
 
-    static void TestPatchLineExcelRunStatusAndPrecision()
-    {
-        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-patch-{Guid.NewGuid():N}.xlsx");
-        try
-        {
-            var settings = new AppSettings();
-            LineCatalog.Apply(settings, LineCatalog.Xianhe.Name);
-            settings.Tags.First(tag => tag.Name == RunStatusFormatting.TagName).DataType = TagDataType.Bool;
-            settings.TemperaturePrecision = 1;
-            LineExcelConfigService.Export(settings, tempPath);
-
-            using (var workbook = new XLWorkbook(tempPath))
-            {
-                var configSheet = workbook.Worksheet(LineExcelConfigService.ConfigSheetName);
-                foreach (var row in configSheet.RowsUsed())
-                {
-                    if (row.Cell(1).GetString().Trim() == "精度")
-                    {
-                        row.Cell(1).Value = "温度精度";
-                        row.Cell(2).Value = "1";
-                        break;
-                    }
-                }
-
-                workbook.SaveAs(tempPath);
-            }
-
-            AssertTrue(LineExcelConfigService.PatchRunStatusAndPrecision(tempPath));
-
-            var loaded = new AppSettings();
-            LineExcelConfigService.Apply(loaded, tempPath);
-            var runStatus = loaded.Tags.First(tag => tag.Name == RunStatusFormatting.TagName);
-            AssertTrue(runStatus.DataType == TagDataType.Int16);
-            AssertTrue(loaded.TemperaturePrecision == 1);
-
-            using var verifyWorkbook = new XLWorkbook(tempPath);
-            var verifyConfig = verifyWorkbook.Worksheet(LineExcelConfigService.ConfigSheetName);
-            AssertTrue(verifyConfig.RowsUsed().Any(row => row.Cell(1).GetString().Trim() == "精度"));
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-            {
-                File.Delete(tempPath);
-            }
-        }
-    }
-
     static void TestLineFileMaintenancePreservesCustomTags()
     {
         var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-maint-{Guid.NewGuid():N}.xlsx");
@@ -691,7 +714,7 @@ public static class MonitorCoreTests
         }
     }
 
-    static void TestLineExcelRevisionMerge()
+    static void TestLineExcelLoadPreservesContent()
     {
         var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-rev-{Guid.NewGuid():N}.xlsx");
         try
@@ -699,6 +722,10 @@ public static class MonitorCoreTests
             var legacy = new AppSettings();
             LineCatalog.Apply(legacy, LineCatalog.Xianhe.Name);
             legacy.Tags = legacy.Tags.Where(tag => tag.Name != "产品货号").ToList();
+            legacy.Mqtt.Host = "127.0.0.1";
+            legacy.Mqtt.Port = 1883;
+            legacy.Mqtt.Username = "local-user";
+            legacy.Mqtt.Password = "local-pass";
             LineExcelConfigService.Export(legacy, tempPath);
 
             using (var workbook = new XLWorkbook(tempPath))
@@ -716,13 +743,15 @@ public static class MonitorCoreTests
                 workbook.SaveAs(tempPath);
             }
 
-            LineExcelConfigService.EnsureLineFile(tempPath, LineCatalog.Xianhe.Name);
-
             var loaded = new AppSettings();
             LineExcelConfigService.Apply(loaded, tempPath);
-            AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version);
+            AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version - 1);
+            AssertTrue(loaded.AddressCatalogVersion == LineCatalog.Version - 1);
             AssertFalse(loaded.Tags.Any(tag => tag.Name == "产品货号"));
-            AssertTrue(loaded.Tags.Any(tag => tag.Name == "当前注胶机编号"));
+            AssertTrue(loaded.Mqtt.Host == "127.0.0.1");
+            AssertTrue(loaded.Mqtt.Port == 1883);
+            AssertTrue(loaded.Mqtt.Username == "local-user");
+            AssertTrue(loaded.Mqtt.Password == "local-pass");
         }
         finally
         {
@@ -816,8 +845,8 @@ public static class MonitorCoreTests
             }, 1, ["车速", "运行状态"]).GetAwaiter().GetResult();
             AssertTrue(table.Rows.Count == 1);
             AssertTrue(table.Columns.Count == 2);
-            AssertTrue(table.Rows[0].Cells[0] == "45.2");
-            AssertTrue(table.Rows[0].Cells[1] == "开");
+            AssertTrue(table.Rows[0].TagCells[0].Text == "45.2");
+            AssertTrue(table.Rows[0].TagCells[1].Text == "开");
 
             var tableWithPreferredOnly = store.QueryTableAsync(new HistoryQuery
             {
@@ -830,7 +859,7 @@ public static class MonitorCoreTests
             }).GetAwaiter().GetResult();
             AssertTrue(tableWithPreferredOnly.Columns.Count == 3);
             AssertTrue(tableWithPreferredOnly.Columns.Any(column => column.TagName == "新增点位"));
-            AssertTrue(tableWithPreferredOnly.Rows[0].Cells[2] == "—");
+            AssertTrue(tableWithPreferredOnly.Rows[0].TagCells[2].Text == "—");
 
             var deviceATags = store.GetDistinctTagNamesAsync(new HistoryQuery
             {
@@ -998,8 +1027,8 @@ public static class MonitorCoreTests
                 catalogTags: catalogTags,
                 mqttProfile: profile).GetAwaiter().GetResult();
             AssertTrue(table.Rows.Count == 1);
-            AssertTrue(table.Rows[0].Cells[0] == "88.50");
-            AssertTrue(table.Rows[0].Cells[1] == "45.00");
+            AssertTrue(table.Rows[0].TagCells[0].Text == "88.50");
+            AssertTrue(table.Rows[0].TagCells[1].Text == "45.00");
         }
         finally
         {
@@ -1019,18 +1048,18 @@ public static class MonitorCoreTests
         {
             Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
 
-            var saved = new AppSettings
-            {
-                DeviceId = "USER-DEVICE-99",
-                LineName = LineCatalog.LineNames[0],
-                AutoStartAcquisition = false,
-                EnableHistoryRecording = false,
-                HistoryRetentionDays = 30,
-                AddressCatalogVersion = LineCatalog.Version,
-                Plc = new PlcSettings { Host = "10.0.0.88" },
-                Mqtt = new MqttSettings { Host = "10.0.0.99", Port = 1888, Topic = "/custom/topic" },
-                Tags = [new PlcTag { Name = "测试点", Source = TagSource.Manual, ManualValue = "1" }]
-            };
+            var saved = LineExcelConfigService.CreateSeedSettings(LineCatalog.LineNames[0]);
+            saved.DeviceId = "USER-DEVICE-99";
+            saved.AutoStartAcquisition = false;
+            saved.EnableHistoryRecording = false;
+            saved.HistoryRetentionDays = 30;
+            saved.Plc.Host = "10.0.0.88";
+            saved.Mqtt.Host = "10.0.0.99";
+            saved.Mqtt.Port = 1888;
+            saved.Mqtt.Topic = "/custom/topic";
+            saved.Tags.Add(new PlcTag { Name = "测试点", Source = TagSource.Manual, ManualValue = "1" });
+            MqttFieldMappingCatalog.ApplyDefaults(saved.Tags, saved.LineName);
+            PlcTagIdentity.AssignStableIds(saved);
             LineExcelConfigService.Export(saved, configPath);
 
             var loaded = LineExcelConfigService.LoadLineExcel(

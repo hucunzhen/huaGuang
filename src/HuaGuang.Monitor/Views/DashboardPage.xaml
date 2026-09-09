@@ -99,7 +99,7 @@
                             <BoxView WidthRequest="7" HeightRequest="7" CornerRadius="4" VerticalOptions="Center" Color="{Binding QualityColor}" />
                             <Label Text="{Binding UpdatedAt}" TextColor="#8AA0B5"
                                    FontSize="{Binding Source={RelativeSource AncestorType={x:Type controls:FitGrid}}, Path=SmallFontSize}" />
-                        </HorizontalStackLayout>
+                </HorizontalStackLayout>
                     </VerticalStackLayout>
                 </Grid>
             </Border>
@@ -156,9 +156,9 @@
         <DataTemplate x:Key="RemoteDevicePanelTemplate" x:DataType="vm:RemoteDevicePanelViewModel">
             <VerticalStackLayout Spacing="8" Margin="0,0,0,10">
                 <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#101C28" Padding="10,8">
-                    <Border.StrokeShape>
-                        <RoundRectangle CornerRadius="8" />
-                    </Border.StrokeShape>
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
                     <VerticalStackLayout Spacing="2">
                         <Label Text="{Binding DeviceId}" TextColor="White" FontAttributes="Bold"
                                FontSize="{Binding Source={RelativeSource AncestorType={x:Type views:DashboardPage}}, Path=BodyFontSize}" />
@@ -333,8 +333,8 @@
                             <Label Text="{Binding MqttConnected, Converter={StaticResource BoolToConnectedTextConverter}}" TextColor="White"
                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
                         </VerticalStackLayout>
-                    </HorizontalStackLayout>
-                </Border>
+                                    </HorizontalStackLayout>
+                        </Border>
 
                 <Button Text="{Binding Source={x:Reference ThisPage}, Path=IsFullScreenMode, Converter={StaticResource FullScreenLabelConverter}}"
                         Clicked="OnFullScreenClicked"
@@ -498,9 +498,9 @@
                     BackgroundColor="#152536"
                     Padding="10,8"
                     IsVisible="{Binding ShowScannerInput}">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="8" />
+            </Border.StrokeShape>
                 <VerticalStackLayout Spacing="6">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <Label Text="{Binding ScannerInputTitle}"
@@ -532,14 +532,14 @@
                                 Padding="14,8"
                                 MinimumWidthRequest="72"
                                 FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
-                    </Grid>
+            </Grid>
                     <Label Text="{Binding LastError}"
                            TextColor="#FF6B6B"
                            LineBreakMode="WordWrap"
                            FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
                            IsVisible="{Binding LastError, Converter={StaticResource IsNotNullOrEmptyConverter}}" />
                 </VerticalStackLayout>
-            </Border>
+        </Border>
 
             <ScrollView Grid.Row="2">
                 <VerticalStackLayout Spacing="14" Padding="0,4">

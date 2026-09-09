@@ -86,6 +86,25 @@ begin
   Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+procedure DisableShadowStacksForExe(const ExePath: String);
+var
+  ResultCode: Integer;
+  Args: String;
+begin
+  if not FileExists(ExePath) then
+    Exit;
+
+  Args := '-NoProfile -ExecutionPolicy Bypass -Command "Set-ProcessMitigation -Name ''' +
+    ExePath + ''' -Disable ShadowStacks"';
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure ConfigureOldWindowsCompat();
+begin
+  DisableShadowStacksForExe(ExpandConstant('{app}\{#MyAppExeName}'));
+  DisableShadowStacksForExe(ServiceExePath());
+end;
+
 function InstallMonitorService(): Boolean;
 var
   ResultCode: Integer;
@@ -115,8 +134,12 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('installservice') then
-    InstallMonitorService();
+  if CurStep = ssPostInstall then
+  begin
+    ConfigureOldWindowsCompat();
+    if WizardIsTaskSelected('installservice') then
+      InstallMonitorService();
+  end;
 end;
 
 procedure DeletePackageUserDataUnder(const Root: String);
@@ -151,7 +174,7 @@ begin
   DeleteUserData := False;
   Answer := MsgBox(
     '是否同时删除用户数据？' + #13#10 + #13#10 +
-    '包括：本地设置 (settings.json)、历史数据库 (history.db)、' + #13#10 +
+    '包括：历史数据库 (history.db)、' + #13#10 +
     '以及 AppData 中保存的产线 Excel 配置。' + #13#10 + #13#10 +
     '选「是」将永久删除，无法恢复。',
     mbConfirmation,

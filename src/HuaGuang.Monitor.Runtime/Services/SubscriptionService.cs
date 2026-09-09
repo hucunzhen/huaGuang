@@ -67,7 +67,6 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             }
 
             var settings = _settingsStore.Current;
-            SubscribeTopicHelper.Migrate(settings);
             var topics = SubscribeTopicHelper.NormalizeTopics(settings.SubscribeTopics);
             if (topics.Count == 0)
             {
@@ -129,7 +128,6 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             }
 
             var settings = _settingsStore.Current;
-            SubscribeTopicHelper.Migrate(settings);
             var topics = SubscribeTopicHelper.NormalizeTopics(settings.SubscribeTopics);
             if (topics.Count == 0)
             {
@@ -227,9 +225,12 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             var settings = _settingsStore.Current;
             var profile = settings.MqttPayload ?? new MqttPayloadProfile();
             var parsed = MqttPayloadMapper.Parse(root, profile);
-            var deviceId = parsed.DeviceId
-                ?? ReadOptionalDeviceId(root)
-                ?? MqttTopicDeviceId.Extract(message.Topic);
+            var deviceId = SubscribeDeviceIdResolver.Resolve(
+                message.Topic,
+                root,
+                profile,
+                parsed,
+                settings.DeviceId);
             if (string.IsNullOrWhiteSpace(deviceId))
             {
                 _logger.LogWarning("忽略遥测：无法解析 deviceId topic={Topic}", message.Topic);
@@ -338,16 +339,6 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             _devices.Remove(key);
         }
     }
-
-    static string? ReadOptionalDeviceId(JsonElement root) =>
-        TryReadString(root, "deviceId");
-
-    static string? TryReadString(JsonElement root, string name) =>
-        root.ValueKind == JsonValueKind.Object &&
-        root.TryGetProperty(name, out var element) &&
-        element.ValueKind == JsonValueKind.String
-            ? element.GetString()
-            : null;
 
     async Task DisconnectAsync()
     {

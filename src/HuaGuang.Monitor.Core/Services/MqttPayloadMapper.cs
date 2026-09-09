@@ -175,7 +175,7 @@ public static class MqttPayloadMapper
             }
 
             var mqttField = ResolveFieldKey(tag, profile);
-            if (string.Equals(mqttField, remoteFieldKey, StringComparison.Ordinal))
+            if (string.Equals(mqttField, remoteFieldKey, StringComparison.OrdinalIgnoreCase))
             {
                 return tag;
             }

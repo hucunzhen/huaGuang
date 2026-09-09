@@ -311,19 +311,20 @@ public sealed class HistoryStore
             {
                 valuesBySample.TryGetValue(sample.Id, out var map);
                 map ??= new Dictionary<string, string>(StringComparer.Ordinal);
-                var cells = columns
-                    .Select(column => map.TryGetValue(column.TagName, out var value) ? value : "—")
+                var recordedAtText = sample.RecordedAt.ToLocalTime().ToString("MM-dd HH:mm:ss");
+                var tagCells = columns
+                    .Select(column => new HistoryTableCell
+                    {
+                        Text = map.TryGetValue(column.TagName, out var value) ? value : "—",
+                        Width = column.Width
+                    })
                     .ToList();
                 rows.Add(new HistoryTableRow
                 {
                     SampleId = sample.Id,
-                    RecordedAtText = sample.RecordedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"),
+                    RecordedAtText = recordedAtText,
                     DeviceId = sample.DeviceId,
-                    Cells = cells,
-                    LineText = HistoryTableFormatting.FormatDataLine(
-                        sample.RecordedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"),
-                        sample.DeviceId,
-                        cells)
+                    TagCells = tagCells
                 });
             }
 
@@ -382,7 +383,8 @@ public sealed class HistoryStore
             return new HistoryTableColumn
             {
                 TagName = name,
-                HeaderText = header
+                HeaderText = header,
+                Width = HistoryTableFormatting.EstimateTextWidth(header, minWidth: HistoryTableFormatting.TagColumnWidth)
             };
         }).ToList();
     }

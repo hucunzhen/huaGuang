@@ -49,25 +49,13 @@ public static class SubscribeTopicHelper
     {
         if (topics is null)
         {
-            return ["monitor/+/telemetry"];
+            return [];
         }
 
-        var normalized = topics
+        return topics
             .Where(topic => !string.IsNullOrWhiteSpace(topic))
             .Select(topic => topic.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-        return normalized.Count == 0 ? ["monitor/+/telemetry"] : normalized;
-    }
-
-    public static void Migrate(AppSettings settings)
-    {
-        if (settings.SubscribeTopics.Count == 0 && !string.IsNullOrWhiteSpace(settings.SubscribeTopic))
-        {
-            settings.SubscribeTopics.Add(settings.SubscribeTopic.Trim());
-        }
-
-        settings.SubscribeTopics = NormalizeTopics(settings.SubscribeTopics).ToList();
     }
 }

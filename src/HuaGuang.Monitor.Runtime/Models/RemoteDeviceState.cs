@@ -12,5 +12,5 @@ public sealed class RemoteDeviceState
     public Dictionary<string, object?> Tags { get; set; } = new(StringComparer.Ordinal);
     public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.Now;
 
-    public string DisplayLabel => $"{DeviceId} ({SourceTopic})";
+    public string DisplayLabel => DeviceId;
 }

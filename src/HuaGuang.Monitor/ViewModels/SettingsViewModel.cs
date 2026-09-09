@@ -340,9 +340,7 @@ public partial class SettingsViewModel : ObservableObject
         settings.Mqtt.Password = MqttPassword;
         settings.Mqtt.UseTls = MqttUseTls;
         settings.Mqtt.Qos = ParseInt(MqttQos, 0, 0, 2);
-        settings.Mqtt.Topic = string.IsNullOrWhiteSpace(MqttTopic)
-            ? LineMqttDefaults.ResolvePublishTopic(settings.LineName)
-            : MqttTopic.Trim();
+        settings.Mqtt.Topic = MqttTopic.Trim();
         return settings;
     }
 
@@ -418,9 +416,7 @@ public partial class SettingsViewModel : ObservableObject
             settings.Mqtt.Password = MqttPassword;
             settings.Mqtt.UseTls = MqttUseTls;
             settings.Mqtt.Qos = ParseInt(MqttQos, 0, 0, 2);
-            settings.Mqtt.Topic = string.IsNullOrWhiteSpace(MqttTopic)
-                ? LineMqttDefaults.ResolvePublishTopic(settings.LineName)
-                : MqttTopic.Trim();
+            settings.Mqtt.Topic = MqttTopic.Trim();
 
             _startup.Apply(settings.StartWithWindows);
             await _store.SaveAsync(settings);
@@ -443,7 +439,6 @@ public partial class SettingsViewModel : ObservableObject
         DeviceId = settings.DeviceId;
         SelectedOperationMode = settings.OperationMode == AppOperationMode.Subscribe ? "订阅模式" : "采集模式";
         SubscribeTopics.Clear();
-        SubscribeTopicHelper.Migrate(settings);
         foreach (var topic in settings.SubscribeTopics)
         {
             SubscribeTopics.Add(topic);
@@ -466,9 +461,7 @@ public partial class SettingsViewModel : ObservableObject
         PlcTimeoutMs = settings.Plc.TimeoutMs.ToString();
         MqttHost = settings.Mqtt.Host;
         MqttPort = settings.Mqtt.Port.ToString();
-        MqttClientId = string.IsNullOrWhiteSpace(settings.Mqtt.ClientId)
-            ? LineMqttDefaults.ResolveClientIdForLine(settings.LineName)
-            : settings.Mqtt.ClientId;
+        MqttClientId = settings.Mqtt.ClientId;
         MqttUsername = settings.Mqtt.Username;
         MqttPassword = settings.Mqtt.Password;
         MqttUseTls = settings.Mqtt.UseTls;

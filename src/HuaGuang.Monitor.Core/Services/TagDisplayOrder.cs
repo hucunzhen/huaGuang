@@ -7,12 +7,13 @@ public static class TagDisplayOrder
     public static IEnumerable<(string Name, object? Value, PlcTag? CatalogTag)> OrderRemoteTags(
         IReadOnlyDictionary<string, object?> remoteTags,
         IReadOnlyList<PlcTag> catalogTags,
-        MqttPayloadProfile? profile = null)
+        MqttPayloadProfile? profile = null,
+        bool includeDisabledCatalogTags = false)
     {
         profile ??= new MqttPayloadProfile();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var catalogTag in catalogTags.Where(tag => tag.Enabled))
+        foreach (var catalogTag in catalogTags.Where(tag => includeDisabledCatalogTags || tag.Enabled))
         {
             if (!TryGetRemoteValue(remoteTags, catalogTag, profile, out var value))
             {
@@ -32,7 +33,7 @@ public static class TagDisplayOrder
                     continue;
                 }
 
-                if (!catalogTag.Enabled)
+                if (!includeDisabledCatalogTags && !catalogTag.Enabled)
                 {
                     continue;
                 }
@@ -73,9 +74,39 @@ public static class TagDisplayOrder
                 catalogTag = matched;
                 return true;
             }
+
+            catalogTag = new PlcTag
+            {
+                Name = tagName,
+                MqttField = remoteKey.Trim()
+            };
+            return true;
         }
 
         catalogTag = null!;
+        return false;
+    }
+
+    static bool TryGetRemoteValueByKey(
+        IReadOnlyDictionary<string, object?> remoteTags,
+        string key,
+        out object? value)
+    {
+        if (remoteTags.TryGetValue(key, out value))
+        {
+            return true;
+        }
+
+        foreach (var pair in remoteTags)
+        {
+            if (string.Equals(pair.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                value = pair.Value;
+                return true;
+            }
+        }
+
+        value = null;
         return false;
     }
 
@@ -86,11 +117,11 @@ public static class TagDisplayOrder
         out object? value)
     {
         var mqttField = MqttPayloadMapper.ResolveFieldKey(catalogTag, profile);
-        if (remoteTags.TryGetValue(mqttField, out value))
+        if (TryGetRemoteValueByKey(remoteTags, mqttField, out value))
         {
             return true;
         }
 
-        return remoteTags.TryGetValue(catalogTag.Name, out value);
+        return TryGetRemoteValueByKey(remoteTags, catalogTag.Name, out value);
     }
 }

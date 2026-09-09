@@ -16,8 +16,13 @@ public static class HistoryTagNameResolver
         }
 
         profile ??= new MqttPayloadProfile();
-        return TagDisplayOrder.TryResolveCatalogTag(storedName, catalogTags, profile, out var matched)
-            ? matched.Name
+        if (TagDisplayOrder.TryResolveCatalogTag(storedName, catalogTags, profile, out var matched))
+        {
+            return matched.Name;
+        }
+
+        return MqttFieldMappingCatalog.TryResolveTagNameByField(storedName, out var mappedName)
+            ? mappedName
             : storedName;
     }
 

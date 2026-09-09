@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HuaGuang.Monitor.Models;
 
 namespace HuaGuang.Monitor.Services;
@@ -64,10 +65,53 @@ public sealed class HistoryQuery
     public int Offset { get; init; }
 }
 
-public sealed class HistoryTableColumn
+public sealed class HistoryTableColumn : INotifyPropertyChanged
 {
     public string TagName { get; init; } = string.Empty;
     public string HeaderText { get; init; } = string.Empty;
+
+    double _width = HistoryTableFormatting.TagColumnWidth;
+
+    public double Width
+    {
+        get => _width;
+        set
+        {
+            if (Math.Abs(_width - value) < 0.5)
+            {
+                return;
+            }
+
+            _width = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Width)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+}
+
+public sealed class HistoryTableCell : INotifyPropertyChanged
+{
+    public string Text { get; init; } = string.Empty;
+
+    double _width = HistoryTableFormatting.TagColumnWidth;
+
+    public double Width
+    {
+        get => _width;
+        set
+        {
+            if (Math.Abs(_width - value) < 0.5)
+            {
+                return;
+            }
+
+            _width = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Width)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }
 
 public sealed class HistoryTableRow
@@ -75,8 +119,7 @@ public sealed class HistoryTableRow
     public long SampleId { get; init; }
     public string RecordedAtText { get; init; } = string.Empty;
     public string DeviceId { get; init; } = string.Empty;
-    public IReadOnlyList<string> Cells { get; init; } = [];
-    public string LineText { get; init; } = string.Empty;
+    public IReadOnlyList<HistoryTableCell> TagCells { get; init; } = [];
 }
 
 public sealed class HistoryTableData

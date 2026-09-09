@@ -1,0 +1,6 @@
+<Project>
+  <!-- Win10 21H2（ntdll &lt; 10.0.19041.5007）无法运行带 CET 标记的 apphost，见 dotnet/runtime#110920 -->
+  <PropertyGroup>
+    <CETCompat>false</CETCompat>
+  </PropertyGroup>
+</Project>

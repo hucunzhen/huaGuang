@@ -4,7 +4,7 @@ namespace HuaGuang.Monitor.Views;
 
 public partial class HistoryPage : MonitorPageBase
 {
-    const double MinListHeight = 120;
+    bool _syncingHorizontalScroll;
 
     public HistoryPage() : this(MauiProgram.Services.GetRequiredService<HistoryViewModel>())
     {
@@ -14,8 +14,6 @@ public partial class HistoryPage : MonitorPageBase
     {
         InitializeComponent();
         BindingContext = viewModel;
-        TableHost.SizeChanged += (_, _) => UpdateHistoryListHeight();
-        TableHorizontalScroll.SizeChanged += (_, _) => UpdateHistoryListHeight();
     }
 
     protected override async void OnAppearing()
@@ -26,30 +24,36 @@ public partial class HistoryPage : MonitorPageBase
             await viewModel.InitializeAsync();
             await viewModel.RefreshOnAppearAsync();
         }
-
-        UpdateHistoryListHeight();
     }
 
-    protected override void OnSizeAllocated(double width, double height)
-    {
-        base.OnSizeAllocated(width, height);
-        UpdateHistoryListHeight();
-    }
+    void OnHeaderHorizontalScrolled(object? sender, ScrolledEventArgs e) =>
+        SyncHorizontalScroll(sourceScrollX: e.ScrollX, fromHeader: true);
 
-    void UpdateHistoryListHeight()
+    void OnBodyHorizontalScrolled(object? sender, ScrolledEventArgs e) =>
+        SyncHorizontalScroll(sourceScrollX: e.ScrollX, fromHeader: false);
+
+    void SyncHorizontalScroll(double sourceScrollX, bool fromHeader)
     {
-        if (HistoryRowsView is null || TableHorizontalScroll is null)
+        if (_syncingHorizontalScroll)
         {
             return;
         }
 
-        var viewportHeight = TableHorizontalScroll.Height;
-        if (viewportHeight <= 0)
+        _syncingHorizontalScroll = true;
+        try
         {
-            return;
+            if (fromHeader)
+            {
+                BodyHorizontalScroll.ScrollToAsync(sourceScrollX, 0, false);
+            }
+            else
+            {
+                HeaderHorizontalScroll.ScrollToAsync(sourceScrollX, 0, false);
+            }
         }
-
-        const double headerReserve = 44;
-        HistoryRowsView.HeightRequest = Math.Max(MinListHeight, viewportHeight - headerReserve);
+        finally
+        {
+            _syncingHorizontalScroll = false;
+        }
     }
 }

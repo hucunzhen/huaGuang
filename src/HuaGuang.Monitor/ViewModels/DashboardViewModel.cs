@@ -194,11 +194,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         ToggleText = IsSubscribeMode ? "连接中..." : "启动中...";
         try
         {
-            await _settings.LoadAsync().ConfigureAwait(false);
+            await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
 
             if (!IsRunning && MauiProgram.IsWindowsBackgroundServiceAvailable())
             {
-                await _settings.SaveAsync(_settings.Current).ConfigureAwait(false);
                 try
                 {
                     await RuntimeSettingsSync.ReloadBackgroundServiceAsync().ConfigureAwait(false);
@@ -223,7 +222,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             }
             else
             {
-                await MainThread.InvokeOnMainThreadAsync(RebuildRows).ConfigureAwait(false);
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    RebuildRows();
+                    _appliedSettingsRevision = _settings.Revision;
+                }).ConfigureAwait(false);
+
                 if (IsSubscribeMode)
                 {
                     await _subscription.StartAsync().ConfigureAwait(false);
@@ -434,7 +438,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         }
 
         var settings = _settings.Current;
-        SubscribeTopicHelper.Migrate(settings);
         if (settings.SubscribeTopics.Any(existing => existing.Equals(topic, StringComparison.OrdinalIgnoreCase)))
         {
             LastError = "该订阅主题已存在。";
@@ -1121,7 +1124,11 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
     IEnumerable<(string Name, object? Value, PlcTag? CatalogTag)> OrderRemoteTags(
         IReadOnlyDictionary<string, object?> remoteTags) =>
-        TagDisplayOrder.OrderRemoteTags(remoteTags, _settings.Current.Tags, _settings.Current.MqttPayload);
+        TagDisplayOrder.OrderRemoteTags(
+            remoteTags,
+            _settings.Current.Tags,
+            _settings.Current.MqttPayload,
+            includeDisabledCatalogTags: IsSubscribeMode);
 
     public void Dispose()
     {

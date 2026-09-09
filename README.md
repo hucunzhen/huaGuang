@@ -2,7 +2,7 @@
 
 Windows / Android 共用一套代码：**采集模式**下按设定周期从 **信捷 XD5E-60T10** 读点位并以 JSON 发布 MQTT；**订阅模式**下连接同一 Broker，查看局域网内其他设备的遥测。
 
-**当前版本：1.1.8（修订 1）**（订阅历史全量保存、历史页双向滚动、MQTT 温度字段映射、崩溃日志与订阅内存优化）
+**当前版本：1.1.9（修订 1）**（Excel 专属配置、历史页列对齐与可拖列宽、启停设置保留、旧版 Windows CET 兼容）
 
 > 版本号与修订号定义在 `HuaGuang.Monitor.csproj` 的 `ApplicationDisplayVersion` / `ApplicationVersion`；安装包与 APK 文件名格式为 `IndustrialMonitor-{版本}-r{修订}-Setup.exe` / `IndustrialMonitor-{版本}-r{修订}-android.apk`。应用内可在 **诊断** Tab 查看。
 
@@ -86,7 +86,7 @@ Release 自包含参数已在 `HuaGuang.Monitor.csproj` 中配置，**不要**�
 2. 实例 B：设置 → 运行模式选 **订阅模式**，添加主题如 `monitor/+/telemetry`，保存后点 **启动订阅**
 3. 首页 **主题筛选** 可选「全部」或单个主题；运行中也可 **添加主题** 而无需停止订阅
 
-参考配置见 `test/settings.sample.json`；`test/mosquitto.conf` 为本地匿名 Broker（仅开发机）。
+参考 `test/mosquitto.conf` 启动本地匿名 Broker（仅开发机）。
 
 ## 连接 XD5E-60T10
 

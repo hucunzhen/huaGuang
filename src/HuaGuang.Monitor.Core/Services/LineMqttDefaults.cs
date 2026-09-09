@@ -62,60 +62,6 @@ public static class LineMqttDefaults
         settings.SubscribeTopic = SubscribeTopics[0];
     }
 
-    public static void MigrateLegacySettings(AppSettings settings)
-    {
-        var legacyBroker = string.IsNullOrWhiteSpace(settings.Mqtt.Host) ||
-                           settings.Mqtt.Host is "127.0.0.1" or "localhost";
-        var legacyPort = settings.Mqtt.Port is 0 or 1883;
-        var legacyTopic = string.IsNullOrWhiteSpace(settings.Mqtt.Topic) ||
-                          settings.Mqtt.Topic.Contains("{deviceId}", StringComparison.OrdinalIgnoreCase) ||
-                          settings.Mqtt.Topic.StartsWith("monitor/", StringComparison.OrdinalIgnoreCase);
-
-        if (legacyBroker && legacyPort)
-        {
-            ApplyBroker(settings.Mqtt);
-        }
-        else
-        {
-            EnsureCredentials(settings.Mqtt);
-        }
-
-        if (legacyTopic)
-        {
-            settings.Mqtt.Topic = ResolvePublishTopic(settings.LineName);
-        }
-
-        if (settings.SubscribeTopics.Count == 0 ||
-            settings.SubscribeTopics.All(topic =>
-                topic.StartsWith("monitor/", StringComparison.OrdinalIgnoreCase)))
-        {
-            ApplySubscribeTopics(settings);
-        }
-
-        if (IsLegacyClientId(settings))
-        {
-            settings.Mqtt.ClientId = ResolveClientIdForLine(settings.LineName);
-        }
-    }
-
-    /// <summary>现场常只改 Broker 地址，账号密码仍为空；与 MQTTX 手动填账号不一致时连接会失败。</summary>
-    public static void EnsureCredentials(MqttSettings mqtt)
-    {
-        if (!string.IsNullOrWhiteSpace(mqtt.Username))
-        {
-            return;
-        }
-
-        if (IsProductionBroker(mqtt.Host, mqtt.Port))
-        {
-            mqtt.Username = Username;
-            mqtt.Password = Password;
-        }
-    }
-
-    public static bool IsProductionBroker(string? host, int port) =>
-        string.Equals(host?.Trim(), Host, StringComparison.OrdinalIgnoreCase) && port == Port;
-
     public static (string Username, string Password) ResolveCredentials(MqttSettings mqtt) =>
         (mqtt.Username?.Trim() ?? string.Empty, mqtt.Password ?? string.Empty);
 
@@ -129,19 +75,28 @@ public static class LineMqttDefaults
         return ResolveClientIdForLine(lineName);
     }
 
-    static bool IsLegacyClientId(AppSettings settings)
+    /// <summary>从 MQTT 主题推断 deviceId（产线名）；平台 topic 中 clientId 段会映射为产线名。</summary>
+    public static string? ResolveDeviceIdFromTopic(string topic)
     {
-        var clientId = settings.Mqtt.ClientId?.Trim();
-        if (string.IsNullOrWhiteSpace(clientId))
+        var segment = MqttTopicDeviceId.Extract(topic);
+        if (string.IsNullOrWhiteSpace(segment))
         {
-            return true;
+            return null;
         }
 
-        if (string.Equals(clientId, settings.DeviceId, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return clientId is "先河热熔胶复合机" or "华迪热熔胶复合机" or "撒粉复合机" or "平板复合机" or "C型火焰复合机";
+        return ResolveLineNameFromClientId(segment) ?? segment.Trim();
     }
+
+    public static string? ResolveLineNameFromClientId(string? clientId) => clientId?.Trim() switch
+    {
+        XianheClientId => "先河热熔胶复合机",
+        HuadiClientId => "华迪热熔胶复合机",
+        SafenClientId => "撒粉复合机",
+        PingbanClientId => "平板复合机",
+        CyhyClientId => "C型火焰复合机",
+        _ => null
+    };
+
+    public static string ResolveDeviceDisplayName(string deviceId) =>
+        string.IsNullOrWhiteSpace(deviceId) ? deviceId : deviceId.Trim();
 }

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HuaGuang.Monitor.Models;
@@ -20,6 +21,7 @@ public partial class HistoryViewModel : ObservableObject
     List<string> _preferredTags = [];
     Dictionary<string, string?> _tagUnitHints = new(StringComparer.Ordinal);
     List<HistoryTableColumn> _fixedColumns = [];
+    List<HistoryTableColumn> _widthSubscriptions = [];
     IReadOnlyList<PlcTag> _catalogTags = [];
     MqttPayloadProfile _mqttProfile = new();
 
@@ -41,7 +43,8 @@ public partial class HistoryViewModel : ObservableObject
 
     [ObservableProperty] ObservableCollection<HistoryTableRow> tableRows = [];
     [ObservableProperty] ObservableCollection<HistoryTableColumn> tableColumns = [];
-    [ObservableProperty] string headerLine = string.Empty;
+    [ObservableProperty] double timeColumnWidth = HistoryTableFormatting.TimeColumnWidth;
+    [ObservableProperty] double deviceColumnWidth = HistoryTableFormatting.DeviceColumnWidth;
     [ObservableProperty] double tableContentMinWidth;
     [ObservableProperty] string selectedRange = "最近 24 小时";
     [ObservableProperty] string selectedDevice = "全部设备";
@@ -98,7 +101,7 @@ public partial class HistoryViewModel : ObservableObject
             var (from, to) = ResolveQueryRange();
             _queryFrom = from;
             _queryTo = to;
-            _queryDeviceFilter = SelectedDevice == "全部设备" ? null : SelectedDevice;
+            _queryDeviceFilter = ResolveDeviceFilter(SelectedDevice);
             _currentOffset = 0;
             _fixedColumns = [];
 
@@ -123,15 +126,15 @@ public partial class HistoryViewModel : ObservableObject
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 ApplyFilterOptions(devices, _queryDeviceFilter);
+                _fixedColumns = table.Columns.ToList();
+                TableColumns = new ObservableCollection<HistoryTableColumn>(_fixedColumns);
+                ApplyColumnLayout(table.Rows);
+                SubscribeColumnWidthChanges();
                 TableRows.Clear();
                 foreach (var row in table.Rows)
                 {
                     TableRows.Add(row);
                 }
-                _fixedColumns = table.Columns.ToList();
-                TableColumns = new ObservableCollection<HistoryTableColumn>(_fixedColumns);
-                HeaderLine = table.HeaderLine;
-                TableContentMinWidth = HistoryTableFormatting.EstimateContentWidth(_fixedColumns.Count);
                 ShowEmpty = TableRows.Count == 0;
                 UpdateSummary();
                 StatusMessage = string.Empty;
@@ -170,6 +173,10 @@ public partial class HistoryViewModel : ObservableObject
     partial void OnIsLoadingMoreChanged(bool value) =>
         LoadMoreCommand.NotifyCanExecuteChanged();
 
+    partial void OnTimeColumnWidthChanged(double value) => RecalculateTableContentMinWidth();
+
+    partial void OnDeviceColumnWidthChanged(double value) => RecalculateTableContentMinWidth();
+
     bool CanExecuteLoadMore() => CanLoadMore && !IsBusy && !IsLoadingMore;
 
     [RelayCommand(CanExecute = nameof(CanExecuteLoadMore))]
@@ -189,8 +196,10 @@ public partial class HistoryViewModel : ObservableObject
 
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
+                ExpandColumnLayout(table.Rows);
                 foreach (var row in table.Rows)
                 {
+                    ApplyRowTagWidths(row);
                     TableRows.Add(row);
                 }
 
@@ -259,7 +268,10 @@ public partial class HistoryViewModel : ObservableObject
             DeviceOptions.Add("全部设备");
             foreach (var device in devices)
             {
-                DeviceOptions.Add(device);
+                if (!DeviceOptions.Contains(device))
+                {
+                    DeviceOptions.Add(device);
+                }
             }
 
             if (deviceFilter is not null && DeviceOptions.Contains(deviceFilter))
@@ -276,6 +288,9 @@ public partial class HistoryViewModel : ObservableObject
             _suppressFilterRefresh = false;
         }
     }
+
+    string? ResolveDeviceFilter(string selected) =>
+        selected == "全部设备" ? null : selected;
 
     [RelayCommand]
     async Task DeleteRowAsync(HistoryTableRow? row)
@@ -353,7 +368,7 @@ public partial class HistoryViewModel : ObservableObject
             {
                 From = from,
                 To = to,
-                DeviceId = SelectedDevice == "全部设备" ? null : SelectedDevice
+                DeviceId = ResolveDeviceFilter(SelectedDevice)
             }).ConfigureAwait(false);
             StatusMessage = deleted == 0 ? "没有可删除的记录。" : $"已删除 {deleted} 条记录，点「刷新」查看最新。";
             ClearDisplayedTable();
@@ -412,10 +427,12 @@ public partial class HistoryViewModel : ObservableObject
 
     void ClearDisplayedTable()
     {
+        UnsubscribeColumnWidthChanges();
         TableRows.Clear();
         TableColumns.Clear();
-        HeaderLine = string.Empty;
         TableContentMinWidth = 0;
+        TimeColumnWidth = HistoryTableFormatting.TimeColumnWidth;
+        DeviceColumnWidth = HistoryTableFormatting.DeviceColumnWidth;
         _fixedColumns = [];
         _tagUnitHints = new Dictionary<string, string?>(StringComparer.Ordinal);
         _currentOffset = 0;
@@ -423,6 +440,121 @@ public partial class HistoryViewModel : ObservableObject
         CanLoadMore = false;
         ShowEmpty = true;
         SummaryText = "点「刷新」重新加载历史数据。";
+    }
+
+    void ApplyColumnLayout(IReadOnlyList<HistoryTableRow> rows)
+    {
+        TimeColumnWidth = HistoryTableFormatting.EstimateTextWidth(
+            "时间",
+            rows.Select(row => row.RecordedAtText),
+            HistoryTableFormatting.TimeColumnWidth);
+        DeviceColumnWidth = HistoryTableFormatting.EstimateTextWidth(
+            "设备",
+            rows.Select(row => row.DeviceId),
+            HistoryTableFormatting.DeviceColumnWidth);
+
+        for (var index = 0; index < _fixedColumns.Count; index++)
+        {
+            var column = _fixedColumns[index];
+            column.Width = HistoryTableFormatting.EstimateTextWidth(
+                column.HeaderText,
+                rows.Select(row => index < row.TagCells.Count ? row.TagCells[index].Text : "—"),
+                HistoryTableFormatting.TagColumnWidth);
+        }
+
+        foreach (var row in rows)
+        {
+            ApplyRowTagWidths(row);
+        }
+
+        RecalculateTableContentMinWidth();
+    }
+
+    void ExpandColumnLayout(IReadOnlyList<HistoryTableRow> rows)
+    {
+        TimeColumnWidth = Math.Max(
+            TimeColumnWidth,
+            HistoryTableFormatting.EstimateTextWidth(
+                "时间",
+                rows.Select(row => row.RecordedAtText),
+                TimeColumnWidth));
+        DeviceColumnWidth = Math.Max(
+            DeviceColumnWidth,
+            HistoryTableFormatting.EstimateTextWidth(
+                "设备",
+                rows.Select(row => row.DeviceId),
+                DeviceColumnWidth));
+
+        for (var index = 0; index < _fixedColumns.Count; index++)
+        {
+            var column = _fixedColumns[index];
+            column.Width = Math.Max(
+                column.Width,
+                HistoryTableFormatting.EstimateTextWidth(
+                    column.HeaderText,
+                    rows.Select(row => index < row.TagCells.Count ? row.TagCells[index].Text : "—"),
+                    column.Width));
+        }
+
+        RecalculateTableContentMinWidth();
+    }
+
+    void ApplyRowTagWidths(HistoryTableRow row)
+    {
+        for (var index = 0; index < row.TagCells.Count && index < _fixedColumns.Count; index++)
+        {
+            row.TagCells[index].Width = _fixedColumns[index].Width;
+        }
+    }
+
+    void RecalculateTableContentMinWidth() =>
+        TableContentMinWidth = HistoryTableFormatting.EstimateContentWidth(
+            TimeColumnWidth,
+            DeviceColumnWidth,
+            _fixedColumns.Select(column => column.Width));
+
+    void SubscribeColumnWidthChanges()
+    {
+        UnsubscribeColumnWidthChanges();
+        foreach (var column in TableColumns)
+        {
+            column.PropertyChanged += OnColumnWidthChanged;
+            _widthSubscriptions.Add(column);
+        }
+    }
+
+    void UnsubscribeColumnWidthChanges()
+    {
+        foreach (var column in _widthSubscriptions)
+        {
+            column.PropertyChanged -= OnColumnWidthChanged;
+        }
+
+        _widthSubscriptions.Clear();
+    }
+
+    void OnColumnWidthChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(HistoryTableColumn.Width) || sender is not HistoryTableColumn column)
+        {
+            return;
+        }
+
+        var index = _fixedColumns.IndexOf(column);
+        if (index < 0)
+        {
+            return;
+        }
+
+        foreach (var row in TableRows)
+        {
+            if (index < row.TagCells.Count)
+            {
+                row.TagCells[index].Width = column.Width;
+            }
+        }
+
+        RecalculateTableContentMinWidth();
     }
 
     static (DateTimeOffset From, DateTimeOffset To) ResolvePresetRange(string selected) =>
