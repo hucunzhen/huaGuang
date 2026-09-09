@@ -45,19 +45,21 @@ public partial class SettingsViewModel : ObservableObject
     public IReadOnlyList<string> LineNames => LineCatalog.LineNames;
     public string[] OperationModes { get; } = ["采集模式", "订阅模式"];
     public ObservableCollection<string> SubscribeTopics { get; } = [];
+    public ObservableCollection<MqttEndpointViewModel> MqttEndpoints { get; } = [];
 
     [ObservableProperty] string selectedOperationMode = "采集模式";
     [ObservableProperty] string newSubscribeTopic = string.Empty;
     [ObservableProperty] string selectedLineName = "先河热熔胶复合机";
     [ObservableProperty] string deviceId = "先河热熔胶复合机";
-    [ObservableProperty] string scanIntervalMs = "60000";
+    [ObservableProperty] string scanIntervalMs = "2000";
+    [ObservableProperty] string publishIntervalMs = "60000";
     [ObservableProperty] string temperaturePublishThresholdC = "0";
     [ObservableProperty] string temperaturePrecision = AppSettings.DefaultTemperaturePrecision.ToString();
     [ObservableProperty] bool useSimulator = true;
     [ObservableProperty] bool startWithWindows = true;
     [ObservableProperty] bool autoStartAcquisition = true;
     [ObservableProperty] bool enableHistoryRecording = true;
-    [ObservableProperty] string historyRetentionDays = "14";
+    [ObservableProperty] string historyRetentionDays = "1";
 
     public bool StartupSupported => _startup.IsSupported;
     public bool IsSubscribeSettings => SelectedOperationMode == "订阅模式";
@@ -73,15 +75,6 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] string plcPort = "502";
     [ObservableProperty] string station = "1";
     [ObservableProperty] string plcTimeoutMs = "2000";
-
-    [ObservableProperty] string mqttHost = LineMqttDefaults.Host;
-    [ObservableProperty] string mqttPort = LineMqttDefaults.Port.ToString();
-    [ObservableProperty] string mqttClientId = LineMqttDefaults.XianheClientId;
-    [ObservableProperty] string mqttUsername = LineMqttDefaults.Username;
-    [ObservableProperty] string mqttPassword = LineMqttDefaults.Password;
-    [ObservableProperty] bool mqttUseTls;
-    [ObservableProperty] string mqttQos = "0";
-    [ObservableProperty] string mqttTopic = LineMqttDefaults.XianhePublishTopic;
 
     [ObservableProperty] string statusMessage = string.Empty;
 
@@ -325,7 +318,8 @@ public partial class SettingsViewModel : ObservableObject
         var settings = _store.Current;
         settings.LineName = SelectedLineName;
         settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
-        settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 60_000, 200, 60_000);
+        settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 2_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxScanIntervalMs);
+        settings.PublishIntervalMs = ParseInt(PublishIntervalMs, 60_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxPublishIntervalMs);
         settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
         settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
         settings.UseSimulator = UseSimulator;
@@ -333,39 +327,81 @@ public partial class SettingsViewModel : ObservableObject
         settings.Plc.Port = ParseInt(PlcPort, 502, 1, 65535);
         settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
         settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
-        settings.Mqtt.Host = MqttHost.Trim();
-        settings.Mqtt.Port = ParseInt(MqttPort, LineMqttDefaults.Port, 1, 65535);
-        settings.Mqtt.ClientId = MqttClientId.Trim();
-        settings.Mqtt.Username = MqttUsername.Trim();
-        settings.Mqtt.Password = MqttPassword;
-        settings.Mqtt.UseTls = MqttUseTls;
-        settings.Mqtt.Qos = ParseInt(MqttQos, 0, 0, 2);
-        settings.Mqtt.Topic = MqttTopic.Trim();
+        ApplyMqttEndpointsToSettings(settings);
         return settings;
     }
 
     bool TryValidateMqttSettings(out string message)
     {
-        if (string.IsNullOrWhiteSpace(MqttClientId))
+        if (MqttEndpoints.Count == 0)
         {
-            message = "请填写 MQTT ClientId（先河 XHRRJFHJ，华迪 HDRRJFHJ）。";
+            message = "请至少添加一个 MQTT 目标。";
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(MqttUsername))
+        foreach (var endpoint in MqttEndpoints.Where(e => e.Enabled))
         {
-            message = "请填写 MQTT 用户名。";
-            return false;
-        }
+            if (string.IsNullOrWhiteSpace(endpoint.ClientId))
+            {
+                message = $"请填写 MQTT 目标「{endpoint.Name}」的 ClientId。";
+                return false;
+            }
 
-        if (string.IsNullOrWhiteSpace(MqttPassword))
-        {
-            message = "请填写 MQTT 密码。";
-            return false;
+            if (string.IsNullOrWhiteSpace(endpoint.Username))
+            {
+                message = $"请填写 MQTT 目标「{endpoint.Name}」的用户名。";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(endpoint.Password))
+            {
+                message = $"请填写 MQTT 目标「{endpoint.Name}」的密码。";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(endpoint.Host))
+            {
+                message = $"请填写 MQTT 目标「{endpoint.Name}」的 Broker 地址。";
+                return false;
+            }
         }
 
         message = string.Empty;
         return true;
+    }
+
+    [RelayCommand]
+    void AddMqttEndpoint()
+    {
+        var endpoint = new MqttEndpointViewModel
+        {
+            Name = $"目标 {MqttEndpoints.Count + 1}"
+        };
+        endpoint.CopyDefaultsFromLine(SelectedLineName);
+        MqttEndpoints.Add(endpoint);
+    }
+
+    [RelayCommand]
+    void RemoveMqttEndpoint(MqttEndpointViewModel? endpoint)
+    {
+        if (endpoint is null || !MqttEndpoints.Contains(endpoint))
+        {
+            return;
+        }
+
+        if (MqttEndpoints.Count <= 1)
+        {
+            StatusMessage = "至少保留一个 MQTT 目标。";
+            return;
+        }
+
+        MqttEndpoints.Remove(endpoint);
+    }
+
+    void ApplyMqttEndpointsToSettings(AppSettings settings)
+    {
+        settings.MqttEndpoints = MqttEndpoints.Select(endpoint => endpoint.ToModel()).ToList();
+        MqttEndpointCatalog.Normalize(settings);
     }
 
     [RelayCommand]
@@ -397,26 +433,20 @@ public partial class SettingsViewModel : ObservableObject
             settings.SubscribeTopic = topics.Count > 0 ? topics[0] : "monitor/+/telemetry";
             settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
             settings.LineName = SelectedLineName;
-            settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 60_000, 200, 60_000);
+            settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 2_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxScanIntervalMs);
+            settings.PublishIntervalMs = ParseInt(PublishIntervalMs, 60_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxPublishIntervalMs);
             settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
             settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
             settings.UseSimulator = UseSimulator;
             settings.StartWithWindows = StartWithWindows;
             settings.AutoStartAcquisition = AutoStartAcquisition;
             settings.EnableHistoryRecording = EnableHistoryRecording;
-            settings.HistoryRetentionDays = ParseInt(HistoryRetentionDays, 14, 1, 365);
+            settings.HistoryRetentionDays = ParseInt(HistoryRetentionDays, 1, 1, 365);
             settings.Plc.Host = PlcHost.Trim();
             settings.Plc.Port = ParseInt(PlcPort, 502, 1, 65535);
             settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
             settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
-            settings.Mqtt.Host = MqttHost.Trim();
-            settings.Mqtt.Port = ParseInt(MqttPort, LineMqttDefaults.Port, 1, 65535);
-            settings.Mqtt.ClientId = MqttClientId.Trim();
-            settings.Mqtt.Username = MqttUsername.Trim();
-            settings.Mqtt.Password = MqttPassword;
-            settings.Mqtt.UseTls = MqttUseTls;
-            settings.Mqtt.Qos = ParseInt(MqttQos, 0, 0, 2);
-            settings.Mqtt.Topic = MqttTopic.Trim();
+            ApplyMqttEndpointsToSettings(settings);
 
             _startup.Apply(settings.StartWithWindows);
             await _store.SaveAsync(settings);
@@ -448,6 +478,7 @@ public partial class SettingsViewModel : ObservableObject
             ? LineCatalog.LineNames[0]
             : settings.LineName;
         ScanIntervalMs = settings.ScanIntervalMs.ToString();
+        PublishIntervalMs = settings.PublishIntervalMs.ToString();
         TemperaturePublishThresholdC = settings.TemperaturePublishThresholdC.ToString("G");
         TemperaturePrecision = settings.TemperaturePrecision.ToString();
         UseSimulator = settings.UseSimulator;
@@ -459,14 +490,19 @@ public partial class SettingsViewModel : ObservableObject
         PlcPort = settings.Plc.Port.ToString();
         Station = settings.Plc.Station.ToString();
         PlcTimeoutMs = settings.Plc.TimeoutMs.ToString();
-        MqttHost = settings.Mqtt.Host;
-        MqttPort = settings.Mqtt.Port.ToString();
-        MqttClientId = settings.Mqtt.ClientId;
-        MqttUsername = settings.Mqtt.Username;
-        MqttPassword = settings.Mqtt.Password;
-        MqttUseTls = settings.Mqtt.UseTls;
-        MqttQos = settings.Mqtt.Qos.ToString();
-        MqttTopic = settings.Mqtt.Topic;
+        MqttEndpointCatalog.Normalize(settings);
+        MqttEndpoints.Clear();
+        foreach (var endpoint in settings.MqttEndpoints)
+        {
+            MqttEndpoints.Add(MqttEndpointViewModel.FromModel(endpoint));
+        }
+
+        if (MqttEndpoints.Count == 0)
+        {
+            var fallback = MqttEndpointViewModel.FromModel(MqttEndpoint.FromSettings(settings.Mqtt, "默认"));
+            MqttEndpoints.Add(fallback);
+        }
+
         StatusMessage = string.Empty;
     }
 

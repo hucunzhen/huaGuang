@@ -31,7 +31,7 @@ public static class LineConfigPaths
             return installPath;
         }
 
-        return null;
+        return BundledLineFileProviderRegistry.Current?.ResolveBundledTemplatePath(lineName);
     }
 
     public static string ReadActiveLineName()
@@ -82,7 +82,11 @@ public static class LineConfigPaths
         if (TryCopyBundledLineFile(lineName, path))
         {
             LineExcelConfigService.EnsureLineFile(path, lineName, ResolveShippedLineExcelPath(lineName));
+            return;
         }
+
+        LineExcelConfigService.Export(LineExcelConfigService.CreateSeedSettings(lineName), path);
+        LineExcelConfigService.EnsureLineFile(path, lineName, ResolveShippedLineExcelPath(lineName));
     }
 
     public static void SaveLine(AppSettings settings)
@@ -135,10 +139,6 @@ public static class LineConfigPaths
             Path.GetFullPath(right),
             StringComparison.OrdinalIgnoreCase);
 
-    static bool TryCopyBundledLineFile(string lineName, string destinationPath)
-    {
-        _ = lineName;
-        _ = destinationPath;
-        return false;
-    }
+    static bool TryCopyBundledLineFile(string lineName, string destinationPath) =>
+        BundledLineFileProviderRegistry.Current?.TryCopyBundledLineFile(lineName, destinationPath) ?? false;
 }

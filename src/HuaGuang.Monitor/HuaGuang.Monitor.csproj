@@ -33,8 +33,8 @@
 		<ApplicationId>com.industrial.monitor</ApplicationId>
 
 		<!-- Versions: DisplayVersion=版本号, ApplicationVersion=修订号(Android versionCode) -->
-		<ApplicationDisplayVersion>1.1.9</ApplicationDisplayVersion>
-		<ApplicationVersion>1</ApplicationVersion>
+		<ApplicationDisplayVersion>1.1.10</ApplicationDisplayVersion>
+		<ApplicationVersion>2</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
 		<WindowsPackageType>None</WindowsPackageType>
@@ -166,6 +166,18 @@
 
 	<ItemGroup>
 		<InternalsVisibleTo Include="HuaGuang.Monitor.Tests" />
+	</ItemGroup>
+
+	<!-- 诊断页版本：显式写入程序集，避免 Windows 解包运行时 AppInfo 元数据陈旧。 -->
+	<ItemGroup>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>HuaGuang.Monitor.ReleaseVersion</_Parameter1>
+			<_Parameter2>$(ApplicationDisplayVersion)</_Parameter2>
+		</AssemblyAttribute>
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>HuaGuang.Monitor.ReleaseRevision</_Parameter1>
+			<_Parameter2>$(ApplicationVersion)</_Parameter2>
+		</AssemblyAttribute>
 	</ItemGroup>
 
 	<ItemGroup>

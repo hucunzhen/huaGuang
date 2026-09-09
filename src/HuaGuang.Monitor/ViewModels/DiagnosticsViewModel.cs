@@ -163,7 +163,7 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
             if (_acquisition.IsRunning)
             {
                 builder.AppendLine(
-                    $"周期 {_acquisition.ActiveScanIntervalMs / 1000.0:G}s · 已完成 {_acquisition.CycleCount} 次 · 待发送 {_acquisition.MqttPendingCount}");
+                    $"采集 {_acquisition.ActiveScanIntervalMs / 1000.0:G}s · 发布 {_acquisition.ActivePublishIntervalMs / 1000.0:G}s · 已完成 {_acquisition.CycleCount} 次 · 待发送 {_acquisition.MqttPendingCount}");
                 if (_acquisition.LastCycleCompletedAt is { } completedAt)
                 {
                     builder.AppendLine($"最近刷新 {completedAt.LocalDateTime:HH:mm:ss} · PLC {_acquisition.LastPlcElapsedMs:0}ms · 等待 {_acquisition.LastWaitElapsedMs:0}ms");

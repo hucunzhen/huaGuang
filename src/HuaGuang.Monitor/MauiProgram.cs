@@ -32,6 +32,7 @@ public static class MauiProgram
 
 #if ANDROID
 		ScanMonotonicClock.ConfigureFactory(static () => new Platforms.Android.AndroidScanMonotonicClock());
+		BundledLineFileProviderRegistry.Configure(new MauiBundledLineFileProvider());
 #endif
 
 		var builder = MauiApp.CreateBuilder();

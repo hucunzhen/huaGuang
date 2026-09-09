@@ -35,6 +35,7 @@ public static class LineCatalog
         settings.Mqtt.Topic = line.MqttTopic;
         LineMqttDefaults.ApplySubscribeTopics(settings);
         settings.Mqtt.ClientId = LineMqttDefaults.ResolveClientIdForLine(line.Name);
+        settings.MqttEndpoints = [MqttEndpoint.FromSettings(settings.Mqtt, "默认")];
         settings.Tags = line.Tags.Select(CloneAndResolve).ToList();
         MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
     }

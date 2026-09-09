@@ -13,6 +13,7 @@ public static class LineExcelConfigService
 
     public const string ConfigSheetName = "配置";
     public const string MqttSheetName = "MQTT报文";
+    public const string MqttEndpointsSheetName = "MQTT目标";
     public const string FieldMappingSheetName = MqttFieldMappingImporter.FieldMappingSheetName;
     public const string TagsSheetName = "点表";
     public const string DisplayCategorySheetName = "显示分组说明";
@@ -47,6 +48,7 @@ public static class LineExcelConfigService
         ("PlcStation", "PLC站号"),
         ("PlcTimeoutMs", "PLC超时毫秒"),
         ("ScanIntervalMs", "扫描周期毫秒"),
+        ("PublishIntervalMs", "发布周期毫秒"),
         ("TemperaturePublishThresholdC", "温度发布阈值"),
         ("TemperaturePrecision", "精度"),
         ("UseSimulator", "使用模拟数据"),
@@ -73,7 +75,10 @@ public static class LineExcelConfigService
         MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, settings.LineName);
 
         using var workbook = new XLWorkbook();
+        MqttEndpointCatalog.PrepareForExport(settings);
+        MqttEndpointCatalog.Normalize(settings);
         WriteConfigSheet(workbook, settings);
+        WriteMqttEndpointsSheet(workbook, settings);
         WriteMqttPayloadSheet(workbook, settings.MqttPayload);
         WriteFieldMappingSheet(workbook, settings.Tags);
         WriteTagsSheet(workbook, settings.Tags);
@@ -157,6 +162,8 @@ public static class LineExcelConfigService
     {
         ValidateWorkbookFormat(workbook);
         ApplyConfigSheet(settings, workbook, expectedLineName);
+        ApplyMqttEndpointsSheet(settings, workbook);
+        MqttEndpointCatalog.Normalize(settings);
         ApplyMqttPayloadSheet(settings, workbook);
         settings.Tags = ReadTagsSheet(workbook);
         PlcTagIdentity.AssignStableIds(settings);
@@ -166,6 +173,49 @@ public static class LineExcelConfigService
     public static void EnsureLineFile(string filePath, string lineName, string? templateFilePath = null)
     {
         EnsureLineFileExists(filePath, lineName, templateFilePath);
+    }
+
+    /// <summary>
+    /// 为已有产线 Excel 补写「MQTT目标」工作表（从「配置」页 MQTT 项读取，不改动其他 sheet）。
+    /// </summary>
+    /// <returns>已写入返回 true；工作表已存在则返回 false。</returns>
+    public static bool PatchMqttEndpointsInFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        using var workbook = new XLWorkbook(filePath);
+        if (workbook.Worksheets.Contains(MqttEndpointsSheetName))
+        {
+            return false;
+        }
+
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var configSheet))
+        {
+            throw new InvalidOperationException($"产线 Excel 缺少工作表「{ConfigSheetName}」。");
+        }
+
+        var map = ReadKeyValueSheet(configSheet);
+        var endpoint = new MqttEndpoint
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "默认",
+            Enabled = true,
+            Host = GetString(map, "MQTT_Broker", LineMqttDefaults.Host),
+            Port = GetInt(map, "MQTT端口", LineMqttDefaults.Port),
+            ClientId = GetString(map, "MQTT_ClientId", string.Empty),
+            Username = GetString(map, "MQTT_用户名", LineMqttDefaults.Username),
+            Password = GetString(map, "MQTT_密码", LineMqttDefaults.Password),
+            UseTls = GetBool(map, "MQTT_TLS", false),
+            Qos = GetInt(map, "MQTT_QoS", 0),
+            Topic = GetString(map, "MQTT发布主题", LineMqttDefaults.XianhePublishTopic)
+        };
+
+        WriteMqttEndpointsSheet(workbook, new AppSettings { MqttEndpoints = [endpoint] });
+        workbook.SaveAs(filePath);
+        return true;
     }
 
     /// <summary>
@@ -691,6 +741,80 @@ public static class LineExcelConfigService
         ["UseTagNameWhenFieldEmpty"] = profile.UseTagNameWhenFieldEmpty ? "是" : "否",
     };
 
+    static void WriteMqttEndpointsSheet(XLWorkbook workbook, AppSettings settings)
+    {
+        var sheet = workbook.Worksheets.Add(MqttEndpointsSheetName);
+        sheet.Cell(1, 1).Value = "名称";
+        sheet.Cell(1, 2).Value = "启用";
+        sheet.Cell(1, 3).Value = "Broker";
+        sheet.Cell(1, 4).Value = "端口";
+        sheet.Cell(1, 5).Value = "ClientId";
+        sheet.Cell(1, 6).Value = "用户名";
+        sheet.Cell(1, 7).Value = "密码";
+        sheet.Cell(1, 8).Value = "TLS";
+        sheet.Cell(1, 9).Value = "QoS";
+        sheet.Cell(1, 10).Value = "主题";
+        sheet.Cell(1, 11).Value = "ID";
+        sheet.Row(1).Style.Font.Bold = true;
+
+        var row = 2;
+        foreach (var endpoint in settings.MqttEndpoints)
+        {
+            sheet.Cell(row, 1).Value = endpoint.Name;
+            sheet.Cell(row, 2).Value = endpoint.Enabled ? "是" : "否";
+            sheet.Cell(row, 3).Value = endpoint.Host;
+            sheet.Cell(row, 4).Value = endpoint.Port;
+            sheet.Cell(row, 5).Value = endpoint.ClientId;
+            sheet.Cell(row, 6).Value = endpoint.Username;
+            sheet.Cell(row, 7).Value = endpoint.Password;
+            sheet.Cell(row, 8).Value = endpoint.UseTls ? "是" : "否";
+            sheet.Cell(row, 9).Value = endpoint.Qos;
+            sheet.Cell(row, 10).Value = endpoint.Topic;
+            sheet.Cell(row, 11).Value = endpoint.Id;
+            row++;
+        }
+
+        sheet.Columns(1, 11).AdjustToContents();
+    }
+
+    static void ApplyMqttEndpointsSheet(AppSettings settings, XLWorkbook workbook)
+    {
+        if (!workbook.Worksheets.TryGetWorksheet(MqttEndpointsSheetName, out var sheet))
+        {
+            return;
+        }
+
+        var endpoints = new List<MqttEndpoint>();
+        foreach (var row in sheet.RowsUsed().Skip(1))
+        {
+            var host = row.Cell(3).GetString().Trim();
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                continue;
+            }
+
+            endpoints.Add(new MqttEndpoint
+            {
+                Id = row.Cell(11).GetString().Trim(),
+                Name = row.Cell(1).GetString().Trim(),
+                Enabled = ParseBoolText(row.Cell(2).GetString(), true),
+                Host = host,
+                Port = int.TryParse(row.Cell(4).GetString(), out var port) ? port : LineMqttDefaults.Port,
+                ClientId = row.Cell(5).GetString().Trim(),
+                Username = row.Cell(6).GetString().Trim(),
+                Password = row.Cell(7).GetString(),
+                UseTls = ParseBoolText(row.Cell(8).GetString(), false),
+                Qos = int.TryParse(row.Cell(9).GetString(), out var qos) ? qos : 0,
+                Topic = row.Cell(10).GetString().Trim()
+            });
+        }
+
+        if (endpoints.Count > 0)
+        {
+            settings.MqttEndpoints = endpoints;
+        }
+    }
+
     static void ApplyMqttPayloadSheet(AppSettings settings, XLWorkbook workbook)
     {
         if (!workbook.Worksheets.TryGetWorksheet(MqttSheetName, out var sheet))
@@ -724,17 +848,18 @@ public static class LineExcelConfigService
         ["PlcStation"] = settings.Plc.Station.ToString(),
         ["PlcTimeoutMs"] = settings.Plc.TimeoutMs.ToString(),
         ["ScanIntervalMs"] = settings.ScanIntervalMs.ToString(),
+        ["PublishIntervalMs"] = settings.PublishIntervalMs.ToString(),
         ["TemperaturePublishThresholdC"] = settings.TemperaturePublishThresholdC.ToString("G"),
         ["TemperaturePrecision"] = settings.TemperaturePrecision.ToString(),
         ["UseSimulator"] = settings.UseSimulator ? "是" : "否",
-        ["MqttHost"] = settings.Mqtt.Host,
-        ["MqttPort"] = settings.Mqtt.Port.ToString(),
-        ["MqttClientId"] = settings.Mqtt.ClientId,
-        ["MqttUsername"] = settings.Mqtt.Username,
-        ["MqttPassword"] = settings.Mqtt.Password,
-        ["MqttUseTls"] = settings.Mqtt.UseTls ? "是" : "否",
-        ["MqttQos"] = settings.Mqtt.Qos.ToString(),
-        ["MqttTopic"] = settings.Mqtt.Topic,
+        ["MqttHost"] = MqttEndpointCatalog.GetPrimary(settings).Host,
+        ["MqttPort"] = MqttEndpointCatalog.GetPrimary(settings).Port.ToString(),
+        ["MqttClientId"] = MqttEndpointCatalog.GetPrimary(settings).ClientId,
+        ["MqttUsername"] = MqttEndpointCatalog.GetPrimary(settings).Username,
+        ["MqttPassword"] = MqttEndpointCatalog.GetPrimary(settings).Password,
+        ["MqttUseTls"] = MqttEndpointCatalog.GetPrimary(settings).UseTls ? "是" : "否",
+        ["MqttQos"] = MqttEndpointCatalog.GetPrimary(settings).Qos.ToString(),
+        ["MqttTopic"] = MqttEndpointCatalog.GetPrimary(settings).Topic,
         ["SubscribeTopics"] = string.Join(';', settings.SubscribeTopics),
         ["OperationMode"] = FormatOperationMode(settings.OperationMode),
         ["StartWithWindows"] = settings.StartWithWindows ? "是" : "否",
@@ -850,6 +975,7 @@ public static class LineExcelConfigService
         settings.Plc.Station = (byte)GetInt(map, "PLC站号", settings.Plc.Station);
         settings.Plc.TimeoutMs = GetInt(map, "PLC超时毫秒", settings.Plc.TimeoutMs);
         settings.ScanIntervalMs = GetInt(map, "扫描周期毫秒", settings.ScanIntervalMs);
+        settings.PublishIntervalMs = GetInt(map, "发布周期毫秒", settings.PublishIntervalMs);
         settings.TemperaturePublishThresholdC = GetDouble(map, "温度发布阈值", settings.TemperaturePublishThresholdC);
         settings.TemperaturePrecision = GetInt(map, "精度", settings.TemperaturePrecision);
         settings.UseSimulator = GetBool(map, "使用模拟数据", settings.UseSimulator);

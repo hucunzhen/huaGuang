@@ -16,10 +16,18 @@ if (args.Contains("--export-mapping-ref"))
 
 if (args.Contains("--inspect"))
 {
+    var inspectDir = outputDir;
+    var inspectIndex = Array.IndexOf(args, "--inspect");
+    if (inspectIndex + 1 < args.Length && !args[inspectIndex + 1].StartsWith('-'))
+    {
+        var candidate = Path.GetFullPath(args[inspectIndex + 1]);
+        inspectDir = Directory.Exists(candidate) ? candidate : Path.GetDirectoryName(candidate)!;
+    }
+
     var files = args.Where(arg => arg.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)).ToArray();
     if (files.Length == 0)
     {
-        files = Directory.GetFiles(outputDir, "*.xlsx");
+        files = Directory.GetFiles(inspectDir, "*.xlsx");
     }
 
     foreach (var file in files)
@@ -31,7 +39,15 @@ if (args.Contains("--inspect"))
 
         var settings = new AppSettings();
         LineExcelConfigService.Apply(settings, file);
-        Console.WriteLine($"=== {file} ===");
+        Console.WriteLine($"=== {Path.GetFileName(file)} ===");
+        Console.WriteLine(
+            $"mqttTargets={settings.MqttEndpoints.Count} tags={settings.Tags.Count} scan={settings.ScanIntervalMs} publish={settings.PublishIntervalMs}");
+        foreach (var endpoint in settings.MqttEndpoints)
+        {
+            Console.WriteLine(
+                $"  [{endpoint.Name}] {endpoint.Host}:{endpoint.Port} clientId={endpoint.ClientId} topic={endpoint.Topic}");
+        }
+
         foreach (var tag in settings.Tags.Where(tag =>
                      tag.Name.Contains("当前工作", StringComparison.Ordinal) ||
                      tag.Name.Contains("胶盘", StringComparison.Ordinal)))
@@ -59,6 +75,45 @@ if (args.Contains("--patch"))
         {
             LineExcelConfigService.ApplyLineFileMaintenance(file);
             Console.WriteLine($"已维护: {file}");
+        }
+        catch (Exception ex)
+        {
+            exitCode = 1;
+            Console.Error.WriteLine($"失败: {file} ({ex.Message})");
+        }
+    }
+
+    return exitCode;
+}
+
+if (args.Contains("--patch-mqtt"))
+{
+    var patchDir = outputDir;
+    var patchIndex = Array.IndexOf(args, "--patch-mqtt");
+    if (patchIndex + 1 < args.Length && !args[patchIndex + 1].StartsWith('-'))
+    {
+        patchDir = Path.GetFullPath(args[patchIndex + 1]);
+    }
+
+    Directory.CreateDirectory(patchDir);
+    var exitCode = 0;
+    foreach (var file in Directory.GetFiles(patchDir, "*.xlsx"))
+    {
+        if (Path.GetFileName(file).StartsWith("~$", StringComparison.Ordinal))
+        {
+            continue;
+        }
+
+        try
+        {
+            if (LineExcelConfigService.PatchMqttEndpointsInFile(file))
+            {
+                Console.WriteLine($"已补写 MQTT目标: {file}");
+            }
+            else
+            {
+                Console.WriteLine($"跳过（已有 MQTT目标）: {file}");
+            }
         }
         catch (Exception ex)
         {

@@ -21,7 +21,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
     CancellationTokenSource? _cts;
     Thread? _loopThread;
     IDisposable? _backgroundLease;
-    bool _initialPublishDone;
+    DateTimeOffset? _lastPublishScheduleTime;
     int _forcePublishSignal;
     string _plcError = string.Empty;
     DateTimeOffset _plcConnectRetryAfter = DateTimeOffset.MinValue;
@@ -54,6 +54,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
     public double LastPublishElapsedMs => _mqttOutbound.LastPublishElapsedMs;
     public double LastWaitElapsedMs { get; private set; }
     public int ActiveScanIntervalMs { get; private set; }
+    public int ActivePublishIntervalMs { get; private set; }
     public DateTimeOffset? LastCycleCompletedAt { get; private set; }
     public long CycleCount { get; private set; }
     public IReadOnlyDictionary<string, TagSnapshot> LastSnapshots => _lastSnapshots;
@@ -78,10 +79,11 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 
             var settings = CurrentSettings;
             _logger.LogInformation(
-                "启动采集 line={LineName} simulator={Simulator} intervalMs={IntervalMs} plc={Plc} mqtt={Mqtt}",
+                "启动采集 line={LineName} simulator={Simulator} scanMs={ScanMs} publishMs={PublishMs} plc={Plc} mqtt={Mqtt}",
                 settings.LineName,
                 settings.UseSimulator,
                 settings.ScanIntervalMs,
+                settings.PublishIntervalMs,
                 LogFormatting.DescribePlc(settings.Plc),
                 LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
 
@@ -162,8 +164,9 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 var cycleStartMs = clock.ElapsedMs;
-                var intervalMs = Math.Clamp(CurrentSettings.ScanIntervalMs, 200, 60_000);
+                var intervalMs = AcquisitionTiming.ResolveScanIntervalMs(CurrentSettings);
                 ActiveScanIntervalMs = intervalMs;
+                ActivePublishIntervalMs = AcquisitionTiming.ResolvePublishIntervalMs(CurrentSettings);
                 var targetNextMs = cycleStartMs + intervalMs;
 
                 RunCycleAsync(CurrentSettings, cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
@@ -306,30 +309,55 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             {
                 if (ShouldPublish(settings, enabledTags, values))
                 {
-                    var payload = MqttPayloadMapper.BuildPayload(settings, values, allGood);
-                    var topic = settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase);
-                    var tagsForPublish = enabledTags;
-                    var valuesForPublish = values;
-                    _mqttOutbound.Enqueue(new MqttOutboundItem
+                    MqttEndpointCatalog.Normalize(settings);
+                    var endpoints = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings);
+                    if (endpoints.Count == 0)
                     {
-                        Topic = topic,
-                        Payload = payload,
-                        Qos = settings.Mqtt.Qos,
-                        OnPublished = () => OnMqttPublished(tagsForPublish, valuesForPublish, allGood)
-                    });
-                    _logger.LogDebug(
-                        "MQTT 入队 topic={Topic} bytes={Bytes} tagCount={TagCount} payload={Payload}",
-                        topic,
-                        payload.Length,
-                        values.Count,
-                        LogFormatting.Truncate(payload));
-                    LastPublishNote = MqttPendingCount > 0
-                        ? $"待发送 {MqttPendingCount} 条"
-                        : string.Empty;
+                        LastPublishNote = "未发布：没有已启用的 MQTT 目标";
+                    }
+                    else
+                    {
+                        var payload = MqttPayloadMapper.BuildPayload(settings, values, allGood);
+                        var targets = endpoints.Select(endpoint => new MqttPublishTarget
+                        {
+                            EndpointId = endpoint.Id,
+                            Topic = MqttEndpointCatalog.ResolveTopic(endpoint, settings),
+                            Qos = endpoint.Qos
+                        }).ToList();
+                        var tagsForPublish = enabledTags;
+                        var valuesForPublish = values;
+                        lock (_publishStateGate)
+                        {
+                            _lastPublishScheduleTime = DateTimeOffset.Now;
+                        }
+
+                        for (var i = 0; i < targets.Count; i++)
+                        {
+                            var target = targets[i];
+                            _mqttOutbound.Enqueue(new MqttOutboundItem
+                            {
+                                Payload = payload,
+                                Targets = [target],
+                                OnPublished = i == targets.Count - 1
+                                    ? () => OnMqttPublished(tagsForPublish, valuesForPublish, allGood)
+                                    : null
+                            });
+                        }
+
+                        _logger.LogDebug(
+                            "MQTT 入队 targets={TargetCount} bytes={Bytes} tagCount={TagCount} payload={Payload}",
+                            targets.Count,
+                            payload.Length,
+                            values.Count,
+                            LogFormatting.Truncate(payload));
+                        LastPublishNote = MqttPendingCount > 0
+                            ? $"待发送 {MqttPendingCount} 条"
+                            : string.Empty;
+                    }
                 }
                 else
                 {
-                    LastPublishNote = BuildSkipNote(settings.TemperaturePublishThresholdC);
+                    LastPublishNote = BuildSkipNote(settings);
                     _logger.LogDebug("MQTT 跳过发布 reason={Reason}", LastPublishNote);
                 }
             }
@@ -430,7 +458,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
     {
         lock (_publishStateGate)
         {
-            _initialPublishDone = false;
+            _lastPublishScheduleTime = null;
             _lastPublishedTemperatures.Clear();
         }
 
@@ -453,23 +481,23 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         }
 
         var threshold = settings.TemperaturePublishThresholdC;
-        if (threshold <= 0)
-        {
-            return true;
-        }
+        var publishIntervalMs = AcquisitionTiming.ResolvePublishIntervalMs(settings);
 
         lock (_publishStateGate)
         {
-            if (!_initialPublishDone)
+            if (!_lastPublishScheduleTime.HasValue)
             {
                 return true;
             }
 
-            var intervalMs = Math.Clamp(settings.ScanIntervalMs, 200, 60_000);
-            if (LastPublishTime.HasValue &&
-                (DateTimeOffset.Now - LastPublishTime.Value).TotalMilliseconds >= intervalMs)
+            if (IsPublishIntervalElapsed(publishIntervalMs))
             {
                 return true;
+            }
+
+            if (threshold <= 0)
+            {
+                return false;
             }
 
             foreach (var tag in enabledTags.Where(t => t.IsTemperature && !t.IsManual))
@@ -494,9 +522,12 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         return false;
     }
 
+    bool IsPublishIntervalElapsed(int publishIntervalMs) =>
+        !_lastPublishScheduleTime.HasValue ||
+        (DateTimeOffset.Now - _lastPublishScheduleTime.Value).TotalMilliseconds >= publishIntervalMs;
+
     void UpdatePublishedTemperatures(IReadOnlyList<PlcTag> enabledTags, IReadOnlyDictionary<string, object?> values)
     {
-        _initialPublishDone = true;
         foreach (var tag in enabledTags.Where(t => t.IsTemperature && !t.IsManual))
         {
             if (values.TryGetValue(tag.Name, out var value) && ValueFormatting.TryAsDouble(value, out var current))
@@ -506,8 +537,16 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         }
     }
 
-    static string BuildSkipNote(double threshold) =>
-        $"未发布：温度变化未达 {threshold:G}℃ 阈值";
+    static string BuildSkipNote(AppSettings settings)
+    {
+        var publishSeconds = AcquisitionTiming.ResolvePublishIntervalMs(settings) / 1000.0;
+        if (settings.TemperaturePublishThresholdC <= 0)
+        {
+            return $"未发布：距上次发布未满 {publishSeconds:G} 秒";
+        }
+
+        return $"未发布：温度变化未达 {settings.TemperaturePublishThresholdC:G}℃ 且未满 {publishSeconds:G} 秒发布周期";
+    }
 
     static object Simulate(PlcTag tag, int temperaturePrecision)
     {

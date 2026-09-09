@@ -25,6 +25,8 @@ public static class MonitorCoreTests
         Run("产线点位数量", TestLineCatalog),
         Run("设置读写", TestSettingsRoundTrip),
         Run("Excel 配置读写", TestLineExcelRoundTrip),
+        Run("Excel 缺发布周期", TestLegacyExcelMissingPublishInterval),
+        Run("Excel 多 MQTT 目标", TestMqttEndpointsExcelRoundTrip),
         Run("Excel 维护保留点表", TestLineFileMaintenancePreservesCustomTags),
         Run("Excel 字段映射补全", TestPatchEmptyMqttFieldMappings),
         Run("Excel 加载不改写", TestLineExcelLoadPreservesContent),
@@ -560,6 +562,8 @@ public static class MonitorCoreTests
             var original = new AppSettings();
             LineCatalog.Apply(original, LineCatalog.Xianhe.Name);
             original.Plc.Host = "192.168.6.99";
+            original.ScanIntervalMs = 5000;
+            original.PublishIntervalMs = 120_000;
             original.MqttPayload.TagsPath = "data.tags";
             original.Tags.First(tag => tag.Name == "车速").MqttField = "speed";
             original.Tags.First(tag => tag.Name == "运行状态").DisplayCategory = TagDisplayCategory.Switch;
@@ -571,6 +575,8 @@ public static class MonitorCoreTests
             LineExcelConfigService.Apply(loaded, tempPath);
             AssertTrue(loaded.LineName == original.LineName);
             AssertTrue(loaded.Plc.Host == "192.168.6.99");
+            AssertTrue(loaded.ScanIntervalMs == 5000);
+            AssertTrue(loaded.PublishIntervalMs == 120_000);
             AssertTrue(loaded.MqttPayload.TagsPath == "data.tags");
             AssertTrue(loaded.Tags.Count == original.Tags.Count);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").MqttField == "speed");
@@ -581,6 +587,84 @@ public static class MonitorCoreTests
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
             AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
             AssertTrue(loaded.SubscribeTopics.Count == 2);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestLegacyExcelMissingPublishInterval()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-pub-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var original = LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name);
+            original.ScanIntervalMs = 2000;
+            original.PublishIntervalMs = 60_000;
+            LineExcelConfigService.Export(original, tempPath);
+
+            using (var workbook = new XLWorkbook(tempPath))
+            {
+                var configSheet = workbook.Worksheet(LineExcelConfigService.ConfigSheetName);
+                foreach (var row in configSheet.RowsUsed().ToList())
+                {
+                    if (row.Cell(1).GetString().Trim() == "发布周期毫秒")
+                    {
+                        row.Delete();
+                        break;
+                    }
+                }
+
+                workbook.SaveAs(tempPath);
+            }
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            AssertTrue(loaded.ScanIntervalMs == 2000);
+            AssertTrue(loaded.PublishIntervalMs == 60_000);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestMqttEndpointsExcelRoundTrip()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-mqtt-endpoints-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var original = LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name);
+            original.MqttEndpoints =
+            [
+                MqttEndpoint.FromSettings(original.Mqtt, "平台 A"),
+                new MqttEndpoint
+                {
+                    Name = "平台 B",
+                    Host = "10.0.0.8",
+                    Port = 1883,
+                    ClientId = "BACKUP",
+                    Username = "user2",
+                    Password = "pass2",
+                    Topic = "/backup/topic"
+                }
+            ];
+            LineExcelConfigService.Export(original, tempPath);
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            AssertTrue(loaded.MqttEndpoints.Count == 2);
+            AssertTrue(loaded.MqttEndpoints[1].Host == "10.0.0.8");
+            AssertTrue(loaded.MqttEndpoints[1].ClientId == "BACKUP");
+            MqttEndpointCatalog.Normalize(loaded);
+            AssertTrue(loaded.Mqtt.Host == loaded.MqttEndpoints[0].Host);
         }
         finally
         {

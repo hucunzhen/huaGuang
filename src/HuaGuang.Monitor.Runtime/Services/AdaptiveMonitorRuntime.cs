@@ -40,6 +40,7 @@ public sealed class AdaptiveMonitorAcquisition : IMonitorAcquisition
     public double LastPublishElapsedMs => Active.LastPublishElapsedMs;
     public double LastWaitElapsedMs => Active.LastWaitElapsedMs;
     public int ActiveScanIntervalMs => Active.ActiveScanIntervalMs;
+    public int ActivePublishIntervalMs => Active.ActivePublishIntervalMs;
     public DateTimeOffset? LastCycleCompletedAt => Active.LastCycleCompletedAt;
     public long CycleCount => Active.CycleCount;
     public IReadOnlyDictionary<string, TagSnapshot> LastSnapshots => Active.LastSnapshots;

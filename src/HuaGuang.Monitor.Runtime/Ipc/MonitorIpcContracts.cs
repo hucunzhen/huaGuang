@@ -50,6 +50,7 @@ public sealed class MonitorRuntimeState
     public double LastPlcElapsedMs { get; set; }
     public double LastWaitElapsedMs { get; set; }
     public int ActiveScanIntervalMs { get; set; }
+    public int ActivePublishIntervalMs { get; set; }
     public long CycleCount { get; set; }
     public DateTimeOffset? LastCycleCompletedAt { get; set; }
     public DateTimeOffset? LastPublishTime { get; set; }

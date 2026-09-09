@@ -212,6 +212,7 @@ public sealed class MonitorIpcServer : BackgroundService
         state.LastPlcElapsedMs = acquisition.LastPlcElapsedMs;
         state.LastWaitElapsedMs = acquisition.LastWaitElapsedMs;
         state.ActiveScanIntervalMs = acquisition.ActiveScanIntervalMs;
+        state.ActivePublishIntervalMs = acquisition.ActivePublishIntervalMs;
         state.CycleCount = acquisition.CycleCount;
         state.LastCycleCompletedAt = acquisition.LastCycleCompletedAt;
         state.LastPublishTime = acquisition.LastPublishTime;

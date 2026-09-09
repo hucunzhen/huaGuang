@@ -13,24 +13,44 @@ public sealed class ResizableHistoryColumnHeader : ContentView
     public static readonly BindableProperty HeaderTextProperty =
         BindableProperty.Create(nameof(HeaderText), typeof(string), typeof(ResizableHistoryColumnHeader), string.Empty,
             propertyChanged: (bindable, _, value) =>
-                ((ResizableHistoryColumnHeader)bindable)._label.Text = (string?)value ?? string.Empty);
+            {
+                if (bindable is ResizableHistoryColumnHeader header)
+                {
+                    header.UpdateHeaderText((string?)value ?? string.Empty);
+                }
+            });
 
     public static readonly BindableProperty ColumnWidthProperty =
         BindableProperty.Create(nameof(ColumnWidth), typeof(double), typeof(ResizableHistoryColumnHeader),
             HuaGuang.Monitor.Services.HistoryTableFormatting.TagColumnWidth,
             BindingMode.TwoWay,
             propertyChanged: (bindable, _, value) =>
-                ((ResizableHistoryColumnHeader)bindable).ApplyWidth((double)value));
+            {
+                if (bindable is ResizableHistoryColumnHeader header)
+                {
+                    header.ApplyWidth((double)value);
+                }
+            });
 
     public static readonly BindableProperty HeaderFontSizeProperty =
         BindableProperty.Create(nameof(HeaderFontSize), typeof(double), typeof(ResizableHistoryColumnHeader), 12d,
             propertyChanged: (bindable, _, value) =>
-                ((ResizableHistoryColumnHeader)bindable)._label.FontSize = (double)value);
+            {
+                if (bindable is ResizableHistoryColumnHeader header)
+                {
+                    header.ApplyFontSize((double)value);
+                }
+            });
 
     public static readonly BindableProperty UseMonospaceFontProperty =
         BindableProperty.Create(nameof(UseMonospaceFont), typeof(bool), typeof(ResizableHistoryColumnHeader), false,
             propertyChanged: (bindable, _, value) =>
-                ((ResizableHistoryColumnHeader)bindable).ApplyFont((bool)value));
+            {
+                if (bindable is ResizableHistoryColumnHeader header)
+                {
+                    header.ApplyFont((bool)value);
+                }
+            });
 
     public string HeaderText
     {
@@ -89,13 +109,20 @@ public sealed class ResizableHistoryColumnHeader : ContentView
         _root.Add(grip, 1, 0);
 
         Content = _root;
+        ApplyWidth(ColumnWidth);
+        ApplyFontSize(HeaderFontSize);
+        ApplyFont(UseMonospaceFont);
     }
+
+    void UpdateHeaderText(string text) => _label.Text = text;
 
     void ApplyWidth(double width)
     {
         WidthRequest = width;
         _root.WidthRequest = width;
     }
+
+    void ApplyFontSize(double fontSize) => _label.FontSize = fontSize;
 
     void ApplyFont(bool monospace) =>
         _label.FontFamily = monospace ? "Consolas" : null;

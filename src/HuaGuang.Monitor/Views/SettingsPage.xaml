@@ -51,13 +51,17 @@
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="设备编号" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding DeviceId}" Placeholder="LINE-01" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="扫描周期（毫秒，60000 = 60 秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="PLC 采集周期（毫秒，2000 = 2 秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding ScanIntervalMs}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="两次 PLC 扫描开始之间的间隔；已扣除本轮读取与通信耗时。MQTT 是否每次上报仍受下方温度阈值影响。"
+            <Label Text="两次 PLC 读取开始之间的间隔；仅控制本地采集与界面刷新，与 MQTT 发布无关。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="MQTT 发布周期（毫秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Entry Text="{Binding PublishIntervalMs}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Label Text="两次 MQTT 上报之间的最短间隔；可与采集周期不同（例如 5 秒采 PLC、60 秒发 MQTT）。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="温度发布阈值（℃）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
             <Entry Text="{Binding TemperaturePublishThresholdC}" Keyboard="Numeric" Placeholder="0" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="0 = 每次扫描都发布；大于 0 时，温度变化达到阈值才发布，但最长不超过一个扫描周期。"
+            <Label Text="0 = 仅按发布周期上报；大于 0 时，温度变化达到阈值也会提前触发发布。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
             <Label Text="精度（小数位）" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding TemperaturePrecision}" Keyboard="Numeric" Placeholder="2" />
@@ -81,7 +85,7 @@
                 <Label Text="记录采集/订阅数据到本地 SQLite" TextColor="White" VerticalOptions="Center" LineBreakMode="WordWrap" />
             </HorizontalStackLayout>
             <Label Text="保留天数（1–365）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding HistoryRetentionDays}" Keyboard="Numeric" Placeholder="14" />
+            <Entry Text="{Binding HistoryRetentionDays}" Keyboard="Numeric" Placeholder="1" />
             <Label Text="超出保留期的历史记录会在启动时自动清理。" TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
 
             <Label Text="PLC · 信捷 XD5E-60T10" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" IsVisible="{Binding IsAcquisitionSettings}" />
@@ -99,24 +103,55 @@
                    TextColor="#8AA0B5" FontSize="11" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
 
             <Label Text="MQTT" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
-            <Label Text="Broker 地址" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttHost}" Placeholder="127.0.0.1" />
-            <Label Text="端口（默认 1888）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttPort}" Keyboard="Numeric" />
-            <Label Text="ClientId（先河 XHRRJFHJ，华迪 HDRRJFHJ）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttClientId}" Placeholder="XHRRJFHJ" />
-            <Label Text="用户名" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttUsername}" />
-            <Label Text="密码" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttPassword}" IsPassword="True" />
-            <Label Text="发布主题，可用 {deviceId}（设备编号来自上方「设备编号」，不必写入报文 JSON）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Entry Text="{Binding MqttTopic}" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="QoS（0 / 1 / 2）" TextColor="#8AA0B5" FontSize="12" />
-            <Entry Text="{Binding MqttQos}" Keyboard="Numeric" />
-            <HorizontalStackLayout Spacing="10">
-                <CheckBox IsChecked="{Binding MqttUseTls}" Color="#2EC4B6" VerticalOptions="Center" />
-                <Label Text="启用 TLS" TextColor="White" VerticalOptions="Center" />
-            </HorizontalStackLayout>
+            <Label Text="可配置多个 Broker/账号，采集模式下会同时向所有已启用目标发送。订阅模式使用第一个已启用目标连接。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            <Button Text="添加 MQTT 目标"
+                    Command="{Binding AddMqttEndpointCommand}"
+                    BackgroundColor="#1A2940"
+                    TextColor="#2EC4B6"
+                    Padding="12,8" />
+            <CollectionView ItemsSource="{Binding MqttEndpoints}">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MqttEndpointViewModel">
+                        <Border Stroke="#243447" StrokeThickness="1" BackgroundColor="#111C2B" Padding="12" Margin="0,0,0,10">
+                            <VerticalStackLayout Spacing="8">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <Entry Text="{Binding Name}" Placeholder="目标名称" TextColor="White" />
+                                    <Button Grid.Column="1"
+                                            Text="删除"
+                                            Command="{Binding Source={RelativeSource AncestorType={x:Type vm:SettingsViewModel}}, Path=RemoveMqttEndpointCommand}"
+                                            CommandParameter="{Binding .}"
+                                            BackgroundColor="#3A1F1F"
+                                            TextColor="#FF6B6B"
+                                            Padding="12,6" />
+                                </Grid>
+                                <HorizontalStackLayout Spacing="10">
+                                    <CheckBox IsChecked="{Binding Enabled}" Color="#2EC4B6" VerticalOptions="Center" />
+                                    <Label Text="启用" TextColor="White" VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                                <Label Text="Broker 地址" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Host}" Placeholder="127.0.0.1" />
+                                <Label Text="端口（默认 1888）" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Port}" Keyboard="Numeric" />
+                                <Label Text="ClientId" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding ClientId}" Placeholder="XHRRJFHJ" />
+                                <Label Text="用户名" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Username}" />
+                                <Label Text="密码" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Password}" IsPassword="True" />
+                                <Label Text="发布主题，可用 {deviceId}" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Topic}" />
+                                <Label Text="QoS（0 / 1 / 2）" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Qos}" Keyboard="Numeric" />
+                                <HorizontalStackLayout Spacing="10">
+                                    <CheckBox IsChecked="{Binding UseTls}" Color="#2EC4B6" VerticalOptions="Center" />
+                                    <Label Text="启用 TLS" TextColor="White" VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
 
             <Button Text="保存设置" Command="{Binding SaveCommand}" />
             <Label Text="{Binding StatusMessage}" TextColor="#2EC4B6" FontSize="13" />

@@ -1114,7 +1114,13 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         MqttConnected = _acquisition.MqttConnected;
         ToggleText = IsRunning ? "停止采集" : "启动采集";
         DeviceId = settings.DeviceId;
-        TopicPreview = $"发布主题：{settings.Mqtt.Topic.Replace("{deviceId}", settings.DeviceId, StringComparison.OrdinalIgnoreCase)}";
+        MqttEndpointCatalog.Normalize(settings);
+        var publishTopics = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings)
+            .Select(endpoint => MqttEndpointCatalog.ResolveTopic(endpoint, settings))
+            .ToList();
+        TopicPreview = publishTopics.Count == 0
+            ? "发布主题：未配置"
+            : $"发布主题：{string.Join("，", publishTopics)}";
         ModeText = BuildModeText();
         LastError = preservedError ?? _acquisition.LastError;
         EmptyTagsHint = "还没有启用的点位，请到“点位”页添加。";

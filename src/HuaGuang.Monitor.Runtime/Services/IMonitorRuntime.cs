@@ -17,6 +17,7 @@ public interface IMonitorAcquisition
     double LastPublishElapsedMs { get; }
     double LastWaitElapsedMs { get; }
     int ActiveScanIntervalMs { get; }
+    int ActivePublishIntervalMs { get; }
     DateTimeOffset? LastCycleCompletedAt { get; }
     long CycleCount { get; }
     IReadOnlyDictionary<string, TagSnapshot> LastSnapshots { get; }

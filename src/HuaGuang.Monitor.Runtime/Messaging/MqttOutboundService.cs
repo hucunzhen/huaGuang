@@ -14,29 +14,39 @@ public sealed class MqttOutboundService : IDisposable
     const int MaxPending = 128;
 
     readonly SettingsStore _settingsStore;
-    readonly IMqttPublisher _mqtt;
     readonly ILogger<MqttOutboundService> _logger;
+    readonly ILoggerFactory _loggerFactory;
     readonly object _queueGate = new();
+    readonly object _publisherGate = new();
+    readonly Dictionary<string, MqttPublisher> _publishers = new(StringComparer.Ordinal);
+    readonly Dictionary<string, DateTimeOffset> _connectRetryAfter = new(StringComparer.Ordinal);
     readonly Queue<MqttOutboundItem> _queue = new();
     readonly AutoResetEvent _signal = new(false);
 
     CancellationTokenSource? _cts;
     Thread? _workerThread;
-    DateTimeOffset _connectRetryAfter = DateTimeOffset.MinValue;
     bool _isRunning;
 
     public MqttOutboundService(
         SettingsStore settingsStore,
-        IMqttPublisher mqtt,
+        ILoggerFactory loggerFactory,
         ILogger<MqttOutboundService> logger)
     {
         _settingsStore = settingsStore;
-        _mqtt = mqtt;
+        _loggerFactory = loggerFactory;
         _logger = logger;
-        _mqtt.ConnectionChanged += (_, _) => StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    public bool IsConnected => _mqtt.IsConnected;
+    public bool IsConnected
+    {
+        get
+        {
+            lock (_publisherGate)
+            {
+                return _publishers.Values.Any(publisher => publisher.IsConnected);
+            }
+        }
+    }
 
     public int PendingCount
     {
@@ -65,7 +75,7 @@ public sealed class MqttOutboundService : IDisposable
 
         _cts = new CancellationTokenSource();
         _isRunning = true;
-        _connectRetryAfter = DateTimeOffset.MinValue;
+        _connectRetryAfter.Clear();
         _workerThread = new Thread(() => RunWorker(_cts.Token))
         {
             IsBackground = true,
@@ -104,13 +114,18 @@ public sealed class MqttOutboundService : IDisposable
             _queue.Clear();
         }
 
-        await _mqtt.DisconnectAsync().ConfigureAwait(false);
+        await DisconnectAllAsync().ConfigureAwait(false);
         StateChanged?.Invoke(this, EventArgs.Empty);
         _logger.LogInformation("MQTT 发送线程已停止");
     }
 
     public void Enqueue(MqttOutboundItem item)
     {
+        if (item.Targets.Count == 0)
+        {
+            return;
+        }
+
         lock (_queueGate)
         {
             _queue.Enqueue(item);
@@ -138,12 +153,22 @@ public sealed class MqttOutboundService : IDisposable
                 try
                 {
                     var settings = _settingsStore.Current;
-                    EnsureConnected(settings, cancellationToken);
+                    MqttEndpointCatalog.Normalize(settings);
+                    PrunePublishers(settings.MqttEndpoints.Select(endpoint => endpoint.Id));
+
                     var started = Stopwatch.GetTimestamp();
-                    _mqtt.PublishAsync(item.Topic, item.Payload, item.Qos, cancellationToken)
-                        .ConfigureAwait(false)
-                        .GetAwaiter()
-                        .GetResult();
+                    foreach (var target in item.Targets)
+                    {
+                        var endpoint = settings.MqttEndpoints.FirstOrDefault(e => e.Id == target.EndpointId)
+                                       ?? throw new InvalidOperationException($"找不到 MQTT 目标 {target.EndpointId}。");
+
+                        EnsureConnected(endpoint, settings.LineName, cancellationToken);
+                        var publisher = GetPublisher(endpoint.Id);
+                        publisher.PublishAsync(target.Topic, item.Payload, target.Qos, cancellationToken)
+                            .ConfigureAwait(false)
+                            .GetAwaiter()
+                            .GetResult();
+                    }
 
                     LastPublishElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                     LastPayload = TruncatePayload(item.Payload);
@@ -152,8 +177,8 @@ public sealed class MqttOutboundService : IDisposable
                     item.OnPublished?.Invoke();
                     StateChanged?.Invoke(this, EventArgs.Empty);
                     _logger.LogDebug(
-                        "MQTT 发布成功 topic={Topic} elapsedMs={ElapsedMs:0} bytes={Bytes}",
-                        item.Topic,
+                        "MQTT 发布成功 targets={TargetCount} elapsedMs={ElapsedMs:0} bytes={Bytes}",
+                        item.Targets.Count,
                         LastPublishElapsedMs,
                         item.Payload.Length);
                 }
@@ -165,11 +190,10 @@ public sealed class MqttOutboundService : IDisposable
                 catch (Exception ex)
                 {
                     LastError = $"MQTT: {ex.Message}";
-                    _connectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(30);
                     _logger.LogWarning(
                         ex,
-                        "MQTT 发布失败 topic={Topic} pending={Pending}",
-                        item.Topic,
+                        "MQTT 发布失败 targets={TargetCount} pending={Pending}",
+                        item.Targets.Count,
                         PendingCount);
                     RequeueFront(item);
                     StateChanged?.Invoke(this, EventArgs.Empty);
@@ -212,33 +236,101 @@ public sealed class MqttOutboundService : IDisposable
         }
     }
 
-    void EnsureConnected(AppSettings settings, CancellationToken cancellationToken)
+    MqttPublisher GetPublisher(string endpointId)
     {
-        if (_mqtt.IsConnected)
+        lock (_publisherGate)
         {
-            _connectRetryAfter = DateTimeOffset.MinValue;
+            if (!_publishers.TryGetValue(endpointId, out var publisher))
+            {
+                publisher = new MqttPublisher(_loggerFactory.CreateLogger<MqttPublisher>());
+                publisher.ConnectionChanged += (_, _) => StateChanged?.Invoke(this, EventArgs.Empty);
+                _publishers[endpointId] = publisher;
+            }
+
+            return publisher;
+        }
+    }
+
+    void PrunePublishers(IEnumerable<string> activeEndpointIds)
+    {
+        var active = activeEndpointIds.ToHashSet(StringComparer.Ordinal);
+        List<MqttPublisher>? removed = null;
+        lock (_publisherGate)
+        {
+            foreach (var id in _publishers.Keys.Where(id => !active.Contains(id)).ToList())
+            {
+                if (_publishers.Remove(id, out var publisher))
+                {
+                    removed ??= [];
+                    removed.Add(publisher);
+                }
+
+                _connectRetryAfter.Remove(id);
+            }
+        }
+
+        if (removed is null)
+        {
             return;
         }
 
-        if (DateTimeOffset.UtcNow < _connectRetryAfter)
+        foreach (var publisher in removed)
         {
-            throw new InvalidOperationException("MQTT 暂未连接，稍后重试。");
+            publisher.DisconnectAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            publisher.DisposeAsync().AsTask().ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+    }
+
+    void EnsureConnected(MqttEndpoint endpoint, string lineName, CancellationToken cancellationToken)
+    {
+        var publisher = GetPublisher(endpoint.Id);
+        if (publisher.IsConnected)
+        {
+            _connectRetryAfter.Remove(endpoint.Id);
+            return;
+        }
+
+        if (_connectRetryAfter.TryGetValue(endpoint.Id, out var retryAfter)
+            && DateTimeOffset.UtcNow < retryAfter)
+        {
+            throw new InvalidOperationException($"MQTT 目标「{endpoint.Name}」暂未连接，稍后重试。");
         }
 
         try
         {
-            _mqtt.ConnectAsync(settings.Mqtt, settings.LineName, cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
-            _connectRetryAfter = DateTimeOffset.MinValue;
+            publisher.ConnectAsync(endpoint.ToSettings(), lineName, cancellationToken)
+                .ConfigureAwait(false)
+                .GetAwaiter()
+                .GetResult();
+            _connectRetryAfter.Remove(endpoint.Id);
             _logger.LogInformation(
-                "MQTT 已连接 line={LineName} {Mqtt}",
-                settings.LineName,
-                LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
+                "MQTT 已连接 target={TargetName} line={LineName} {Mqtt}",
+                endpoint.Name,
+                lineName,
+                LogFormatting.DescribeMqtt(endpoint.ToSettings(), lineName));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _connectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(30);
-            _logger.LogWarning(ex, "MQTT 连接失败 line={LineName}", settings.LineName);
+            _connectRetryAfter[endpoint.Id] = DateTimeOffset.UtcNow.AddSeconds(30);
+            _logger.LogWarning(ex, "MQTT 连接失败 target={TargetName} line={LineName}", endpoint.Name, lineName);
             throw;
+        }
+    }
+
+    async Task DisconnectAllAsync()
+    {
+        List<MqttPublisher> publishers;
+        lock (_publisherGate)
+        {
+            publishers = _publishers.Values.ToList();
+            _publishers.Clear();
+            _connectRetryAfter.Clear();
+        }
+
+        foreach (var publisher in publishers)
+        {
+            await publisher.DisconnectAsync().ConfigureAwait(false);
+            await publisher.DisposeAsync().ConfigureAwait(false);
         }
     }
 

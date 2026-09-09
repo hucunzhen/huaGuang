@@ -7,9 +7,11 @@ public sealed class AppSettings
     public string DeviceId { get; set; } = "先河热熔胶复合机";
     public string LineName { get; set; } = "先河热熔胶复合机";
     public int AddressCatalogVersion { get; set; }
-    public int ScanIntervalMs { get; set; } = 60_000;
+    public int ScanIntervalMs { get; set; } = 2_000;
+    /// <summary>MQTT 数据发布最小间隔（毫秒），与 PLC 采集周期独立。</summary>
+    public int PublishIntervalMs { get; set; } = 60_000;
     public bool UseSimulator { get; set; } = true;
-    /// <summary>0 = 每次扫描都发布；大于 0 时，任一温度点位变化达到该值（℃）才发布 MQTT。</summary>
+    /// <summary>0 = 仅按发布周期上报；大于 0 时，任一温度点位变化达到该值（℃）也会触发 MQTT 发布。</summary>
     public double TemperaturePublishThresholdC { get; set; }
     /// <summary>全局默认显示与 MQTT 小数位数（0–4），适用于温度及各类模拟量；点位未单独设置时使用。</summary>
     public const int DefaultTemperaturePrecision = 2;
@@ -31,12 +33,14 @@ public sealed class AppSettings
     public string SubscribeTopic { get; set; } = LineMqttDefaults.XianhePublishTopic;
     public PlcSettings Plc { get; set; } = new();
     public MqttSettings Mqtt { get; set; } = new();
+    /// <summary>多个 MQTT 发布目标；采集模式下会同时向所有已启用目标发送。</summary>
+    public List<MqttEndpoint> MqttEndpoints { get; set; } = [];
     public MqttPayloadProfile MqttPayload { get; set; } = new();
     public List<PlcTag> Tags { get; set; } = [];
     /// <summary>是否记录采集/订阅数据到本地 SQLite。</summary>
     public bool EnableHistoryRecording { get; set; } = true;
     /// <summary>历史数据保留天数；超出后自动清理。</summary>
-    public int HistoryRetentionDays { get; set; } = 14;
+    public int HistoryRetentionDays { get; set; } = 1;
     /// <summary>一次性迁移标记；避免每次启动重复覆盖用户配置。</summary>
     public int SettingsMigrationVersion { get; set; }
 }

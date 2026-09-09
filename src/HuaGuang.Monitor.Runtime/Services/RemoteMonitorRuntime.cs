@@ -37,6 +37,7 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
     public double LastPublishElapsedMs => 0;
     public double LastWaitElapsedMs => _state?.LastWaitElapsedMs ?? 0;
     public int ActiveScanIntervalMs => _state?.ActiveScanIntervalMs ?? 0;
+    public int ActivePublishIntervalMs => _state?.ActivePublishIntervalMs ?? 0;
     public DateTimeOffset? LastCycleCompletedAt => _state?.LastCycleCompletedAt;
     public long CycleCount => _state?.CycleCount ?? 0;
     public IReadOnlyDictionary<string, TagSnapshot> LastSnapshots => _snapshots;
