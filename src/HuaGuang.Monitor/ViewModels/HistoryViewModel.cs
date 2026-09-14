@@ -13,8 +13,8 @@ public partial class HistoryViewModel : ObservableObject
     readonly SettingsStore _settings;
 
     bool _suppressFilterRefresh;
+    bool _hasActiveQuery;
     int _totalCount;
-    int _currentOffset;
     DateTimeOffset _queryFrom;
     DateTimeOffset _queryTo;
     string? _queryDeviceFilter;
@@ -51,9 +51,13 @@ public partial class HistoryViewModel : ObservableObject
     [ObservableProperty] string summaryText = "点「刷新」加载历史数据。";
     [ObservableProperty] string statusMessage = string.Empty;
     [ObservableProperty] bool isBusy;
-    [ObservableProperty] bool isLoadingMore;
-    [ObservableProperty] bool canLoadMore;
     [ObservableProperty] bool showEmpty;
+    [ObservableProperty] int currentPage = 1;
+    [ObservableProperty] int totalPages = 1;
+    [ObservableProperty] string pageNumberInput = "1";
+    [ObservableProperty] bool canGoToPreviousPage;
+    [ObservableProperty] bool canGoToNextPage;
+    [ObservableProperty] bool showPagination;
     [ObservableProperty] bool useCustomStart = true;
     [ObservableProperty] bool useCustomEnd = true;
     [ObservableProperty] DateTime customStartDate;
@@ -102,8 +106,8 @@ public partial class HistoryViewModel : ObservableObject
             _queryFrom = from;
             _queryTo = to;
             _queryDeviceFilter = ResolveDeviceFilter(SelectedDevice);
-            _currentOffset = 0;
             _fixedColumns = [];
+            CurrentPage = 1;
 
             var catalogTags = _settings.Current.Tags;
             var mqttProfile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
@@ -122,23 +126,18 @@ public partial class HistoryViewModel : ObservableObject
                 .ToDictionary(group => group.Key, group => (string?)group.First().Unit, StringComparer.Ordinal);
 
             var table = await LoadPageAsync(0).ConfigureAwait(false);
+            _hasActiveQuery = true;
 
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 ApplyFilterOptions(devices, _queryDeviceFilter);
                 _fixedColumns = table.Columns.ToList();
                 TableColumns = new ObservableCollection<HistoryTableColumn>(_fixedColumns);
-                ApplyColumnLayout(table.Rows);
                 SubscribeColumnWidthChanges();
-                TableRows.Clear();
-                foreach (var row in table.Rows)
-                {
-                    TableRows.Add(row);
-                }
-                ShowEmpty = TableRows.Count == 0;
-                UpdateSummary();
+                ApplyPageRows(table.Rows);
+                ShowEmpty = _totalCount == 0;
                 StatusMessage = string.Empty;
-                UpdateLoadMoreState(table.Rows.Count);
+                UpdatePaginationState();
             });
         }
         catch (Exception ex)
@@ -164,58 +163,125 @@ public partial class HistoryViewModel : ObservableObject
         StatusMessage = "设备筛选已变更，点「刷新」加载。";
     }
 
-    partial void OnCanLoadMoreChanged(bool value) =>
-        LoadMoreCommand.NotifyCanExecuteChanged();
-
-    partial void OnIsBusyChanged(bool value) =>
-        LoadMoreCommand.NotifyCanExecuteChanged();
-
-    partial void OnIsLoadingMoreChanged(bool value) =>
-        LoadMoreCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value)
+    {
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
+        GoToPageCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnTimeColumnWidthChanged(double value) => RecalculateTableContentMinWidth();
 
     partial void OnDeviceColumnWidthChanged(double value) => RecalculateTableContentMinWidth();
 
-    bool CanExecuteLoadMore() => CanLoadMore && !IsBusy && !IsLoadingMore;
+    bool CanExecutePageNavigation() => !IsBusy && _hasActiveQuery && _totalCount > 0;
 
-    [RelayCommand(CanExecute = nameof(CanExecuteLoadMore))]
-    async Task LoadMoreAsync()
+    [RelayCommand(CanExecute = nameof(CanExecutePreviousPage))]
+    Task PreviousPageAsync() => GoToPageAsync(CurrentPage - 1);
+
+    bool CanExecutePreviousPage() => CanExecutePageNavigation() && CurrentPage > 1;
+
+    [RelayCommand(CanExecute = nameof(CanExecuteNextPage))]
+    Task NextPageAsync() => GoToPageAsync(CurrentPage + 1);
+
+    bool CanExecuteNextPage() => CanExecutePageNavigation() && CurrentPage < TotalPages;
+
+    [RelayCommand(CanExecute = nameof(CanExecutePageNavigation))]
+    Task GoToPageAsync()
     {
-        if (IsBusy || IsLoadingMore)
+        if (!int.TryParse(PageNumberInput?.Trim(), out var page))
+        {
+            StatusMessage = "请输入有效页码。";
+            return Task.CompletedTask;
+        }
+
+        return GoToPageAsync(page);
+    }
+
+    async Task GoToPageAsync(int targetPage, bool allowWhileBusy = false)
+    {
+        if (!allowWhileBusy && IsBusy)
         {
             return;
         }
 
-        IsLoadingMore = true;
+        if (!_hasActiveQuery || _totalCount <= 0)
+        {
+            if (!_hasActiveQuery)
+            {
+                StatusMessage = "请先点「刷新」加载数据。";
+            }
+
+            return;
+        }
+
+        TotalPages = CalculateTotalPages();
+        var page = Math.Clamp(targetPage, 1, TotalPages);
+        if (page == CurrentPage && TableRows.Count > 0)
+        {
+            PageNumberInput = page.ToString();
+            UpdatePaginationState();
+            return;
+        }
+
+        IsBusy = true;
         try
         {
-            _currentOffset += HistoryTableFormatting.PageSize;
-            var table = await LoadPageAsync(_currentOffset).ConfigureAwait(false);
-            var batchCount = table.Rows.Count;
+            var offset = (page - 1) * HistoryTableFormatting.PageSize;
+            var table = await LoadPageAsync(offset).ConfigureAwait(false);
 
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
-                ExpandColumnLayout(table.Rows);
-                foreach (var row in table.Rows)
-                {
-                    ApplyRowTagWidths(row);
-                    TableRows.Add(row);
-                }
-
-                UpdateSummary();
-                UpdateLoadMoreState(batchCount);
+                CurrentPage = page;
+                ApplyPageRows(table.Rows);
+                ShowEmpty = _totalCount == 0;
+                StatusMessage = string.Empty;
+                UpdatePaginationState();
             });
         }
         catch (Exception ex)
         {
             await MainThread.InvokeOnMainThreadAsync(() => StatusMessage = ex.Message);
-            _currentOffset = Math.Max(0, _currentOffset - HistoryTableFormatting.PageSize);
         }
         finally
         {
-            await MainThread.InvokeOnMainThreadAsync(() => IsLoadingMore = false);
+            await MainThread.InvokeOnMainThreadAsync(() => IsBusy = false);
         }
+    }
+
+    void ApplyPageRows(IReadOnlyList<HistoryTableRow> rows)
+    {
+        ApplyColumnLayout(rows);
+        TableRows.Clear();
+        foreach (var row in rows)
+        {
+            TableRows.Add(row);
+        }
+
+        UpdateSummary();
+    }
+
+    int CalculateTotalPages() =>
+        _totalCount <= 0
+            ? 1
+            : (int)Math.Ceiling(_totalCount / (double)HistoryTableFormatting.PageSize);
+
+    void UpdatePaginationState()
+    {
+        TotalPages = CalculateTotalPages();
+        if (CurrentPage > TotalPages)
+        {
+            CurrentPage = TotalPages;
+        }
+
+        PageNumberInput = CurrentPage.ToString();
+        CanGoToPreviousPage = CurrentPage > 1;
+        CanGoToNextPage = CurrentPage < TotalPages;
+        ShowPagination = _totalCount > 0;
+        UpdateSummary();
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
+        GoToPageCommand.NotifyCanExecuteChanged();
     }
 
     async Task<HistoryTableData> LoadPageAsync(int offset) =>
@@ -235,20 +301,13 @@ public partial class HistoryViewModel : ObservableObject
             _catalogTags,
             _mqttProfile).ConfigureAwait(false);
 
-    void UpdateLoadMoreState(int? lastBatchCount = null)
-    {
-        var hasMoreByCount = TableRows.Count < _totalCount;
-        var receivedFullPage = lastBatchCount is null || lastBatchCount >= HistoryTableFormatting.PageSize;
-        CanLoadMore = hasMoreByCount && receivedFullPage;
-    }
-
     void UpdateSummary()
     {
         SummaryText = _totalCount == 0
             ? "暂无历史数据。启动采集或订阅后会自动记录。"
-            : CanLoadMore
-                ? $"共 {_totalCount} 条 · 已加载 {TableRows.Count} 条 · 下滑加载更多"
-                : $"共 {_totalCount} 条 · 已全部加载";
+            : TotalPages <= 1
+                ? $"共 {_totalCount} 条"
+                : $"共 {_totalCount} 条 · 第 {CurrentPage}/{TotalPages} 页 · 本页 {TableRows.Count} 条";
     }
 
     HistoryQuery BuildCountQuery() =>
@@ -316,14 +375,22 @@ public partial class HistoryViewModel : ObservableObject
             if (await _store.DeleteSampleAsync(row.SampleId).ConfigureAwait(false))
             {
                 _totalCount = Math.Max(0, _totalCount - 1);
-                await MainThread.InvokeOnMainThreadAsync(() =>
+                var reloadPage = CurrentPage;
+                if (_totalCount == 0)
                 {
-                    TableRows.Remove(row);
-                    ShowEmpty = TableRows.Count == 0;
+                    await MainThread.InvokeOnMainThreadAsync(ClearDisplayedTable);
                     StatusMessage = "已删除 1 条记录";
-                    UpdateSummary();
-                    UpdateLoadMoreState();
-                });
+                    return;
+                }
+
+                TotalPages = CalculateTotalPages();
+                if (reloadPage > TotalPages)
+                {
+                    reloadPage = TotalPages;
+                }
+
+                await GoToPageAsync(reloadPage, allowWhileBusy: true).ConfigureAwait(false);
+                StatusMessage = "已删除 1 条记录";
             }
             else
             {
@@ -435,11 +502,19 @@ public partial class HistoryViewModel : ObservableObject
         DeviceColumnWidth = HistoryTableFormatting.DeviceColumnWidth;
         _fixedColumns = [];
         _tagUnitHints = new Dictionary<string, string?>(StringComparer.Ordinal);
-        _currentOffset = 0;
         _totalCount = 0;
-        CanLoadMore = false;
+        _hasActiveQuery = false;
+        CurrentPage = 1;
+        TotalPages = 1;
+        PageNumberInput = "1";
+        CanGoToPreviousPage = false;
+        CanGoToNextPage = false;
+        ShowPagination = false;
         ShowEmpty = true;
         SummaryText = "点「刷新」重新加载历史数据。";
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
+        GoToPageCommand.NotifyCanExecuteChanged();
     }
 
     void ApplyColumnLayout(IReadOnlyList<HistoryTableRow> rows)
@@ -465,35 +540,6 @@ public partial class HistoryViewModel : ObservableObject
         foreach (var row in rows)
         {
             ApplyRowTagWidths(row);
-        }
-
-        RecalculateTableContentMinWidth();
-    }
-
-    void ExpandColumnLayout(IReadOnlyList<HistoryTableRow> rows)
-    {
-        TimeColumnWidth = Math.Max(
-            TimeColumnWidth,
-            HistoryTableFormatting.EstimateHeaderColumnWidth(
-                "时间",
-                rows.Select(row => row.RecordedAtText),
-                TimeColumnWidth));
-        DeviceColumnWidth = Math.Max(
-            DeviceColumnWidth,
-            HistoryTableFormatting.EstimateHeaderColumnWidth(
-                "设备",
-                rows.Select(row => row.DeviceId),
-                DeviceColumnWidth));
-
-        for (var index = 0; index < _fixedColumns.Count; index++)
-        {
-            var column = _fixedColumns[index];
-            column.Width = Math.Max(
-                column.Width,
-                HistoryTableFormatting.EstimateHeaderColumnWidth(
-                    column.HeaderText,
-                    rows.Select(row => index < row.TagCells.Count ? row.TagCells[index].Text : "—"),
-                    column.Width));
         }
 
         RecalculateTableContentMinWidth();

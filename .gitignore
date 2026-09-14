@@ -15,3 +15,10 @@ AppPackages/
 .idea/
 *.nupkg
 **/TestResults/
+publish-windows.last.log
+query
+_read_tags.csx
+tools/sync-preview.txt
+test/apk-inspect/
+test/apksigner-*.txt
+test/temp.apk.zip

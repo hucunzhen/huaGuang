@@ -20,7 +20,7 @@
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
             <Label Text="{Binding SummaryText}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-            <Label Text="先点「刷新」加载数据；可选快捷范围或「自定义时间」按起止时间查找；修改筛选后需再次刷新。表头完整显示，列宽可拖动表头右侧边缘调整，列较多时可左右滑动查看。"
+            <Label Text="先点「刷新」加载数据；每页 40 条，用底部上一页/下一页或输入页码跳转。表头可拖边调整列宽，列多时可左右滑动。"
                    TextColor="#6E8499"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
         </VerticalStackLayout>
@@ -215,22 +215,45 @@
 
             <VerticalStackLayout Grid.Row="1"
                                  Padding="8,6"
-                                 Spacing="6"
-                                 IsVisible="{Binding ShowEmpty, Converter={StaticResource InverseBoolConverter}}">
-                <Button Text="加载更多"
-                        Command="{Binding LoadMoreCommand}"
-                        IsVisible="{Binding CanLoadMore}"
-                        Padding="12,6"
-                        FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
-                <ActivityIndicator IsRunning="{Binding IsLoadingMore}"
-                                   IsVisible="{Binding IsLoadingMore}"
-                                   Color="#2EC4B6"
-                                   HorizontalOptions="Center" />
-                <Label Text="已加载全部记录"
-                       TextColor="#6E8499"
-                       FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}"
-                       HorizontalOptions="Center"
-                       IsVisible="{Binding CanLoadMore, Converter={StaticResource InverseBoolConverter}}" />
+                                 Spacing="8"
+                                 IsVisible="{Binding ShowPagination}">
+                <Grid ColumnDefinitions="Auto,*,Auto"
+                      ColumnSpacing="8">
+                    <Button Text="上一页"
+                            Command="{Binding PreviousPageCommand}"
+                            IsEnabled="{Binding CanGoToPreviousPage}"
+                            Padding="12,6"
+                            FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                    <HorizontalStackLayout Grid.Column="1"
+                                           Spacing="6"
+                                           HorizontalOptions="Center"
+                                           VerticalOptions="Center">
+                        <Label Text="第"
+                               TextColor="#8AA0B5"
+                               VerticalOptions="Center"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                        <Entry Text="{Binding PageNumberInput}"
+                               WidthRequest="52"
+                               Keyboard="Numeric"
+                               HorizontalTextAlignment="Center"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        <Label Text="{Binding TotalPages, StringFormat='/ {0} 页'}"
+                               TextColor="#8AA0B5"
+                               VerticalOptions="Center"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                        <Button Text="跳转"
+                                Command="{Binding GoToPageCommand}"
+                                Padding="10,6"
+                                BackgroundColor="#1F3A52"
+                                FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                    </HorizontalStackLayout>
+                    <Button Grid.Column="2"
+                            Text="下一页"
+                            Command="{Binding NextPageCommand}"
+                            IsEnabled="{Binding CanGoToNextPage}"
+                            Padding="12,6"
+                            FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                </Grid>
             </VerticalStackLayout>
 
             <Label Grid.RowSpan="2"

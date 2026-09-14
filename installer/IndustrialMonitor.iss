@@ -23,6 +23,10 @@
 #define ServiceExeName "HuaGuang.Monitor.Service.exe"
 #define ServiceDisplayName "工业监控采集服务"
 #define ServiceDescription "工业监控 PLC 采集与 MQTT 推送后台服务"
+#define WatchdogServiceName "HuaGuangMonitorWatchdog"
+#define WatchdogExeName "HuaGuang.Monitor.Watchdog.Service.exe"
+#define WatchdogDisplayName "工业监控守护服务"
+#define WatchdogDescription "监控采集服务与界面进程，异常退出时自动重启"
 
 [Setup]
 AppId={#MyAppId}
@@ -50,6 +54,7 @@ Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "installservice"; Description: "安装并启动后台采集服务（推荐）"; GroupDescription: "附加选项:"; Flags: checkedonce
+Name: "installwatchdog"; Description: "安装守护服务（监控采集/界面异常退出并重启，推荐）"; GroupDescription: "附加选项:"; Flags: checkedonce
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加选项:"; Flags: checkedonce
 Name: "startup"; Description: "登录 Windows 时自动打开监控界面（可选）"; GroupDescription: "附加选项:"; Flags: checkedonce
 
@@ -78,12 +83,25 @@ begin
   Result := ExpandConstant('{app}\service\{#ServiceExeName}');
 end;
 
+function WatchdogExePath(): String;
+begin
+  Result := ExpandConstant('{app}\service\{#WatchdogExeName}');
+end;
+
 procedure StopAndDeleteMonitorService();
 var
   ResultCode: Integer;
 begin
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure StopAndDeleteWatchdogService();
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#WatchdogServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#WatchdogServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure DisableShadowStacksForExe(const ExePath: String);
@@ -103,6 +121,8 @@ procedure ConfigureOldWindowsCompat();
 begin
   DisableShadowStacksForExe(ExpandConstant('{app}\{#MyAppExeName}'));
   DisableShadowStacksForExe(ServiceExePath());
+  if FileExists(WatchdogExePath()) then
+    DisableShadowStacksForExe(WatchdogExePath());
 end;
 
 function InstallMonitorService(): Boolean;
@@ -132,6 +152,33 @@ begin
   Result := True;
 end;
 
+function InstallWatchdogService(): Boolean;
+var
+  ResultCode: Integer;
+  BinPath, CreateArgs: String;
+begin
+  Result := False;
+  if not FileExists(WatchdogExePath()) then
+  begin
+    MsgBox('未找到守护服务程序，跳过守护服务注册。', mbInformation, MB_OK);
+    Exit;
+  end;
+
+  StopAndDeleteWatchdogService();
+
+  BinPath := WatchdogExePath();
+  CreateArgs := 'create {#WatchdogServiceName} binPath= "' + BinPath + '" start= auto DisplayName= "{#WatchdogDisplayName}"';
+  if not Exec(ExpandConstant('{sys}\sc.exe'), CreateArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('注册守护 Windows 服务失败。', mbError, MB_OK);
+    Exit;
+  end;
+
+  Exec(ExpandConstant('{sys}\sc.exe'), 'description {#WatchdogServiceName} "{#WatchdogDescription}"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'start {#WatchdogServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
@@ -139,6 +186,8 @@ begin
     ConfigureOldWindowsCompat();
     if WizardIsTaskSelected('installservice') then
       InstallMonitorService();
+    if WizardIsTaskSelected('installwatchdog') then
+      InstallWatchdogService();
   end;
 end;
 
@@ -186,7 +235,10 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
+  begin
+    StopAndDeleteWatchdogService();
     StopAndDeleteMonitorService();
+  end;
 
   if (CurUninstallStep = usPostUninstall) and DeleteUserData then
   begin

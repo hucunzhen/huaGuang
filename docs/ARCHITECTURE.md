@@ -53,6 +53,7 @@ flowchart LR
 
 - UI 进程：`AddMonitorRuntimeAdaptive()` → `IMonitorAcquisition` 在 **IPC 可用** 时走 `RemoteMonitorAcquisition`，否则本进程内 `AcquisitionService`。
 - 服务进程：注册完整 `AddMonitorRuntimeCore()` + 命名管道/TCP IPC + `MonitorConfigWatcher`（监听产线 Excel 变更）+ `MonitorAutoStartWorker`。
+- **守护服务**（`HuaGuang.Monitor.Watchdog.Service`，Windows 服务 `HuaGuangMonitorWatchdog`）：周期检查采集服务是否在跑、IPC 采集/订阅是否应自动恢复、界面是否异常退出；心跳与正常退出标记见 `ProgramData\...\watchdog\`。
 - 两套进程共享 **同一份** `ProgramData\com.industrial.monitor\Data`（或回退到 LocalAppData，见 `WindowsSharedDataDirectory`）。
 
 ### 2.2 Android 平板

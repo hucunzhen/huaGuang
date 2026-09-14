@@ -4,26 +4,53 @@
 
   <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' and '$(Configuration)' == 'Release'">
     <BuildInstallerOnPublish Condition="'$(BuildInstallerOnPublish)' == ''">true</BuildInstallerOnPublish>
+    <BundleBackgroundExesOnPublish Condition="'$(BundleBackgroundExesOnPublish)' == ''">true</BundleBackgroundExesOnPublish>
     <InstallerIssFile>$(MSBuildProjectDirectory)\..\..\installer\IndustrialMonitor.iss</InstallerIssFile>
     <InstallerOutputDir>$(MSBuildProjectDirectory)\..\..\installer\output</InstallerOutputDir>
     <ResolveInnoSetupScript>$(MSBuildProjectDirectory)\..\..\scripts\Resolve-InnoSetup.ps1</ResolveInnoSetupScript>
     <GenerateAppIconScript>$(MSBuildProjectDirectory)\..\..\scripts\generate-appicon-ico.ps1</GenerateAppIconScript>
   </PropertyGroup>
 
-  <Target Name="BuildWindowsInstaller"
+  <Target Name="BundleWindowsBackgroundExes"
           AfterTargets="Publish"
+          Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'
+                       and '$(Configuration)' == 'Release'
+                       and '$(BundleBackgroundExesOnPublish)' != 'false'">
+
+    <PropertyGroup>
+      <_PublishDir Condition="'$(PublishDir)' != ''">$(PublishDir)</_PublishDir>
+      <_PublishDir Condition="'$(_PublishDir)' == ''">$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\win-x64\publish</_PublishDir>
+      <_PublishFullDir>$([System.IO.Path]::GetFullPath('$(_PublishDir)'))</_PublishFullDir>
+      <_PublishDirArg>$([System.String]::Copy('$(_PublishFullDir)').TrimEnd('\'))</_PublishDirArg>
+      <_BundleServiceScript>$(MSBuildProjectDirectory)\..\..\scripts\bundle-windows-service-to-publish.ps1</_BundleServiceScript>
+    </PropertyGroup>
+
+    <Exec Condition="Exists('$(_BundleServiceScript)')"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(_BundleServiceScript)&quot; -PublishDir &quot;$(_PublishDirArg)&quot; -Configuration $(Configuration)"
+          ConsoleToMSBuild="true" />
+
+    <Error Condition="!Exists('$(_PublishDirArg)\service\HuaGuang.Monitor.Watchdog.Service.exe')"
+           Text="Watchdog service was not bundled into $(_PublishDirArg)\service. Run scripts\publish-windows.ps1 or fix bundle-windows-service-to-publish.ps1." />
+  </Target>
+
+  <Target Name="BuildWindowsInstaller"
+          AfterTargets="BundleWindowsBackgroundExes"
           Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'
                        and '$(Configuration)' == 'Release'
                        and '$(BuildInstallerOnPublish)' == 'true'">
 
     <PropertyGroup>
       <_PublishDir Condition="'$(PublishDir)' != ''">$(PublishDir)</_PublishDir>
-      <_PublishDir Condition="'$(_PublishDir)' == ''">$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\win-x64\publish\</_PublishDir>
+      <_PublishDir Condition="'$(_PublishDir)' == ''">$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\win-x64\publish</_PublishDir>
       <_PublishFullDir>$([System.IO.Path]::GetFullPath('$(_PublishDir)'))</_PublishFullDir>
+      <_PublishDirArg>$([System.String]::Copy('$(_PublishFullDir)').TrimEnd('\'))</_PublishDirArg>
     </PropertyGroup>
 
-    <Error Condition="!Exists('$(_PublishFullDir)\HuaGuang.Monitor.exe')"
-           Text="Publish output not found at $(_PublishFullDir). Cannot build installer." />
+    <Error Condition="!Exists('$(_PublishDirArg)\HuaGuang.Monitor.exe')"
+           Text="Publish output not found at $(_PublishDirArg). Cannot build installer." />
+
+    <Error Condition="!Exists('$(_PublishDirArg)\service\HuaGuang.Monitor.Watchdog.Service.exe')"
+           Text="Watchdog service missing in publish\service. Cannot build installer." />
 
     <Error Condition="!Exists('$(InstallerIssFile)')"
            Text="Installer script not found: $(InstallerIssFile)" />
@@ -49,7 +76,7 @@
     <MakeDir Directories="$(InstallerOutputDir)" Condition="'$(_IsccPath)' != ''" />
 
     <Exec Condition="'$(_IsccPath)' != ''"
-          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishFullDir)&quot; /DMyAppVersion=&quot;$(ApplicationDisplayVersion)&quot; /DMyAppRevision=&quot;$(ApplicationVersion)&quot; &quot;$(InstallerIssFile)&quot;"
+          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishDirArg)&quot; /DMyAppVersion=&quot;$(ApplicationDisplayVersion)&quot; /DMyAppRevision=&quot;$(ApplicationVersion)&quot; &quot;$(InstallerIssFile)&quot;"
           WorkingDirectory="$(MSBuildProjectDirectory)\..\..\installer"
           IgnoreExitCode="true"
           ConsoleToMSBuild="true">

@@ -27,7 +27,7 @@ Add-Type -AssemblyName System.Drawing
 function Convert-PngToIco {
     param(
         [Parameter(Mandatory)][string]$InputPath,
-        [Parameter(Mandatory)][string]$OutputPath,
+        [string]$OutputPath,
         [int[]]$Sizes = @(256, 48, 32, 16)
     )
 
@@ -87,18 +87,76 @@ function Convert-PngToIco {
     }
 
     $writer.Flush()
-    [System.IO.File]::WriteAllBytes($OutputPath, $output.ToArray())
+    $bytes = $output.ToArray()
     $writer.Close()
     $output.Close()
+    return $bytes
 }
 
-Write-Host "Generating ICO from $png" -ForegroundColor DarkGray
-foreach ($ico in $outputs) {
-    $dir = Split-Path -Parent $ico
+function Write-IcoFile {
+    param(
+        [Parameter(Mandatory)][byte[]]$Bytes,
+        [Parameter(Mandatory)][string]$OutputPath,
+        [int]$MaxAttempts = 8
+    )
+
+    $dir = Split-Path -Parent $OutputPath
     if (-not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
 
-    Convert-PngToIco -InputPath $png -OutputPath $ico
+    $tempPath = Join-Path $dir (".appicon-" + [Guid]::NewGuid().ToString("N") + ".ico.tmp")
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            [System.IO.File]::WriteAllBytes($tempPath, $Bytes)
+            if (Test-Path -LiteralPath $OutputPath) {
+                Remove-Item -LiteralPath $OutputPath -Force -ErrorAction Stop
+            }
+
+            Move-Item -LiteralPath $tempPath -Destination $OutputPath -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            if (Test-Path -LiteralPath $tempPath) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+
+            if ($attempt -ge $MaxAttempts) {
+                if (Test-Path -LiteralPath $OutputPath) {
+                    Write-Host "Warning: cannot overwrite locked icon $OutputPath — keeping existing file. ($($_.Exception.Message))" -ForegroundColor Yellow
+                    return
+                }
+
+                throw
+            }
+
+            Start-Sleep -Milliseconds (250 * $attempt)
+        }
+    }
+}
+
+$pngTime = (Get-Item -LiteralPath $png).LastWriteTimeUtc
+$needsBuild = $false
+foreach ($ico in $outputs) {
+    if (-not (Test-Path -LiteralPath $ico)) {
+        $needsBuild = $true
+        break
+    }
+
+    if ((Get-Item -LiteralPath $ico).LastWriteTimeUtc -lt $pngTime) {
+        $needsBuild = $true
+        break
+    }
+}
+
+if (-not $needsBuild) {
+    Write-Host "Installer icon up to date, skip regenerate." -ForegroundColor DarkGray
+    return
+}
+
+Write-Host "Generating ICO from $png" -ForegroundColor DarkGray
+$icoBytes = Convert-PngToIco -InputPath $png -OutputPath $outputs[0]
+foreach ($ico in $outputs) {
+    Write-IcoFile -Bytes $icoBytes -OutputPath $ico
     Write-Host "Generated $ico"
 }

@@ -271,6 +271,11 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
             }
         }
 
+#if WINDOWS
+        builder.AppendLine(
+            $"守护服务 · {(Platforms.Windows.WatchdogServiceHelper.IsWatchdogServiceRunning() ? "运行中" : "未安装或未运行")}");
+#endif
+
         ServiceStatusText = builder.ToString().TrimEnd();
     }
 

@@ -10,7 +10,8 @@ if ([string]::IsNullOrWhiteSpace($InstallDir)) {
 
 $uiExe = Join-Path $InstallDir "HuaGuang.Monitor.exe"
 $serviceExe = Join-Path $InstallDir "service\HuaGuang.Monitor.Service.exe"
-$targets = @($uiExe, $serviceExe) | Where-Object { Test-Path -LiteralPath $_ }
+$watchdogExe = Join-Path $InstallDir "service\HuaGuang.Monitor.Watchdog.Service.exe"
+$targets = @($uiExe, $serviceExe, $watchdogExe) | Where-Object { Test-Path -LiteralPath $_ }
 
 if ($targets.Count -eq 0) {
     throw "No executables found under: $InstallDir"

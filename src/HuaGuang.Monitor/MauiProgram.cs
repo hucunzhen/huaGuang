@@ -2,6 +2,7 @@ using HuaGuang.Monitor.Hosting;
 using HuaGuang.Monitor.Ipc;
 using HuaGuang.Monitor.Services;
 using HuaGuang.Monitor.Services.Logging;
+using HuaGuang.Monitor.Services.Watchdog;
 using HuaGuang.Monitor.ViewModels;
 using HuaGuang.Monitor.Views;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,7 @@ public static class MauiProgram
 		WindowsAppDataPaths.WarmUp();
 		Directory.CreateDirectory(AppPaths.LogDirectory);
 		CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory}");
+		WatchdogHeartbeat.Start(WatchdogConstants.UiRole);
 #else
 		AppPaths.Configure(new MauiAppDataPaths());
 #endif

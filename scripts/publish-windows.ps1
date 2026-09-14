@@ -5,9 +5,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\DotNet-Helpers.ps1"
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "src\HuaGuang.Monitor\HuaGuang.Monitor.csproj"
 $framework = "net10.0-windows10.0.19041.0"
+$logFile = Join-Path $root "publish-windows.last.log"
 
 function Sync-LineExcelToPublish {
     param([string]$PublishDir)
@@ -47,59 +49,92 @@ function Sync-WindowIconToPublish {
     Write-Host "Synced title bar icon to publish\logo.ico." -ForegroundColor DarkGray
 }
 
-Write-Host "Publishing Windows $Configuration (self-contained win-x64 via csproj)..." -ForegroundColor Cyan
-
-$generateLines = Join-Path $root "scripts\generate-line-excel.ps1"
-if ($RegenerateLines -and (Test-Path $generateLines)) {
-    Write-Host "Regenerating config\lines from line catalog ..." -ForegroundColor DarkGray
-    & $generateLines
-    if ($LASTEXITCODE -ne 0) { throw "generate-line-excel.ps1 failed." }
+try {
+    Start-Transcript -LiteralPath $logFile -Force | Out-Null
+}
+catch {
+    Write-Host "Warning: could not write log $logFile" -ForegroundColor Yellow
 }
 
-$iconScript = Join-Path $root "scripts\generate-appicon-ico.ps1"
-if (Test-Path $iconScript) {
-    Write-Host "Generating installer icon..." -ForegroundColor DarkGray
-    & $iconScript
-}
+try {
+    Write-Host "Publishing Windows $Configuration (self-contained win-x64 via csproj)..." -ForegroundColor Cyan
 
-dotnet publish $project -f $framework -c $Configuration
-if ($LASTEXITCODE -ne 0) { throw "Publish failed." }
-
-$publishDir = Join-Path $root "src\HuaGuang.Monitor\bin\$Configuration\$framework\win-x64\publish"
-Sync-LineExcelToPublish -PublishDir $publishDir
-Sync-WindowIconToPublish -PublishDir $publishDir
-
-$fixScript = Join-Path $root "scripts\fix-old-windows.ps1"
-$compatScript = Join-Path $root "scripts\configure-old-windows-compat.ps1"
-foreach ($helper in @($fixScript, $compatScript)) {
-    if (Test-Path $helper) {
-        Copy-Item -LiteralPath $helper -Destination (Join-Path $publishDir (Split-Path -Leaf $helper)) -Force
+    $generateLines = Join-Path $root "scripts\generate-line-excel.ps1"
+    if ($RegenerateLines -and (Test-Path $generateLines)) {
+        Write-Host "Regenerating config\lines from line catalog ..." -ForegroundColor DarkGray
+        & $generateLines
+        if (-not $?) { throw "generate-line-excel.ps1 failed." }
     }
-}
-$fixBat = @"
+
+    $iconScript = Join-Path $root "scripts\generate-appicon-ico.ps1"
+    if (Test-Path $iconScript) {
+        Write-Host "Generating installer icon..." -ForegroundColor DarkGray
+        try {
+            & $iconScript
+        }
+        catch {
+            Write-Host "Warning: generate-appicon-ico.ps1 failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    # MSBuild bundle is disabled here; bundle script runs after publish.
+    Invoke-DotNet publish $project -f $framework -c $Configuration "-p:BuildInstallerOnPublish=false" "-p:BundleBackgroundExesOnPublish=false"
+
+    $publishDir = Join-Path $root "src\HuaGuang.Monitor\bin\$Configuration\$framework\win-x64\publish"
+    $mainExe = Join-Path $publishDir "HuaGuang.Monitor.exe"
+    if (-not (Test-Path -LiteralPath $mainExe)) {
+        throw ('MAUI publish did not produce: {0}' -f $mainExe)
+    }
+
+    Sync-LineExcelToPublish -PublishDir $publishDir
+    Sync-WindowIconToPublish -PublishDir $publishDir
+
+    $fixScript = Join-Path $root "scripts\fix-old-windows.ps1"
+    $compatScript = Join-Path $root "scripts\configure-old-windows-compat.ps1"
+    foreach ($helper in @($fixScript, $compatScript)) {
+        if (Test-Path $helper) {
+            Copy-Item -LiteralPath $helper -Destination (Join-Path $publishDir (Split-Path -Leaf $helper)) -Force
+        }
+    }
+    $fixBat = @"
 @echo off
 chcp 65001 >nul
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0fix-old-windows.ps1" -InstallDir "%~dp0"
 pause
 "@
-Set-Content -LiteralPath (Join-Path $publishDir "fix-old-windows.bat") -Value $fixBat -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $publishDir "fix-old-windows.bat") -Value $fixBat -Encoding UTF8
 
-$serviceScript = Join-Path $PSScriptRoot "publish-windows-service.ps1"
-Write-Host "Publishing background service..." -ForegroundColor Cyan
-& $serviceScript -Configuration $Configuration
-if ($LASTEXITCODE -ne 0) { throw "Service publish failed." }
+    $bundleScript = Join-Path $PSScriptRoot "bundle-windows-service-to-publish.ps1"
+    Write-Host "Publishing and bundling background + watchdog services..." -ForegroundColor Cyan
+    & $bundleScript -PublishDir $publishDir -Configuration $Configuration
+    if (-not $?) {
+        throw "bundle-windows-service-to-publish.ps1 failed."
+    }
 
-$servicePublishDir = Join-Path $root "src\HuaGuang.Monitor.Service\bin\$Configuration\$framework\win-x64\publish"
-$serviceDestDir = Join-Path $publishDir "service"
-if (Test-Path $serviceDestDir) {
-    Remove-Item -LiteralPath $serviceDestDir -Recurse -Force
+    $bundledWatchdog = Join-Path $publishDir "service\HuaGuang.Monitor.Watchdog.Service.exe"
+    if (-not (Test-Path -LiteralPath $bundledWatchdog)) {
+        throw ('Publish finished but watchdog exe is missing: {0}' -f $bundledWatchdog)
+    }
+
+    Write-Host ""
+    Write-Host "Output:" -ForegroundColor Green
+    Write-Host $publishDir
+    Write-Host "Run: .\HuaGuang.Monitor.exe"
+    Write-Host "Service: .\service\HuaGuang.Monitor.Service.exe"
+    Write-Host "Watchdog: .\service\HuaGuang.Monitor.Watchdog.Service.exe"
+    Write-Host ""
+    Write-Host "[OK] publish-windows succeeded. Log: $logFile" -ForegroundColor Green
+    Write-Host "     publish-windows.bat also runs Inno Setup; or: build-installer.bat -SkipPublish" -ForegroundColor DarkGray
+    exit 0
 }
-New-Item -ItemType Directory -Force -Path $serviceDestDir | Out-Null
-Copy-Item -Path (Join-Path $servicePublishDir "*") -Destination $serviceDestDir -Recurse -Force
-Write-Host "Copied service to publish\service" -ForegroundColor DarkGray
-
-Write-Host ""
-Write-Host "Output:" -ForegroundColor Green
-Write-Host $publishDir
-Write-Host "Run: .\HuaGuang.Monitor.exe"
-Write-Host "Service: .\service\HuaGuang.Monitor.Service.exe"
+catch {
+    Write-Host ""
+    Write-Host "[FAILED] $($_.Exception.Message)" -ForegroundColor Red
+    if (Test-Path -LiteralPath $logFile) {
+        Write-Host "See log: $logFile" -ForegroundColor Yellow
+    }
+    exit 1
+}
+finally {
+    try { Stop-Transcript | Out-Null } catch { }
+}

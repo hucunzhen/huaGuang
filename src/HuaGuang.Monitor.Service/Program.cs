@@ -2,6 +2,7 @@ using HuaGuang.Monitor.Hosting;
 using HuaGuang.Monitor.Ipc;
 using HuaGuang.Monitor.Services;
 using HuaGuang.Monitor.Services.Logging;
+using HuaGuang.Monitor.Services.Watchdog;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -25,10 +26,20 @@ public static class Program
         });
 
         builder.Services.AddSingleton<SettingsStore>();
+        builder.Services.AddSingleton(sp => new WatchdogSupervisor(
+            sp.GetRequiredService<SettingsStore>(),
+            sp.GetRequiredService<ILogger<WatchdogSupervisor>>(),
+            WatchdogSupervisor.ResolveInstallRoot(),
+            WindowsUiWatchPolicy.ShouldWatchUi));
         builder.Services.AddMonitorRuntimeCore(AppPaths.LogDirectory);
         builder.Services.AddHostedService<MonitorIpcServer>();
+        builder.Services.AddHostedService<UiSupervisorWorker>();
         builder.Services.AddHostedService<MonitorConfigWatcher>();
         builder.Services.AddHostedService<MonitorAutoStartWorker>();
+        builder.Services.AddHostedService(sp =>
+            new WatchdogRoleHeartbeatWorker(
+                WatchdogConstants.AcquisitionRole,
+                sp.GetRequiredService<ILogger<WatchdogRoleHeartbeatWorker>>()));
 
         var host = builder.Build();
         CrashExitLogger.Register(host.Services.GetRequiredService<ILoggerFactory>());
