@@ -52,13 +52,33 @@ public sealed class SettingsStore
             LineConfigPaths.GetLineExcelPath(lineName),
             templateFilePath: null);
 
+        MqttEndpointCatalog.Normalize(Current);
         _logger.LogInformation(
-            "配置已加载 line={LineName} mode={Mode} excel={ExcelPath} plc={Plc} mqtt={Mqtt}",
+            "配置已加载 line={LineName} mode={Mode} excel={ExcelPath} plc={Plc} mqtt={Mqtt} mqttTargets={TargetCount}",
             Current.LineName,
             Current.OperationMode,
             LineConfigPaths.GetLineExcelPath(Current.LineName),
             LogFormatting.DescribePlc(Current.Plc),
-            LogFormatting.DescribeMqtt(Current.Mqtt, Current.LineName));
+            LogFormatting.DescribeMqtt(Current.Mqtt, Current.LineName),
+            Current.MqttEndpoints.Count);
+        foreach (var endpoint in Current.MqttEndpoints)
+        {
+            _logger.LogInformation(
+                "MQTT 目标配置 name={TargetName} enabled={Enabled} {Mqtt}",
+                endpoint.Name,
+                endpoint.Enabled,
+                LogFormatting.DescribeMqtt(endpoint.ToSettings(), Current.LineName));
+        }
+
+        foreach (var group in Current.MqttEndpoints
+                     .Where(endpoint => endpoint.Enabled)
+                     .GroupBy(endpoint => $"{endpoint.Host}:{endpoint.Port}:{endpoint.ClientId}", StringComparer.OrdinalIgnoreCase)
+                     .Where(group => group.Count() > 1))
+        {
+            _logger.LogWarning(
+                "多个已启用 MQTT 目标共用 host/port/clientId={Key}，可能导致「目标 2 暂未连接」",
+                group.Key);
+        }
 
         _loadedFingerprint = CaptureConfigFingerprint();
         Revision++;

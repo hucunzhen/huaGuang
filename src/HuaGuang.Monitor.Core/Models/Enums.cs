@@ -6,6 +6,20 @@ public enum AppOperationMode
     Subscribe
 }
 
+public enum PlcProtocol
+{
+    ModbusTcp,
+    S7
+}
+
+public enum S7MemoryArea
+{
+    Input,
+    Output,
+    Memory,
+    DataBlock
+}
+
 public enum TagSource
 {
     Plc,

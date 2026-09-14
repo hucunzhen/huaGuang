@@ -42,8 +42,8 @@ public partial class MqttEndpointViewModel : ObservableObject
         Host = Host.Trim(),
         Port = ParseInt(Port, LineMqttDefaults.Port, 1, 65535),
         ClientId = ClientId.Trim(),
-        Username = Username.Trim(),
-        Password = Password,
+        Username = MqttCredentialNormalizer.NormalizeUsername(Username),
+        Password = MqttCredentialNormalizer.NormalizePassword(Password),
         UseTls = UseTls,
         Qos = ParseInt(Qos, 0, 0, 2),
         Topic = Topic.Trim()

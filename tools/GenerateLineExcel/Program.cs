@@ -44,8 +44,9 @@ if (args.Contains("--inspect"))
             $"mqttTargets={settings.MqttEndpoints.Count} tags={settings.Tags.Count} scan={settings.ScanIntervalMs} publish={settings.PublishIntervalMs}");
         foreach (var endpoint in settings.MqttEndpoints)
         {
+            var pwd = string.IsNullOrEmpty(endpoint.Password) ? "未设置" : "已设置";
             Console.WriteLine(
-                $"  [{endpoint.Name}] {endpoint.Host}:{endpoint.Port} clientId={endpoint.ClientId} topic={endpoint.Topic}");
+                $"  [{endpoint.Name}] {endpoint.Host}:{endpoint.Port} clientId={endpoint.ClientId} user={endpoint.Username} password={pwd} topic={endpoint.Topic}");
         }
 
         foreach (var tag in settings.Tags.Where(tag =>

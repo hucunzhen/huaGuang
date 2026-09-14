@@ -14,7 +14,9 @@ public static class Program
     {
         CrashExitLogger.RegisterEarly("service");
         AppPaths.Configure(new WindowsAppDataPaths());
+        WindowsAppDataPaths.WarmUp();
         Directory.CreateDirectory(AppPaths.LogDirectory);
+        CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory}");
 
         var builder = Host.CreateApplicationBuilder(args);
         builder.Services.AddWindowsService(options =>

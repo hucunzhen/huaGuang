@@ -30,6 +30,7 @@ public sealed class AdaptiveMonitorAcquisition : IMonitorAcquisition
     public bool IsRunning => Active.IsRunning;
     public bool PlcConnected => Active.PlcConnected;
     public bool MqttConnected => Active.MqttConnected;
+    public string MqttTargetsStatus => Active.MqttTargetsStatus;
     public int MqttPendingCount => Active.MqttPendingCount;
     public string LastError => Active.LastError;
     public string LastPayload => Active.LastPayload;

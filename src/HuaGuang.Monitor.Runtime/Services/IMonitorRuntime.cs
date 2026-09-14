@@ -7,6 +7,8 @@ public interface IMonitorAcquisition
     bool IsRunning { get; }
     bool PlcConnected { get; }
     bool MqttConnected { get; }
+    /// <summary>各 MQTT 发布目标连接摘要（多目标时逐条显示）。</summary>
+    string MqttTargetsStatus { get; }
     int MqttPendingCount { get; }
     string LastError { get; }
     string LastPayload { get; }

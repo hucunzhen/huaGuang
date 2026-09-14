@@ -27,6 +27,7 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
     public bool IsRunning => _state?.IsRunning ?? false;
     public bool PlcConnected => _state?.PlcConnected ?? false;
     public bool MqttConnected => _state?.MqttConnected ?? false;
+    public string MqttTargetsStatus => _state?.MqttTargetsStatus ?? string.Empty;
     public int MqttPendingCount => _state?.MqttPendingCount ?? 0;
     public string LastError => _state?.LastError ?? string.Empty;
     public string LastPayload => _state?.LastPayload ?? string.Empty;

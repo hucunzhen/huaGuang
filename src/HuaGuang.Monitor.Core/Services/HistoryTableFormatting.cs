@@ -16,6 +16,11 @@ public static class HistoryTableFormatting
     public const double DeleteColumnWidth = 48;
     public const double MinColumnWidth = 48;
     public const double CellHorizontalPadding = 12;
+    /// <summary>历史表头右侧拖动手柄宽度（需计入列宽，避免标题换行）。</summary>
+    public const double HeaderResizeGripWidth = 10;
+
+    public static string FormatColumnHeader(string tagName, string? unit) =>
+        string.IsNullOrWhiteSpace(unit) ? tagName : $"{tagName}({unit})";
     /// <summary>数据区纵向滚动条占位，表头需预留同宽以免列错位。</summary>
     public const double VerticalScrollBarGutter = 12;
 
@@ -90,6 +95,10 @@ public static class HistoryTableFormatting
 
         return Math.Max(minWidth, Math.Ceiling(width + CellHorizontalPadding));
     }
+
+    /// <summary>表头列宽：文本宽度 + 内边距 + 拖动手柄。</summary>
+    public static double EstimateHeaderColumnWidth(string referenceText, IEnumerable<string>? dataSamples = null, double minWidth = MinColumnWidth, double fontSize = 12) =>
+        EstimateTextWidth(referenceText, dataSamples, minWidth, fontSize) + HeaderResizeGripWidth;
 
     static double EstimateSingleTextBlock(string text, double fontSize)
     {

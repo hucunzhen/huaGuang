@@ -20,6 +20,7 @@ public sealed class MqttOutboundService : IDisposable
     readonly object _publisherGate = new();
     readonly Dictionary<string, MqttPublisher> _publishers = new(StringComparer.Ordinal);
     readonly Dictionary<string, DateTimeOffset> _connectRetryAfter = new(StringComparer.Ordinal);
+    readonly Dictionary<string, string> _lastConnectErrors = new(StringComparer.Ordinal);
     readonly Queue<MqttOutboundItem> _queue = new();
     readonly AutoResetEvent _signal = new(false);
 
@@ -46,6 +47,63 @@ public sealed class MqttOutboundService : IDisposable
                 return _publishers.Values.Any(publisher => publisher.IsConnected);
             }
         }
+    }
+
+    /// <summary>所有已启用目标均已连接（多目标时比 <see cref="IsConnected"/> 更严格）。</summary>
+    public bool AllEnabledTargetsConnected(AppSettings settings)
+    {
+        MqttEndpointCatalog.Normalize(settings);
+        var enabled = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings);
+        if (enabled.Count == 0)
+        {
+            return false;
+        }
+
+        lock (_publisherGate)
+        {
+            foreach (var endpoint in enabled)
+            {
+                var desired = endpoint.ToSettings();
+                if (!_publishers.TryGetValue(endpoint.Id, out var publisher)
+                    || !publisher.IsConnected
+                    || !publisher.MatchesConnection(desired))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    public string BuildTargetsStatus(AppSettings settings)
+    {
+        MqttEndpointCatalog.Normalize(settings);
+        var enabled = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings);
+        if (enabled.Count == 0)
+        {
+            return "MQTT：无已启用目标";
+        }
+
+        var lines = new List<string> { $"MQTT 目标 {enabled.Count} 个（各自独立连接/发布）" };
+        lock (_publisherGate)
+        {
+            foreach (var endpoint in enabled)
+            {
+                var desired = endpoint.ToSettings();
+                _publishers.TryGetValue(endpoint.Id, out var publisher);
+                var connected = publisher?.IsConnected == true && publisher.MatchesConnection(desired);
+                var detail = connected
+                    ? "已连接"
+                    : _lastConnectErrors.TryGetValue(endpoint.Id, out var err) && !string.IsNullOrWhiteSpace(err)
+                        ? err
+                        : "尚未连接";
+                lines.Add(
+                    $"· {endpoint.Name} {desired.Host}:{desired.Port} clientId={desired.ClientId} user={desired.Username} → {detail}");
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     public int PendingCount
@@ -117,6 +175,15 @@ public sealed class MqttOutboundService : IDisposable
         await DisconnectAllAsync().ConfigureAwait(false);
         StateChanged?.Invoke(this, EventArgs.Empty);
         _logger.LogInformation("MQTT 发送线程已停止");
+    }
+
+    public async Task ResetConnectionsAsync()
+    {
+        _connectRetryAfter.Clear();
+        _lastConnectErrors.Clear();
+        await DisconnectAllAsync().ConfigureAwait(false);
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        _logger.LogInformation("MQTT 连接已重置（将按最新配置重新连接各目标）");
     }
 
     public void Enqueue(MqttOutboundItem item)
@@ -266,6 +333,7 @@ public sealed class MqttOutboundService : IDisposable
                 }
 
                 _connectRetryAfter.Remove(id);
+                _lastConnectErrors.Remove(id);
             }
         }
 
@@ -283,36 +351,55 @@ public sealed class MqttOutboundService : IDisposable
 
     void EnsureConnected(MqttEndpoint endpoint, string lineName, CancellationToken cancellationToken)
     {
+        MqttEndpointCatalog.ValidatePublishCredentials(endpoint);
+
+        var desired = endpoint.ToSettings();
         var publisher = GetPublisher(endpoint.Id);
-        if (publisher.IsConnected)
+        if (publisher.IsConnected && publisher.MatchesConnection(desired))
         {
             _connectRetryAfter.Remove(endpoint.Id);
+            _lastConnectErrors.Remove(endpoint.Id);
             return;
         }
 
         if (_connectRetryAfter.TryGetValue(endpoint.Id, out var retryAfter)
             && DateTimeOffset.UtcNow < retryAfter)
         {
-            throw new InvalidOperationException($"MQTT 目标「{endpoint.Name}」暂未连接，稍后重试。");
+            var detail = _lastConnectErrors.TryGetValue(endpoint.Id, out var lastError)
+                ? lastError
+                : "连接尚未成功";
+            throw new InvalidOperationException($"MQTT 目标「{endpoint.Name}」暂未连接：{detail}");
         }
 
         try
         {
-            publisher.ConnectAsync(endpoint.ToSettings(), lineName, cancellationToken)
+            _logger.LogInformation(
+                "MQTT 连接尝试 target={TargetName} line={LineName} {Mqtt}",
+                endpoint.Name,
+                lineName,
+                LogFormatting.DescribeMqtt(desired, lineName));
+            publisher.ConnectAsync(desired, lineName, cancellationToken)
                 .ConfigureAwait(false)
                 .GetAwaiter()
                 .GetResult();
             _connectRetryAfter.Remove(endpoint.Id);
+            _lastConnectErrors.Remove(endpoint.Id);
             _logger.LogInformation(
                 "MQTT 已连接 target={TargetName} line={LineName} {Mqtt}",
                 endpoint.Name,
                 lineName,
-                LogFormatting.DescribeMqtt(endpoint.ToSettings(), lineName));
+                LogFormatting.DescribeMqtt(desired, lineName));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _connectRetryAfter[endpoint.Id] = DateTimeOffset.UtcNow.AddSeconds(30);
-            _logger.LogWarning(ex, "MQTT 连接失败 target={TargetName} line={LineName}", endpoint.Name, lineName);
+            _lastConnectErrors[endpoint.Id] = ex.Message;
+            _logger.LogWarning(
+                ex,
+                "MQTT 连接失败 target={TargetName} line={LineName} {Mqtt}",
+                endpoint.Name,
+                lineName,
+                LogFormatting.DescribeMqtt(desired, lineName));
             throw;
         }
     }

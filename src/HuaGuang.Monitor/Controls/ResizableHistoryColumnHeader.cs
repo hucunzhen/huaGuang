@@ -3,7 +3,7 @@ namespace HuaGuang.Monitor.Controls;
 /// <summary>历史表格表头：完整显示标题，右侧拖动手柄可调整列宽。</summary>
 public sealed class ResizableHistoryColumnHeader : ContentView
 {
-    const double GripWidth = 10;
+    const double GripWidth = HuaGuang.Monitor.Services.HistoryTableFormatting.HeaderResizeGripWidth;
     const double MinColumnWidth = HuaGuang.Monitor.Services.HistoryTableFormatting.MinColumnWidth;
 
     readonly Label _label;
@@ -80,7 +80,8 @@ public sealed class ResizableHistoryColumnHeader : ContentView
     {
         _label = new Label
         {
-            LineBreakMode = LineBreakMode.WordWrap,
+            LineBreakMode = LineBreakMode.NoWrap,
+            MaxLines = 1,
             VerticalOptions = LayoutOptions.Center,
             TextColor = Color.FromArgb("#8AA0B5")
         };

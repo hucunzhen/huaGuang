@@ -444,11 +444,11 @@ public partial class HistoryViewModel : ObservableObject
 
     void ApplyColumnLayout(IReadOnlyList<HistoryTableRow> rows)
     {
-        TimeColumnWidth = HistoryTableFormatting.EstimateTextWidth(
+        TimeColumnWidth = HistoryTableFormatting.EstimateHeaderColumnWidth(
             "时间",
             rows.Select(row => row.RecordedAtText),
             HistoryTableFormatting.TimeColumnWidth);
-        DeviceColumnWidth = HistoryTableFormatting.EstimateTextWidth(
+        DeviceColumnWidth = HistoryTableFormatting.EstimateHeaderColumnWidth(
             "设备",
             rows.Select(row => row.DeviceId),
             HistoryTableFormatting.DeviceColumnWidth);
@@ -456,7 +456,7 @@ public partial class HistoryViewModel : ObservableObject
         for (var index = 0; index < _fixedColumns.Count; index++)
         {
             var column = _fixedColumns[index];
-            column.Width = HistoryTableFormatting.EstimateTextWidth(
+            column.Width = HistoryTableFormatting.EstimateHeaderColumnWidth(
                 column.HeaderText,
                 rows.Select(row => index < row.TagCells.Count ? row.TagCells[index].Text : "—"),
                 HistoryTableFormatting.TagColumnWidth);
@@ -474,13 +474,13 @@ public partial class HistoryViewModel : ObservableObject
     {
         TimeColumnWidth = Math.Max(
             TimeColumnWidth,
-            HistoryTableFormatting.EstimateTextWidth(
+            HistoryTableFormatting.EstimateHeaderColumnWidth(
                 "时间",
                 rows.Select(row => row.RecordedAtText),
                 TimeColumnWidth));
         DeviceColumnWidth = Math.Max(
             DeviceColumnWidth,
-            HistoryTableFormatting.EstimateTextWidth(
+            HistoryTableFormatting.EstimateHeaderColumnWidth(
                 "设备",
                 rows.Select(row => row.DeviceId),
                 DeviceColumnWidth));
@@ -490,7 +490,7 @@ public partial class HistoryViewModel : ObservableObject
             var column = _fixedColumns[index];
             column.Width = Math.Max(
                 column.Width,
-                HistoryTableFormatting.EstimateTextWidth(
+                HistoryTableFormatting.EstimateHeaderColumnWidth(
                     column.HeaderText,
                     rows.Select(row => index < row.TagCells.Count ? row.TagCells[index].Text : "—"),
                     column.Width));

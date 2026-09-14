@@ -33,11 +33,15 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
         _settings = settings;
         _dashboard = dashboard;
         AppVersionText = AppVersionInfo.Display;
-        LogPathText = AppPaths.CurrentRuntimeLogFile;
+        RefreshLogPaths();
     }
 
     public string AppVersionText { get; }
-    public string LogPathText { get; }
+
+    /// <summary>当前 UI 进程日志文件（打开文件夹时使用）。</summary>
+    public string LogPathText { get; private set; } = string.Empty;
+
+    [ObservableProperty] string logPathsDisplayText = string.Empty;
 
     public ObservableCollection<RuntimeLogEntry> LogEntries { get; } = [];
     public ObservableCollection<DiagnosticResult> Results { get; } = [];
@@ -54,6 +58,7 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
         _logStore.EntryAdded += OnLogEntryAdded;
         _acquisition.ConnectionChanged += OnServiceStateChanged;
         _subscription.ConnectionChanged += OnServiceStateChanged;
+        RefreshLogPaths();
         RefreshServiceStatus();
         ReloadLogs();
     }
@@ -95,6 +100,7 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
     [RelayCommand]
     void RefreshLogs()
     {
+        RefreshLogPaths();
         RefreshServiceStatus();
         ReloadLogs();
     }
@@ -108,9 +114,84 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    void OpenLogFolder()
+    async Task OpenLogFolderAsync()
     {
-        StatusMessage = $"日志文件：{LogPathText}";
+        RefreshLogPaths();
+        var logDirectory = Path.GetDirectoryName(LogPathText) ?? AppPaths.LogDirectory;
+        try
+        {
+            Directory.CreateDirectory(logDirectory);
+#if WINDOWS
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = logDirectory,
+                UseShellExecute = true
+            });
+            StatusMessage = "已在资源管理器中打开日志目录。";
+#elif ANDROID
+            await Launcher.Default.OpenAsync(new OpenFileRequest
+            {
+                File = new ReadOnlyFile(LogPathText)
+            });
+            StatusMessage = "已尝试打开日志文件。";
+#else
+            await Launcher.Default.OpenAsync(new OpenFileRequest
+            {
+                File = new ReadOnlyFile(LogPathText)
+            });
+            StatusMessage = $"日志目录：{logDirectory}";
+#endif
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"无法打开日志目录：{ex.Message}。路径见下方。";
+        }
+    }
+
+    void RefreshLogPaths()
+    {
+        try
+        {
+#if WINDOWS
+            WindowsAppDataPaths.WarmUp();
+#endif
+            LogPathText = AppPaths.CurrentRuntimeLogFile;
+            var logDirectory = AppPaths.LogDirectory;
+            var dataDirectory = AppPaths.UserDataDirectory;
+            var builder = new StringBuilder();
+            builder.AppendLine($"数据目录：{dataDirectory}");
+            builder.AppendLine($"日志目录：{logDirectory}");
+            builder.AppendLine($"本页(UI)日志：{LogPathText}");
+            var lineName = _settings.Current.LineName;
+            var excelPath = LineConfigPaths.GetLineExcelPath(lineName);
+            builder.AppendLine($"产线 Excel（运行时）：{excelPath}");
+            builder.AppendLine($"Excel 存在：{File.Exists(excelPath)}");
+            MqttEndpointCatalog.Normalize(_settings.Current);
+            builder.AppendLine($"MQTT 目标数：{_settings.Current.MqttEndpoints.Count}");
+            foreach (var endpoint in _settings.Current.MqttEndpoints)
+            {
+                var mqtt = endpoint.ToSettings();
+                var pwd = string.IsNullOrEmpty(mqtt.Password) ? "未设置" : "已设置";
+                builder.AppendLine(
+                    $"  · {endpoint.Name} {(endpoint.Enabled ? "启用" : "停用")} {mqtt.Host}:{mqtt.Port} clientId={mqtt.ClientId} user={mqtt.Username} password={pwd}");
+            }
+
+#if WINDOWS
+            var serviceLog = Path.Combine(logDirectory, $"runtime-{DateTime.Now:yyyyMMdd}.log");
+            builder.AppendLine($"后台服务日志：{serviceLog}");
+            var originFile = Path.Combine(dataDirectory, WindowsSharedDataDirectory.OriginFileName);
+            if (File.Exists(originFile))
+            {
+                builder.AppendLine($"目录来源：{File.ReadAllLines(originFile).FirstOrDefault() ?? "unknown"}");
+            }
+#endif
+            LogPathsDisplayText = builder.ToString().TrimEnd();
+        }
+        catch (Exception ex)
+        {
+            LogPathText = string.Empty;
+            LogPathsDisplayText = $"无法解析日志路径：{ex.Message}";
+        }
     }
 
     void ReloadLogs()
@@ -158,7 +239,11 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
         else
         {
             builder.AppendLine($"采集模式 · {(settings.UseSimulator ? "模拟" : "PLC")} · {( _acquisition.IsRunning ? "运行中" : "已停止")}");
-            builder.AppendLine($"PLC {(settings.UseSimulator ? "模拟" : _acquisition.PlcConnected ? "已连接" : "未连接")} · MQTT {(_acquisition.MqttConnected ? "已连接" : "未连接")}");
+            builder.AppendLine($"PLC {(settings.UseSimulator ? "模拟" : _acquisition.PlcConnected ? "已连接" : "未连接")} · MQTT {(_acquisition.MqttConnected ? "全部目标已连接" : "未全部连接")}");
+            if (!string.IsNullOrWhiteSpace(_acquisition.MqttTargetsStatus))
+            {
+                builder.AppendLine(_acquisition.MqttTargetsStatus);
+            }
 
             if (_acquisition.IsRunning)
             {

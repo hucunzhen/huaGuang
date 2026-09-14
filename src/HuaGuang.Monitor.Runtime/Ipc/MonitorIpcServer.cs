@@ -208,6 +208,7 @@ public sealed class MonitorIpcServer : BackgroundService
         }
 
         state.MqttPendingCount = acquisition.MqttPendingCount;
+        state.MqttTargetsStatus = acquisition.MqttTargetsStatus;
         state.LastPublishNote = acquisition.LastPublishNote;
         state.LastPlcElapsedMs = acquisition.LastPlcElapsedMs;
         state.LastWaitElapsedMs = acquisition.LastWaitElapsedMs;

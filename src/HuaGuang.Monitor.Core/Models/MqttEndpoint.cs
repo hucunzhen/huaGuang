@@ -19,11 +19,11 @@ public sealed class MqttEndpoint
 
     public MqttSettings ToSettings() => new()
     {
-        Host = Host,
+        Host = Host.Trim(),
         Port = Port,
-        ClientId = ClientId,
-        Username = Username,
-        Password = Password,
+        ClientId = ClientId.Trim(),
+        Username = MqttCredentialNormalizer.NormalizeUsername(Username),
+        Password = MqttCredentialNormalizer.NormalizePassword(Password),
         UseTls = UseTls,
         Qos = Qos,
         Topic = Topic

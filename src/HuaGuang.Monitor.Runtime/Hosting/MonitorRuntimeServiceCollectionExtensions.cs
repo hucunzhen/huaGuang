@@ -19,7 +19,9 @@ public static class MonitorRuntimeServiceCollectionExtensions
         services.AddSingleton<IAcquisitionBackgroundGuard, NoOpAcquisitionBackgroundGuard>();
         services.AddSingleton(_ => new HistoryStore(AppPaths.HistoryDatabasePath));
         services.AddSingleton<HistoryRecorder>();
-        services.AddSingleton<IPlcClient, ModbusTcpPlcClient>();
+        services.AddSingleton<ModbusTcpPlcClient>();
+        services.AddSingleton<S7PlcClient>();
+        services.AddSingleton<IPlcClient, PlcClientRouter>();
         services.AddSingleton<IMqttPublisher, MqttPublisher>();
         services.AddSingleton<MqttOutboundService>();
         services.AddSingleton<AcquisitionService>();

@@ -47,11 +47,18 @@ public sealed class AppSettings
 
 public sealed class PlcSettings
 {
+    public PlcProtocol Protocol { get; set; } = PlcProtocol.ModbusTcp;
     public string Model { get; set; } = "XD5E-60T10";
     public string Host { get; set; } = "192.168.6.10";
     public int Port { get; set; } = 502;
     public byte Station { get; set; } = 1;
     public int TimeoutMs { get; set; } = 2000;
+    /// <summary>S7 机架号（Rack）。</summary>
+    public int Rack { get; set; }
+    /// <summary>S7 槽位（Slot）；S7-1200/1500 通常为 1。</summary>
+    public int Slot { get; set; } = 1;
+    /// <summary>S7 CPU 类型，如 S71200、S71500。</summary>
+    public string CpuType { get; set; } = "S71200";
 }
 
 public sealed class MqttSettings

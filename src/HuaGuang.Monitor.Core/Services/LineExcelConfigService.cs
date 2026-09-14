@@ -43,9 +43,13 @@ public static class LineExcelConfigService
         ("LineName", "产线名称"),
         ("DeviceId", "设备编号"),
         ("PlcModel", "PLC型号"),
+        ("PlcProtocol", "PLC协议"),
         ("PlcHost", "PLC_IP"),
         ("PlcPort", "PLC端口"),
         ("PlcStation", "PLC站号"),
+        ("PlcRack", "PLC机架号"),
+        ("PlcSlot", "PLC槽位"),
+        ("PlcCpuType", "PLC_CPU类型"),
         ("PlcTimeoutMs", "PLC超时毫秒"),
         ("ScanIntervalMs", "扫描周期毫秒"),
         ("PublishIntervalMs", "发布周期毫秒"),
@@ -165,7 +169,7 @@ public static class LineExcelConfigService
         ApplyMqttEndpointsSheet(settings, workbook);
         MqttEndpointCatalog.Normalize(settings);
         ApplyMqttPayloadSheet(settings, workbook);
-        settings.Tags = ReadTagsSheet(workbook);
+        settings.Tags = ReadTagsSheet(workbook, settings.Plc.Protocol);
         PlcTagIdentity.AssignStableIds(settings);
         ApplyFieldMappings(settings, workbook);
     }
@@ -497,7 +501,8 @@ public static class LineExcelConfigService
         var settings = new AppSettings { LineName = lineName };
         if (workbook.Worksheets.TryGetWorksheet(TagsSheetName, out _))
         {
-            settings.Tags = ReadTagsSheet(workbook);
+            var protocol = PlcSettingsHelper.ParseProtocol(GetString(map, "PLC协议", string.Empty), GetString(map, "PLC型号", string.Empty));
+            settings.Tags = ReadTagsSheet(workbook, protocol);
         }
 
         ApplyFieldMappings(settings, workbook);
@@ -799,10 +804,10 @@ public static class LineExcelConfigService
                 Name = row.Cell(1).GetString().Trim(),
                 Enabled = ParseBoolText(row.Cell(2).GetString(), true),
                 Host = host,
-                Port = int.TryParse(row.Cell(4).GetString(), out var port) ? port : LineMqttDefaults.Port,
-                ClientId = row.Cell(5).GetString().Trim(),
-                Username = row.Cell(6).GetString().Trim(),
-                Password = row.Cell(7).GetString(),
+                Port = int.TryParse(ReadCellText(row.Cell(4)), out var port) ? port : LineMqttDefaults.Port,
+                ClientId = ReadCellText(row.Cell(5)).Trim(),
+                Username = MqttCredentialNormalizer.NormalizeUsername(ReadCellText(row.Cell(6))),
+                Password = MqttCredentialNormalizer.NormalizePassword(ReadCellText(row.Cell(7))),
                 UseTls = ParseBoolText(row.Cell(8).GetString(), false),
                 Qos = int.TryParse(row.Cell(9).GetString(), out var qos) ? qos : 0,
                 Topic = row.Cell(10).GetString().Trim()
@@ -843,9 +848,13 @@ public static class LineExcelConfigService
         ["LineName"] = settings.LineName,
         ["DeviceId"] = settings.DeviceId,
         ["PlcModel"] = settings.Plc.Model,
+        ["PlcProtocol"] = PlcSettingsHelper.FormatProtocol(settings.Plc.Protocol),
         ["PlcHost"] = settings.Plc.Host,
         ["PlcPort"] = settings.Plc.Port.ToString(),
         ["PlcStation"] = settings.Plc.Station.ToString(),
+        ["PlcRack"] = settings.Plc.Rack.ToString(),
+        ["PlcSlot"] = settings.Plc.Slot.ToString(),
+        ["PlcCpuType"] = settings.Plc.CpuType,
         ["PlcTimeoutMs"] = settings.Plc.TimeoutMs.ToString(),
         ["ScanIntervalMs"] = settings.ScanIntervalMs.ToString(),
         ["PublishIntervalMs"] = settings.PublishIntervalMs.ToString(),
@@ -970,10 +979,15 @@ public static class LineExcelConfigService
         settings.AddressCatalogVersion = GetInt(map, "产线配置版本", settings.AddressCatalogVersion);
         settings.DeviceId = GetString(map, "设备编号", settings.DeviceId);
         settings.Plc.Model = GetString(map, "PLC型号", settings.Plc.Model);
+        settings.Plc.Protocol = PlcSettingsHelper.ParseProtocol(GetString(map, "PLC协议", string.Empty), settings.Plc.Model);
         settings.Plc.Host = GetString(map, "PLC_IP", settings.Plc.Host);
         settings.Plc.Port = GetInt(map, "PLC端口", settings.Plc.Port);
         settings.Plc.Station = (byte)GetInt(map, "PLC站号", settings.Plc.Station);
+        settings.Plc.Rack = GetInt(map, "PLC机架号", settings.Plc.Rack);
+        settings.Plc.Slot = GetInt(map, "PLC槽位", settings.Plc.Slot);
+        settings.Plc.CpuType = GetString(map, "PLC_CPU类型", settings.Plc.CpuType);
         settings.Plc.TimeoutMs = GetInt(map, "PLC超时毫秒", settings.Plc.TimeoutMs);
+        PlcSettingsHelper.Normalize(settings.Plc);
         settings.ScanIntervalMs = GetInt(map, "扫描周期毫秒", settings.ScanIntervalMs);
         settings.PublishIntervalMs = GetInt(map, "发布周期毫秒", settings.PublishIntervalMs);
         settings.TemperaturePublishThresholdC = GetDouble(map, "温度发布阈值", settings.TemperaturePublishThresholdC);
@@ -1101,7 +1115,7 @@ public static class LineExcelConfigService
         settings.SubscribeTopic = topics[0];
     }
 
-    static List<PlcTag> ReadTagsSheet(XLWorkbook workbook)
+    static List<PlcTag> ReadTagsSheet(XLWorkbook workbook, PlcProtocol protocol)
     {
         if (!workbook.Worksheets.TryGetWorksheet(TagsSheetName, out var sheet))
         {
@@ -1175,7 +1189,7 @@ public static class LineExcelConfigService
 
             if (tag.Source != TagSource.Manual)
             {
-                XinjeXd5eMapper.ApplyTo(tag);
+                PlcAddressMapper.ApplyTo(tag, protocol);
             }
 
             tags.Add(tag);
@@ -1281,5 +1295,25 @@ public static class LineExcelConfigService
         }
 
         return double.TryParse(cell.GetString(), out var parsed) ? parsed : fallback;
+    }
+
+    static string ReadCellText(IXLCell cell)
+    {
+        if (cell.IsEmpty())
+        {
+            return string.Empty;
+        }
+
+        if (cell.TryGetValue(out string text))
+        {
+            return text;
+        }
+
+        if (cell.TryGetValue(out double number))
+        {
+            return number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return cell.GetString();
     }
 }

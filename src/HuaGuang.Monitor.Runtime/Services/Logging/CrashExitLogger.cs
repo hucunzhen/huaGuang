@@ -184,11 +184,12 @@ public static class CrashExitLogger
         }
         catch
         {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                AppPaths.PackageId,
-                "Data",
-                "logs");
+            if (OperatingSystem.IsWindows())
+            {
+                return WindowsSharedDataDirectory.ResolveLogDirectory();
+            }
+
+            return Path.Combine(Path.GetTempPath(), AppPaths.PackageId, "Data", "logs");
         }
     }
 

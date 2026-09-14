@@ -184,11 +184,14 @@ public static class LogFormatting
         var clientId = string.IsNullOrWhiteSpace(settings.ClientId)
             ? LineMqttDefaults.ResolveClientIdForLine(lineName ?? string.Empty)
             : settings.ClientId;
-        return $"host={settings.Host}:{settings.Port}, clientId={clientId}, user={settings.Username}, tls={settings.UseTls}, qos={settings.Qos}, topic={settings.Topic}";
+        var passwordConfigured = !string.IsNullOrEmpty(settings.Password);
+        return $"host={settings.Host}:{settings.Port}, clientId={clientId}, user={settings.Username}, passwordConfigured={passwordConfigured}, tls={settings.UseTls}, qos={settings.Qos}, topic={settings.Topic}";
     }
 
     public static string DescribePlc(PlcSettings settings) =>
-        $"host={settings.Host}:{settings.Port}, station={settings.Station}, timeout={settings.TimeoutMs}ms";
+        settings.Protocol == PlcProtocol.S7
+            ? $"protocol=S7 cpu={settings.CpuType} host={settings.Host}:{settings.Port} rack={settings.Rack} slot={settings.Slot} timeout={settings.TimeoutMs}ms"
+            : $"protocol=Modbus host={settings.Host}:{settings.Port} station={settings.Station} timeout={settings.TimeoutMs}ms";
 
     public static string Truncate(string? text, int maxLength = 512) =>
         string.IsNullOrEmpty(text)

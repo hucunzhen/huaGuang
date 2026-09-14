@@ -379,12 +379,12 @@ public sealed class HistoryStore
         return ordered.Select(name =>
         {
             tagUnits.TryGetValue(name, out var unit);
-            var header = string.IsNullOrWhiteSpace(unit) ? name : $"{name}\n{unit}";
+            var header = HistoryTableFormatting.FormatColumnHeader(name, unit);
             return new HistoryTableColumn
             {
                 TagName = name,
                 HeaderText = header,
-                Width = HistoryTableFormatting.EstimateTextWidth(header, minWidth: HistoryTableFormatting.TagColumnWidth)
+                Width = HistoryTableFormatting.EstimateHeaderColumnWidth(header, minWidth: HistoryTableFormatting.TagColumnWidth)
             };
         }).ToList();
     }

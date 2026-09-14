@@ -52,11 +52,12 @@
                        LineBreakMode="WordWrap" />
             </HorizontalStackLayout>
 
-            <Label Text="信捷地址（XD5E）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
-            <Entry Text="{Binding XinjeAddress}" Placeholder="D100 / M0 / X20 / Y0" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="{Binding PlcAddressLabel}" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Entry Text="{Binding XinjeAddress}" Placeholder="{Binding PlcAddressPlaceholder}" IsVisible="{Binding IsPlcSource}" />
             <Label Text="{Binding ResolvedHint}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="WordWrap"
                    IsVisible="{Binding IsPlcSource}" />
-            <Label Text="数据类型（M/X/Y 会自动按位读取）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="{Binding PlcAddressHelp}" TextColor="#6E8499" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="数据类型（位地址会自动按 Bool 读取）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Picker ItemsSource="{Binding PlcDataTypes}" SelectedItem="{Binding DataTypeName}" IsVisible="{Binding IsPlcSource}" />
             <Label Text="字节序（32 位）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Picker ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrderName}" IsVisible="{Binding IsPlcSource}" />

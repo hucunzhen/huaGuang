@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HuaGuang.Monitor.Ipc;
@@ -19,6 +21,7 @@ public partial class SettingsViewModel : ObservableObject
     readonly ILogger<SettingsViewModel> _logger;
     bool _isApplyingLine;
     bool _isSwitchingLine;
+    bool _isLoadingSettings;
 
     public SettingsViewModel(
         SettingsStore store,
@@ -34,6 +37,7 @@ public partial class SettingsViewModel : ObservableObject
         _startup = startup;
         _dashboard = dashboard;
         _logger = logger;
+        MqttEndpoints.CollectionChanged += OnMqttEndpointsCollectionChanged;
         _isApplyingLine = true;
         LoadFrom(_store.Current);
         SelectedLineName = string.IsNullOrWhiteSpace(_store.Current.LineName)
@@ -71,10 +75,36 @@ public partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(IsAcquisitionSettings));
     }
 
+    [ObservableProperty] string selectedPlcProtocol = "Modbus TCP";
+    [ObservableProperty] string plcModel = "XD5E-60T10";
     [ObservableProperty] string plcHost = "192.168.6.10";
     [ObservableProperty] string plcPort = "502";
     [ObservableProperty] string station = "1";
+    [ObservableProperty] string plcRack = "0";
+    [ObservableProperty] string plcSlot = "1";
+    [ObservableProperty] string plcCpuType = "S71200";
     [ObservableProperty] string plcTimeoutMs = "2000";
+
+    public string[] PlcProtocolOptions { get; } = ["Modbus TCP", "西门子 S7"];
+    public string[] S7CpuTypeOptions { get; } = ["S71200", "S71500", "S7300", "S7400", "S7200Smart"];
+    public bool IsS7Plc => SelectedPlcProtocol == "西门子 S7";
+    public bool IsModbusPlc => !IsS7Plc;
+    public string PlcSectionTitle => PlcSettingsHelper.PlcSectionTitle(new PlcSettings
+    {
+        Protocol = IsS7Plc ? PlcProtocol.S7 : PlcProtocol.ModbusTcp,
+        Model = PlcModel,
+        CpuType = PlcCpuType
+    });
+
+    partial void OnSelectedPlcProtocolChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsS7Plc));
+        OnPropertyChanged(nameof(IsModbusPlc));
+        OnPropertyChanged(nameof(PlcSectionTitle));
+    }
+
+    partial void OnPlcModelChanged(string value) => OnPropertyChanged(nameof(PlcSectionTitle));
+    partial void OnPlcCpuTypeChanged(string value) => OnPropertyChanged(nameof(PlcSectionTitle));
 
     [ObservableProperty] string statusMessage = string.Empty;
 
@@ -245,6 +275,12 @@ public partial class SettingsViewModel : ObservableObject
 
         try
         {
+            if (!TryValidateMqttSettings(out var validationMessage))
+            {
+                StatusMessage = validationMessage;
+                return;
+            }
+
             var settings = BuildPendingSettings();
             settings.Tags = _store.Current.Tags;
             settings.MqttPayload = _store.Current.MqttPayload;
@@ -323,10 +359,7 @@ public partial class SettingsViewModel : ObservableObject
         settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
         settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
         settings.UseSimulator = UseSimulator;
-        settings.Plc.Host = PlcHost.Trim();
-        settings.Plc.Port = ParseInt(PlcPort, 502, 1, 65535);
-        settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
-        settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
+        ApplyPlcSettingsTo(settings);
         ApplyMqttEndpointsToSettings(settings);
         return settings;
     }
@@ -404,6 +437,63 @@ public partial class SettingsViewModel : ObservableObject
         MqttEndpointCatalog.Normalize(settings);
     }
 
+    void OnMqttEndpointsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (MqttEndpointViewModel endpoint in e.OldItems)
+            {
+                endpoint.PropertyChanged -= OnMqttEndpointPropertyChanged;
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (MqttEndpointViewModel endpoint in e.NewItems)
+            {
+                endpoint.PropertyChanged += OnMqttEndpointPropertyChanged;
+            }
+        }
+
+        SyncMqttEndpointsToStore();
+    }
+
+    void OnMqttEndpointPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+        SyncMqttEndpointsToStore();
+
+    /// <summary>
+    /// 设置页 MQTT 列表与内存配置同步，避免只改 UI 未点「保存设置」时被点表等保存写回旧 Excel。
+    /// </summary>
+    void SyncMqttEndpointsToStore()
+    {
+        if (_isApplyingLine || _isSwitchingLine || _isLoadingSettings)
+        {
+            return;
+        }
+
+        ApplyMqttEndpointsToSettings(_store.Current);
+    }
+
+    void ApplyPlcSettingsTo(AppSettings settings)
+    {
+        settings.Plc.Protocol = SelectedPlcProtocol == "西门子 S7" ? PlcProtocol.S7 : PlcProtocol.ModbusTcp;
+        settings.Plc.Model = string.IsNullOrWhiteSpace(PlcModel)
+            ? settings.Plc.Protocol == PlcProtocol.S7 ? "S7-1200" : "XD5E-60T10"
+            : PlcModel.Trim();
+        settings.Plc.Host = PlcHost.Trim();
+        settings.Plc.Port = ParseInt(
+            PlcPort,
+            settings.Plc.Protocol == PlcProtocol.S7 ? 102 : 502,
+            1,
+            65535);
+        settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
+        settings.Plc.Rack = ParseInt(PlcRack, 0, 0, 7);
+        settings.Plc.Slot = ParseInt(PlcSlot, 1, 0, 31);
+        settings.Plc.CpuType = string.IsNullOrWhiteSpace(PlcCpuType) ? "S71200" : PlcCpuType.Trim();
+        settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
+        PlcSettingsHelper.Normalize(settings.Plc);
+    }
+
     [RelayCommand]
     async Task SaveAsync()
     {
@@ -442,10 +532,7 @@ public partial class SettingsViewModel : ObservableObject
             settings.AutoStartAcquisition = AutoStartAcquisition;
             settings.EnableHistoryRecording = EnableHistoryRecording;
             settings.HistoryRetentionDays = ParseInt(HistoryRetentionDays, 1, 1, 365);
-            settings.Plc.Host = PlcHost.Trim();
-            settings.Plc.Port = ParseInt(PlcPort, 502, 1, 65535);
-            settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
-            settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
+            ApplyPlcSettingsTo(settings);
             ApplyMqttEndpointsToSettings(settings);
 
             _startup.Apply(settings.StartWithWindows);
@@ -465,6 +552,19 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     void LoadFrom(AppSettings settings)
+    {
+        _isLoadingSettings = true;
+        try
+        {
+            LoadFromCore(settings);
+        }
+        finally
+        {
+            _isLoadingSettings = false;
+        }
+    }
+
+    void LoadFromCore(AppSettings settings)
     {
         DeviceId = settings.DeviceId;
         SelectedOperationMode = settings.OperationMode == AppOperationMode.Subscribe ? "订阅模式" : "采集模式";
@@ -486,9 +586,15 @@ public partial class SettingsViewModel : ObservableObject
         AutoStartAcquisition = settings.AutoStartAcquisition;
         EnableHistoryRecording = settings.EnableHistoryRecording;
         HistoryRetentionDays = settings.HistoryRetentionDays.ToString();
+        PlcSettingsHelper.Normalize(settings.Plc);
+        SelectedPlcProtocol = PlcSettingsHelper.FormatProtocol(settings.Plc.Protocol);
+        PlcModel = settings.Plc.Model;
         PlcHost = settings.Plc.Host;
         PlcPort = settings.Plc.Port.ToString();
         Station = settings.Plc.Station.ToString();
+        PlcRack = settings.Plc.Rack.ToString();
+        PlcSlot = settings.Plc.Slot.ToString();
+        PlcCpuType = settings.Plc.CpuType;
         PlcTimeoutMs = settings.Plc.TimeoutMs.ToString();
         MqttEndpointCatalog.Normalize(settings);
         MqttEndpoints.Clear();

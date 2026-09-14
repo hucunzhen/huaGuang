@@ -12,6 +12,7 @@ public sealed class MqttPublisher : IMqttPublisher
     readonly MqttClientFactory _factory = new();
     readonly ILogger<MqttPublisher> _logger;
     IMqttClient? _client;
+    MqttSettings? _connectedProfile;
 
     public MqttPublisher(ILogger<MqttPublisher> logger) => _logger = logger;
 
@@ -19,8 +20,17 @@ public sealed class MqttPublisher : IMqttPublisher
 
     public event EventHandler<bool>? ConnectionChanged;
 
+    public bool MatchesConnection(MqttSettings settings) =>
+        _connectedProfile is not null
+        && ConnectionProfileEquals(_connectedProfile, settings);
+
     public async Task ConnectAsync(MqttSettings settings, string? lineName, CancellationToken cancellationToken)
     {
+        if (_client?.IsConnected == true && MatchesConnection(settings))
+        {
+            return;
+        }
+
         await DisconnectAsync().ConfigureAwait(false);
 
         var client = _factory.CreateMqttClient();
@@ -56,6 +66,7 @@ public sealed class MqttPublisher : IMqttPublisher
         }
 
         _client = client;
+        _connectedProfile = CloneConnectionProfile(settings);
         _logger.LogInformation(
             "MQTT 客户端已连接 {Mqtt}",
             LogFormatting.DescribeMqtt(settings, lineName));
@@ -83,10 +94,31 @@ public sealed class MqttPublisher : IMqttPublisher
         {
             _client.Dispose();
             _client = null;
+            _connectedProfile = null;
             ConnectionChanged?.Invoke(this, false);
             _logger.LogInformation("MQTT 客户端已断开");
         }
     }
+
+    static bool ConnectionProfileEquals(MqttSettings left, MqttSettings right) =>
+        string.Equals(left.Host?.Trim(), right.Host?.Trim(), StringComparison.OrdinalIgnoreCase)
+        && left.Port == right.Port
+        && string.Equals(left.ClientId?.Trim(), right.ClientId?.Trim(), StringComparison.Ordinal)
+        && string.Equals(left.Username?.Trim(), right.Username?.Trim(), StringComparison.Ordinal)
+        && string.Equals(left.Password ?? string.Empty, right.Password ?? string.Empty, StringComparison.Ordinal)
+        && left.UseTls == right.UseTls;
+
+    static MqttSettings CloneConnectionProfile(MqttSettings settings) => new()
+    {
+        Host = settings.Host,
+        Port = settings.Port,
+        ClientId = settings.ClientId,
+        Username = settings.Username,
+        Password = settings.Password,
+        UseTls = settings.UseTls,
+        Qos = settings.Qos,
+        Topic = settings.Topic
+    };
 
     public async Task PublishAsync(string topic, string payload, int qos, CancellationToken cancellationToken)
     {

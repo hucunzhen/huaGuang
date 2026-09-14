@@ -12,7 +12,7 @@ static class MqttConnectionFactory
         _ = lineName;
         var clientId = settings.ClientId?.Trim() ?? string.Empty;
         var username = settings.Username?.Trim() ?? string.Empty;
-        var password = settings.Password ?? string.Empty;
+        var password = MqttCredentialNormalizer.NormalizePassword(settings.Password);
 
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(settings.Host, settings.Port)
@@ -67,7 +67,11 @@ static class MqttConnectionFactory
         var detail = string.IsNullOrWhiteSpace(result.ReasonString)
             ? result.ResultCode.ToString()
             : $"{result.ResultCode} — {result.ReasonString}";
+        var pwdLen = MqttCredentialNormalizer.NormalizePassword(settings.Password).Length;
+        var authHint = result.ResultCode == MqttClientConnectResultCode.NotAuthorized
+            ? " Broker 拒绝了用户名/密码/ClientId 组合；请核对「MQTT目标」该行与平台开户信息一致（含 TLS、ClientId 是否绑定账号），并确认现场运行时 Excel 与本地测试文件相同。"
+            : string.Empty;
         throw new InvalidOperationException(
-            $"MQTT 连接失败：{detail}（{settings.Host}:{settings.Port}，ClientId {clientHint}，账号 {userHint}，{tlsHint}）");
+            $"MQTT 连接失败：{detail}（{settings.Host}:{settings.Port}，ClientId {clientHint}，账号 {userHint}，passwordLength={pwdLen}，{tlsHint}）{authHint}");
     }
 }

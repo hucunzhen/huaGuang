@@ -20,6 +20,7 @@ public static class MonitorCoreTests
         Run("平台字段跨产线映射", TestPlatformFieldMappingWithoutCatalogTag),
         Run("华迪订阅字段映射", TestHuadiSubscribeFieldMapping),
         Run("信捷地址解析 D6000", TestXinjeAddress),
+        Run("西门子 S7 地址", TestS7Address),
         Run("Float32 字节序", TestRegisterConverter),
         Run("数值显示精度", TestValueFormatting),
         Run("产线点位数量", TestLineCatalog),
@@ -27,6 +28,7 @@ public static class MonitorCoreTests
         Run("Excel 配置读写", TestLineExcelRoundTrip),
         Run("Excel 缺发布周期", TestLegacyExcelMissingPublishInterval),
         Run("Excel 多 MQTT 目标", TestMqttEndpointsExcelRoundTrip),
+        Run("Excel 导出保留 MQTT 凭证", TestExportPreservesMqttEndpointCredentials),
         Run("Excel 维护保留点表", TestLineFileMaintenancePreservesCustomTags),
         Run("Excel 字段映射补全", TestPatchEmptyMqttFieldMappings),
         Run("Excel 加载不改写", TestLineExcelLoadPreservesContent),
@@ -503,6 +505,39 @@ public static class MonitorCoreTests
         AssertTrue(resolved.Table == ModbusTable.HoldingRegister);
     }
 
+    static void TestS7Address()
+    {
+        AssertTrue(SiemensS7AddressMapper.TryResolve("DB1.DBD0", TagDataType.Float32, out var dbReal, out _));
+        AssertTrue(dbReal.Area == S7MemoryArea.DataBlock);
+        AssertTrue(dbReal.DbNumber == 1);
+        AssertTrue(dbReal.ByteOffset == 0);
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("DB2.DBX4.3", TagDataType.Bool, out var dbBit, out _));
+        AssertTrue(dbBit.IsBit);
+        AssertTrue(dbBit.BitOffset == 3);
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("MW10", TagDataType.Int16, out var memoryWord, out _));
+        AssertTrue(memoryWord.Area == S7MemoryArea.Memory);
+        AssertTrue(memoryWord.ByteOffset == 10);
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("I0.0", TagDataType.Bool, out var inputBit, out _));
+        AssertTrue(inputBit.Area == S7MemoryArea.Input);
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("IW64", TagDataType.Int16, out var inputWord, out _));
+        AssertTrue(inputWord.Area == S7MemoryArea.Input);
+        AssertTrue(inputWord.ByteOffset == 64);
+        AssertTrue(inputWord.Normalized == "IW64");
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("%IW128", TagDataType.UInt16, out var percentWord, out _));
+        AssertTrue(percentWord.ByteOffset == 128);
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("EW64", TagDataType.Int16, out var germanWord, out _));
+        AssertTrue(germanWord.Normalized == "IW64");
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("ID100", TagDataType.Float32, out var inputDword, out _));
+        AssertTrue(inputDword.ByteOffset == 100);
+    }
+
     static void TestRegisterConverter()
     {
         var value = RegisterConverter.ToValue([0x0000, 0x0000], TagDataType.Float32, ByteOrder.CDAB);
@@ -663,8 +698,48 @@ public static class MonitorCoreTests
             AssertTrue(loaded.MqttEndpoints.Count == 2);
             AssertTrue(loaded.MqttEndpoints[1].Host == "10.0.0.8");
             AssertTrue(loaded.MqttEndpoints[1].ClientId == "BACKUP");
+            AssertTrue(loaded.MqttEndpoints[1].Username == "user2");
+            AssertTrue(loaded.MqttEndpoints[1].Password == "pass2");
             MqttEndpointCatalog.Normalize(loaded);
             AssertTrue(loaded.Mqtt.Host == loaded.MqttEndpoints[0].Host);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestExportPreservesMqttEndpointCredentials()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-mqtt-creds-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var settings = LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name);
+            settings.Mqtt.Username = "legacy-user";
+            settings.Mqtt.Password = "legacy-pass";
+            settings.MqttEndpoints =
+            [
+                new MqttEndpoint
+                {
+                    Name = "平台",
+                    Host = settings.Mqtt.Host,
+                    Port = settings.Mqtt.Port,
+                    ClientId = settings.Mqtt.ClientId,
+                    Username = "endpoint-user",
+                    Password = "endpoint-pass",
+                    Topic = settings.Mqtt.Topic
+                }
+            ];
+
+            LineExcelConfigService.Export(settings, tempPath);
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            AssertTrue(loaded.MqttEndpoints[0].Username == "endpoint-user");
+            AssertTrue(loaded.MqttEndpoints[0].Password == "endpoint-pass");
         }
         finally
         {

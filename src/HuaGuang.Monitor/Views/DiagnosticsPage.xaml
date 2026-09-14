@@ -71,13 +71,28 @@
                         Margin="0,0,8,8"
                         BackgroundColor="#1F3A52"
                         FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
-                <Button Text="日志路径"
+                <Button Text="打开日志目录"
                         Command="{Binding OpenLogFolderCommand}"
                         Padding="10,6"
                         Margin="0,0,8,8"
                         BackgroundColor="#1F3A52"
                         FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
             </FlexLayout>
+            <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#0F1A26" Padding="10,8">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="日志与数据路径"
+                           TextColor="#2EC4B6"
+                           FontAttributes="Bold"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    <Label Text="{Binding LogPathsDisplayText}"
+                           TextColor="#8AA0B5"
+                           LineBreakMode="WordWrap"
+                           FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                </VerticalStackLayout>
+            </Border>
         </VerticalStackLayout>
 
         <Border Grid.Row="2"

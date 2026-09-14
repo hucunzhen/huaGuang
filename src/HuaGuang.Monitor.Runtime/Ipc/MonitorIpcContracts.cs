@@ -43,6 +43,7 @@ public sealed class MonitorRuntimeState
     public bool IsRunning { get; set; }
     public bool PlcConnected { get; set; }
     public bool MqttConnected { get; set; }
+    public string MqttTargetsStatus { get; set; } = string.Empty;
     public int MqttPendingCount { get; set; }
     public string LastError { get; set; } = string.Empty;
     public string LastPayload { get; set; } = string.Empty;

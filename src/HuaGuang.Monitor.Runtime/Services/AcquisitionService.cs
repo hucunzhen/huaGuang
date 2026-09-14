@@ -43,7 +43,9 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 
     public bool IsRunning { get; private set; }
     public bool PlcConnected => !CurrentSettings.UseSimulator && _plc.IsConnected;
-    public bool MqttConnected => _mqttOutbound.IsConnected;
+    public bool MqttConnected => _mqttOutbound.AllEnabledTargetsConnected(CurrentSettings);
+
+    public string MqttTargetsStatus => _mqttOutbound.BuildTargetsStatus(CurrentSettings);
     public int MqttPendingCount => _mqttOutbound.PendingCount;
     public string LastError => string.IsNullOrWhiteSpace(_plcError) ? _mqttOutbound.LastError : _plcError;
     public string LastPayload => _mqttOutbound.LastPayload;
@@ -77,15 +79,29 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 return;
             }
 
+            await _settingsStore.LoadAsyncIfChanged().ConfigureAwait(false);
             var settings = CurrentSettings;
+            MqttEndpointCatalog.Normalize(settings);
+            var excelPath = LineConfigPaths.GetLineExcelPath(settings.LineName);
             _logger.LogInformation(
-                "启动采集 line={LineName} simulator={Simulator} scanMs={ScanMs} publishMs={PublishMs} plc={Plc} mqtt={Mqtt}",
+                "启动采集 line={LineName} excel={ExcelPath} simulator={Simulator} scanMs={ScanMs} publishMs={PublishMs} plc={Plc} mqtt={Mqtt} mqttTargets={TargetCount}",
                 settings.LineName,
+                excelPath,
                 settings.UseSimulator,
                 settings.ScanIntervalMs,
                 settings.PublishIntervalMs,
                 LogFormatting.DescribePlc(settings.Plc),
-                LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
+                LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName),
+                settings.MqttEndpoints.Count);
+            foreach (var endpoint in settings.MqttEndpoints.Where(endpoint => endpoint.Enabled))
+            {
+                _logger.LogInformation(
+                    "启动采集 MQTT 目标 name={TargetName} {Mqtt}",
+                    endpoint.Name,
+                    LogFormatting.DescribeMqtt(endpoint.ToSettings(), settings.LineName));
+            }
+
+            await _mqttOutbound.ResetConnectionsAsync().ConfigureAwait(false);
 
             if (CurrentSettings.UseSimulator && _plc.IsConnected)
             {

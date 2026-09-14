@@ -96,18 +96,24 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
     }
 
+    public string PlcAddressLabel => PlcAddressMapper.AddressLabel(_store.Current.Plc.Protocol);
+
+    public string PlcAddressPlaceholder => PlcAddressMapper.AddressPlaceholder(_store.Current.Plc.Protocol);
+
+    public string PlcAddressHelp => PlcAddressMapper.AddressHelp(_store.Current.Plc.Protocol);
+
     public string ResolvedHint
     {
         get
         {
-            if (!XinjeXd5eMapper.TryResolve(XinjeAddress, out var resolved, out var error))
+            if (!Enum.TryParse<TagDataType>(DataTypeName, out var dataType))
             {
-                return error;
+                dataType = TagDataType.Float32;
             }
 
-            return resolved.IsBit
-                ? $"XD5E 线圈  {resolved.Normalized} → {resolved.Address}"
-                : $"XD5E 保持寄存器  {resolved.Normalized} → {resolved.Address}";
+            return PlcAddressMapper.TryResolve(_store.Current.Plc.Protocol, XinjeAddress, dataType, out var hint, out var error)
+                ? hint
+                : error;
         }
     }
 
@@ -215,7 +221,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
         else
         {
-            if (!XinjeXd5eMapper.TryResolve(XinjeAddress, out _, out var addressError))
+            if (!PlcAddressMapper.TryResolve(_store.Current.Plc.Protocol, XinjeAddress, dataType, out _, out var addressError))
             {
                 StatusMessage = addressError;
                 return;
@@ -236,7 +242,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
             tag.XinjeAddress = XinjeAddress.Trim();
             tag.Scale = scale;
             tag.Offset = offset;
-            XinjeXd5eMapper.ApplyTo(tag);
+            PlcAddressMapper.ApplyTo(tag, _store.Current.Plc.Protocol);
         }
 
         if (_store.Current.Tags.All(t => t.Id != tag.Id))
