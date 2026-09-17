@@ -67,21 +67,36 @@ public static class LineConfigPaths
     {
         Directory.CreateDirectory(LinesDirectory);
         var path = GetLineExcelPath(lineName);
+        var templatePath = ResolveShippedLineExcelPath(lineName);
         if (File.Exists(path))
         {
-            LineExcelConfigService.EnsureLineFile(path, lineName, ResolveShippedLineExcelPath(lineName));
-            return;
-        }
+            if (LineExcelConfigService.NeedsShippedTemplateRefresh(path, lineName, templatePath) &&
+                templatePath is not null &&
+                File.Exists(templatePath))
+            {
+                File.Copy(templatePath, path, overwrite: true);
+            }
 
-        if (TryCopyShippedLineExcel(lineName, path))
-        {
-            LineExcelConfigService.EnsureLineFile(path, lineName, ResolveShippedLineExcelPath(lineName));
+            LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
             return;
         }
 
         if (TryCopyBundledLineFile(lineName, path))
         {
-            LineExcelConfigService.EnsureLineFile(path, lineName, ResolveShippedLineExcelPath(lineName));
+            LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
+            return;
+        }
+
+        if (TryCopyShippedLineExcel(lineName, path))
+        {
+            LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
+            return;
+        }
+
+        if (templatePath is not null && File.Exists(templatePath))
+        {
+            File.Copy(templatePath, path, overwrite: true);
+            LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
             return;
         }
 

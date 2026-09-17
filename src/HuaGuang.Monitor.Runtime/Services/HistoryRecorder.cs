@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using HuaGuang.Monitor.Models;
+using Microsoft.Extensions.Logging;
 
 namespace HuaGuang.Monitor.Services;
 
@@ -11,6 +12,7 @@ public sealed class HistoryRecorder : IAsyncDisposable
     readonly SettingsStore _settings;
     readonly AcquisitionService _acquisition;
     readonly SubscriptionService _subscription;
+    readonly ILogger<HistoryRecorder> _logger;
     readonly Channel<HistorySampleWriteRequest> _channel;
     readonly CancellationTokenSource _cts = new();
     readonly Task _writer;
@@ -19,12 +21,14 @@ public sealed class HistoryRecorder : IAsyncDisposable
         HistoryStore store,
         SettingsStore settings,
         AcquisitionService acquisition,
-        SubscriptionService subscription)
+        SubscriptionService subscription,
+        ILogger<HistoryRecorder> logger)
     {
         _store = store;
         _settings = settings;
         _acquisition = acquisition;
         _subscription = subscription;
+        _logger = logger;
         _channel = Channel.CreateUnbounded<HistorySampleWriteRequest>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -124,7 +128,26 @@ public sealed class HistoryRecorder : IAsyncDisposable
     {
         var days = Math.Clamp(_settings.Current.HistoryRetentionDays, 1, 365);
         var cutoff = DateTimeOffset.Now.AddDays(-days);
-        await _store.PruneOlderThanAsync(cutoff).ConfigureAwait(false);
+        try
+        {
+            var deleted = await _store.PruneOlderThanAsync(cutoff).ConfigureAwait(false);
+            if (deleted > 0)
+            {
+                _logger.LogInformation(
+                    "历史记录已清理 deleted={Deleted} retentionDays={Days} cutoff={Cutoff:O}",
+                    deleted,
+                    days,
+                    cutoff);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "历史记录清理失败（服务继续运行）retentionDays={Days} cutoff={Cutoff:O}",
+                days,
+                cutoff);
+        }
     }
 
     bool ShouldRecord() => _settings.Current.EnableHistoryRecording;

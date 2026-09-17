@@ -24,6 +24,7 @@ public static class MonitorCoreTests
         Run("Float32 字节序", TestRegisterConverter),
         Run("数值显示精度", TestValueFormatting),
         Run("产线点位数量", TestLineCatalog),
+        Run("S7 测试产线种子", TestS7TestLineCatalog),
         Run("设置读写", TestSettingsRoundTrip),
         Run("Excel 配置读写", TestLineExcelRoundTrip),
         Run("Excel 缺发布周期", TestLegacyExcelMissingPublishInterval),
@@ -549,6 +550,21 @@ public static class MonitorCoreTests
     {
         var tag = new PlcTag { Name = "车速", DataType = TagDataType.Float32, DisplayPrecision = 2 };
         AssertTrue(ValueFormatting.FormatDisplay(tag, 45.234, 1) == "45.23");
+    }
+
+    static void TestS7TestLineCatalog()
+    {
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.S7TestLineName);
+        AssertTrue(settings.Plc.Protocol == PlcProtocol.S7);
+        AssertTrue(settings.Plc.Port == 102);
+        AssertTrue(settings.Plc.Rack == 0);
+        AssertTrue(settings.Plc.Slot == 0);
+        AssertTrue(settings.Plc.CpuType == "S71500");
+        foreach (var tag in settings.Tags.Where(tag => tag.Source == TagSource.Plc))
+        {
+            AssertTrue(SiemensS7AddressMapper.TryResolve(tag.XinjeAddress, tag.DataType, out _, out _));
+        }
     }
 
     static void TestLineCatalog()

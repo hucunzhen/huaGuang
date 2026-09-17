@@ -40,7 +40,15 @@ public static class Program
         var host = builder.Build();
         CrashExitLogger.Register(host.Services.GetRequiredService<ILoggerFactory>());
         CrashExitLogger.SetContext(typeof(Program).Assembly.GetName().Version?.ToString(), "watchdog");
-        host.Services.GetRequiredService<SettingsStore>().LoadAsync().GetAwaiter().GetResult();
+        var store = host.Services.GetRequiredService<SettingsStore>();
+        var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("WatchdogStartup");
+        if (!store.TryLoad())
+        {
+            startupLogger.LogCritical(
+                "产线 Excel 加载失败，看门狗仍将启动 error={Error}",
+                store.LastLoadError);
+        }
+
         host.Run();
     }
 }

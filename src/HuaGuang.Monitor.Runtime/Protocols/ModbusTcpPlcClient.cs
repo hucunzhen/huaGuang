@@ -163,19 +163,26 @@ public sealed class ModbusTcpPlcClient : IPlcClient
 
     void AbortOnTimeout()
     {
-        _logger.LogWarning("PLC 读超时，强制断开连接");
+        _logger.LogWarning("PLC 读超时或传输失败，清理连接");
         lock (_gate)
         {
             try
             {
-                _tcpClient?.Close();
+                _master?.Dispose();
             }
             catch
             {
-                // 强制断开以结束阻塞中的 socket 读
             }
 
             _master = null;
+            try
+            {
+                _tcpClient?.Dispose();
+            }
+            catch
+            {
+            }
+
             _tcpClient = null;
         }
     }

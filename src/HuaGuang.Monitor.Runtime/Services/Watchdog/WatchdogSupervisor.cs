@@ -195,6 +195,23 @@ public sealed class WatchdogSupervisor
             return;
         }
 
+        if (OperatingSystem.IsWindows() && WindowsUiWatchPolicy.ShouldDeferUiLaunchToStartupRegistry(uiState))
+        {
+            var msg = "跳过 UI 重启：已启用开机自启，等待系统 Run 项在登录时启动（开机 3 分钟内不重复拉起）";
+            _logger.LogDebug(msg);
+            WatchdogDiagLog.Write(msg);
+            return;
+        }
+
+        if (registryWatch)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(8));
+            if (IsProcessRunning(WatchdogConstants.UiProcessName))
+            {
+                return;
+            }
+        }
+
         var uiPath = Path.Combine(_installRoot, WatchdogConstants.UiExeFileName);
         if (!File.Exists(uiPath))
         {

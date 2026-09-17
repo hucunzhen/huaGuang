@@ -107,7 +107,11 @@ public sealed class MonitorConfigWatcher : BackgroundService
         {
             await Task.Delay(300).ConfigureAwait(false);
             var wasRunning = _acquisition.IsRunning || _subscription.IsRunning;
-            await _settings.LoadAsync().ConfigureAwait(false);
+            if (!await _settings.TryLoadAsync().ConfigureAwait(false))
+            {
+                _logger.LogWarning("配置文件热加载失败 error={Error}", _settings.LastLoadError);
+                return;
+            }
             if (!wasRunning)
             {
                 return;

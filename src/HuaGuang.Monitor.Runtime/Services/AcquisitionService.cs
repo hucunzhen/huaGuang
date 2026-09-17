@@ -79,6 +79,8 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 return;
             }
 
+            await EnsureLoopThreadStoppedAsync().ConfigureAwait(false);
+
             await _settingsStore.LoadAsyncIfChanged().ConfigureAwait(false);
             var settings = CurrentSettings;
             MqttEndpointCatalog.Normalize(settings);
@@ -143,20 +145,9 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 await _cts.CancelAsync().ConfigureAwait(false);
             }
 
+            await EnsureLoopThreadStoppedAsync().ConfigureAwait(false);
+
             await _plc.DisconnectAsync().ConfigureAwait(false);
-
-            if (_loopThread is not null)
-            {
-                if (_loopThread.IsAlive)
-                {
-                    _loopThread.Join(TimeSpan.FromSeconds(3));
-                }
-
-                _loopThread = null;
-            }
-
-            _cts?.Dispose();
-            _cts = null;
             _backgroundLease?.Dispose();
             _backgroundLease = null;
             ResetPublishBaseline();
@@ -169,6 +160,32 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         {
             _gate.Release();
         }
+    }
+
+    async Task EnsureLoopThreadStoppedAsync()
+    {
+        var thread = _loopThread;
+        if (thread is null)
+        {
+            return;
+        }
+
+        if (thread.IsAlive)
+        {
+            if (_cts is not null && !_cts.IsCancellationRequested)
+            {
+                await _cts.CancelAsync().ConfigureAwait(false);
+            }
+
+            if (!thread.Join(TimeSpan.FromSeconds(5)))
+            {
+                _logger.LogWarning("采集线程未在 5 秒内结束，PLC 连接可能处于异常状态");
+            }
+        }
+
+        _loopThread = null;
+        _cts?.Dispose();
+        _cts = null;
     }
 
     void RunLoop(CancellationToken cancellationToken)
@@ -249,20 +266,16 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 
             if (plcTags.Count > 0 && !settings.UseSimulator)
             {
-                try
-                {
-                    plcValues = await _plc.ReadTagsAsync(plcTags, cancellationToken).ConfigureAwait(false);
-                    _plcError = string.Empty;
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                plcValues = await _plc.ReadTagsAsync(plcTags, cancellationToken).ConfigureAwait(false);
+                if (plcValues.Count == 0 && plcTags.Count > 0)
                 {
                     allGood = false;
-                    _plcError = $"PLC: {ex.Message}";
-                    _logger.LogWarning(ex, "PLC 批量读取失败 tagCount={TagCount}", plcTags.Count);
-                    await _plc.DisconnectAsync().ConfigureAwait(false);
-                    _plcConnectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(5);
-                    PublishPlcTagFailures(plcTags, ex.Message, plcStarted);
-                    return;
+                    _plcError = "PLC: 所有点位读取均失败，请核对 S7 地址与 DB 是否存在于 PLC。";
+                    _logger.LogWarning("PLC 批量读取无有效数据 tagCount={TagCount}", plcTags.Count);
+                }
+                else
+                {
+                    _plcError = string.Empty;
                 }
             }
 
@@ -428,6 +441,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 
         try
         {
+            PlcSettingsHelper.Normalize(settings.Plc);
             await _plc.ConnectAsync(settings.Plc, cancellationToken).ConfigureAwait(false);
             _plcConnectRetryAfter = DateTimeOffset.MinValue;
             _plcError = string.Empty;

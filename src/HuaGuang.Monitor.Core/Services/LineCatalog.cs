@@ -12,13 +12,16 @@ public static class LineCatalog
     public const string ProductSkuTagName = "产品货号";
     public const int Version = 12;
 
+    public const string S7TestLineName = "S7测试产线";
+
     public static IReadOnlyList<string> LineNames { get; } =
     [
         "先河热熔胶复合机",
         "华迪热熔胶复合机",
         "撒粉复合机",
         "平板复合机",
-        "C型火焰复合机"
+        "C型火焰复合机",
+        S7TestLineName
     ];
 
     public static void Apply(AppSettings settings, string lineName)
@@ -27,17 +30,39 @@ public static class LineCatalog
         settings.LineName = line.Name;
         settings.DeviceId = line.Name;
         settings.AddressCatalogVersion = Version;
-        settings.Plc.Model = "XD5E-60T10";
-        settings.Plc.Host = line.Host;
-        settings.Plc.Port = 502;
+        ApplyPlcDefaults(settings, lineName, line);
         settings.MqttPayload = MqttFieldMappingCatalog.CreatePropertiesPayloadProfile();
         LineMqttDefaults.ApplyBroker(settings.Mqtt);
         settings.Mqtt.Topic = line.MqttTopic;
         LineMqttDefaults.ApplySubscribeTopics(settings);
         settings.Mqtt.ClientId = LineMqttDefaults.ResolveClientIdForLine(line.Name);
         settings.MqttEndpoints = [MqttEndpoint.FromSettings(settings.Mqtt, "默认")];
-        settings.Tags = line.Tags.Select(CloneAndResolve).ToList();
+        settings.Tags = line.Tags.Select(tag => CloneAndResolve(tag, lineName)).ToList();
         MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
+    }
+
+    static void ApplyPlcDefaults(AppSettings settings, string lineName, LineProfile line)
+    {
+        if (lineName == S7TestLineName)
+        {
+            settings.Plc.Protocol = PlcProtocol.S7;
+            settings.Plc.Model = "S7-1515";
+            settings.Plc.Host = line.Host;
+            settings.Plc.Port = 102;
+            settings.Plc.Rack = 0;
+            settings.Plc.Slot = 0;
+            settings.Plc.CpuType = "S71500";
+            settings.Plc.TimeoutMs = 3000;
+            settings.UseSimulator = false;
+            PlcSettingsHelper.Normalize(settings.Plc);
+            return;
+        }
+
+        settings.Plc.Protocol = PlcProtocol.ModbusTcp;
+        settings.Plc.Model = "XD5E-60T10";
+        settings.Plc.Host = line.Host;
+        settings.Plc.Port = 502;
+        PlcSettingsHelper.Normalize(settings.Plc);
     }
 
     public static LineProfile Resolve(string? lineName) => lineName switch
@@ -46,6 +71,7 @@ public static class LineCatalog
         "撒粉复合机" => Safen,
         "平板复合机" => Pingban,
         "C型火焰复合机" => Cyhy,
+        S7TestLineName => S7Test,
         _ => Xianhe
     };
 
@@ -56,8 +82,15 @@ public static class LineCatalog
         "撒粉复合机" => "safen",
         "平板复合机" => "pingban",
         "C型火焰复合机" => "cyhy",
+        S7TestLineName => "s7test",
         _ => "xianhe"
     };
+
+    public static LineProfile S7Test { get; } = new(
+        S7TestLineName,
+        "192.168.0.10",
+        LineMqttDefaults.S7TestPublishTopic,
+        S7TestTags());
 
     public static LineProfile Xianhe { get; } = new(
         "先河热熔胶复合机",
@@ -197,7 +230,51 @@ public static class LineCatalog
         DisplayCategory = TagDisplayCategory.Setting
     };
 
-    static PlcTag CloneAndResolve(PlcTag source)
+    static List<PlcTag> S7TestTags() =>
+    [
+        S7Word("运行状态", "DB1.DBW0", TagDisplayCategory.Switch),
+        S7Real("DB温度Real", "DB1.DBD4", "℃"),
+        S7Real("DB工艺Real", "DB1.DBD8"),
+        // I/Q 区地址因 CPU/模块而异，默认禁用；在 TIA 确认偏移后再启用。
+        S7Word("输入字IW64", "IW64", enabled: false),
+        S7Real("输入Real_ID100", "ID100", enabled: false),
+        S7Bool("输入位I00", "I0.0", enabled: false),
+        ManualString("测试备注", defaultValue: "S7 联调")
+    ];
+
+    static PlcTag S7Bool(string name, string address, bool enabled = true) => new()
+    {
+        Name = name,
+        XinjeAddress = address,
+        DataType = TagDataType.Bool,
+        Enabled = enabled,
+        DisplayCategory = TagDisplayCategory.Switch
+    };
+
+    static PlcTag S7Word(string name, string address, TagDisplayCategory? category = null, bool enabled = true) => new()
+    {
+        Name = name,
+        XinjeAddress = address,
+        DataType = TagDataType.Int16,
+        Enabled = enabled,
+        DisplayCategory = category ?? TagDisplayCategory.Process
+    };
+
+    static PlcTag S7Real(string name, string address, string unit = "", bool enabled = true) => new()
+    {
+        Name = name,
+        Unit = unit,
+        XinjeAddress = address,
+        DataType = TagDataType.Float32,
+        Enabled = enabled,
+        ByteOrder = ByteOrder.ABCD,
+        DisplayCategory = unit.Contains('℃', StringComparison.Ordinal) ||
+                         name.Contains("温度", StringComparison.Ordinal)
+            ? TagDisplayCategory.Temperature
+            : TagDisplayCategory.Process
+    };
+
+    static PlcTag CloneAndResolve(PlcTag source, string lineName)
     {
         var tag = new PlcTag
         {
@@ -216,7 +293,14 @@ public static class LineCatalog
 
         if (tag.Source != TagSource.Manual)
         {
-            XinjeXd5eMapper.ApplyTo(tag);
+            if (lineName == S7TestLineName)
+            {
+                PlcAddressMapper.ApplyTo(tag, PlcProtocol.S7);
+            }
+            else
+            {
+                XinjeXd5eMapper.ApplyTo(tag);
+            }
         }
 
         return tag;

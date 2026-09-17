@@ -6,6 +6,7 @@ using HuaGuang.Monitor.Diagnostics;
 using HuaGuang.Monitor.Messaging;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
+using HuaGuang.Monitor.Services.LogExport;
 using HuaGuang.Monitor.Services.Logging;
 
 namespace HuaGuang.Monitor.ViewModels;
@@ -19,19 +20,22 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
     readonly IMonitorSubscription _subscription;
     readonly SettingsStore _settings;
     readonly DashboardViewModel _dashboard;
+    readonly ILogExportLocationService _logExport;
 
     public DiagnosticsViewModel(
         RuntimeLogStore logStore,
         IMonitorAcquisition acquisition,
         IMonitorSubscription subscription,
         SettingsStore settings,
-        DashboardViewModel dashboard)
+        DashboardViewModel dashboard,
+        ILogExportLocationService logExport)
     {
         _logStore = logStore;
         _acquisition = acquisition;
         _subscription = subscription;
         _settings = settings;
         _dashboard = dashboard;
+        _logExport = logExport;
         AppVersionText = AppVersionInfo.Display;
         RefreshLogPaths();
     }
@@ -51,7 +55,33 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
     [ObservableProperty] bool showAllLogCategories;
     [ObservableProperty] string summaryText = "尚未运行测试";
     [ObservableProperty] bool isRunning;
-    [ObservableProperty] string statusMessage = "采集/推送日志在此查看；下方可进行软件自检。";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanExportLogBundle))]
+    bool isExportingLogBundle;
+    [ObservableProperty] string statusMessage = "上方切换「概览 / 运行日志 / 软件自检」，各页独占屏幕，互不抢空间。";
+
+    public bool CanExportLogBundle => !IsExportingLogBundle;
+
+    public const string TabOverview = "overview";
+    public const string TabLogs = "logs";
+    public const string TabSelfCheck = "selfcheck";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsOverviewTab), nameof(IsLogsTab), nameof(IsSelfCheckTab))]
+    string selectedDiagnosticsTab = TabLogs;
+
+    public bool IsOverviewTab => SelectedDiagnosticsTab == TabOverview;
+    public bool IsLogsTab => SelectedDiagnosticsTab == TabLogs;
+    public bool IsSelfCheckTab => SelectedDiagnosticsTab == TabSelfCheck;
+
+    [RelayCommand]
+    void SelectDiagnosticsTab(string tab)
+    {
+        if (tab is TabOverview or TabLogs or TabSelfCheck)
+        {
+            SelectedDiagnosticsTab = tab;
+        }
+    }
 
     public void OnAppearing()
     {
@@ -113,6 +143,79 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
         LogSummaryText = "0 条日志";
     }
 
+    [RelayCommand(CanExecute = nameof(CanExportLogBundle))]
+    async Task ExportLogBundleAsync()
+    {
+        IsExportingLogBundle = true;
+        ExportLogBundleCommand.NotifyCanExecuteChanged();
+        string? tempZipPath = null;
+        try
+        {
+            await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
+            var deviceLabel = _settings.Current.DeviceId;
+            var version = AppVersionText;
+            var hint = _settings.Current.LogExportDirectory;
+
+            var bundle = await Task.Run(() =>
+            {
+                var tempDir = Path.Combine(Path.GetTempPath(), "huaGuang-log-export");
+                Directory.CreateDirectory(tempDir);
+                return LogBundleExporter.CreateBundle(tempDir, deviceLabel, version);
+            }).ConfigureAwait(false);
+
+            tempZipPath = bundle.ZipPath;
+            var zipFileName = Path.GetFileName(bundle.ZipPath);
+
+            var delivered = await MainThread.InvokeOnMainThreadAsync(() =>
+                _logExport.PickDirectoryAndDeliverZipAsync(tempZipPath, zipFileName, hint)).ConfigureAwait(false);
+
+            if (delivered is null)
+            {
+                await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    StatusMessage = "已取消选择目录，未写入日志包。";
+                });
+                return;
+            }
+
+            var settings = _settings.Current;
+            settings.LogExportDirectory = delivered.SettingsStorageValue;
+            await _settings.SaveAsync(settings).ConfigureAwait(false);
+            RefreshLogPaths();
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                StatusMessage = $"已打包 {bundle.FileCount} 个文件并写入：{delivered.DisplayPath}";
+            });
+        }
+        catch (Exception ex)
+        {
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                StatusMessage = $"打包日志失败：{ex.Message}（Android 请用弹窗选 USB/SD 目录，勿手填路径）";
+            });
+        }
+        finally
+        {
+            if (!string.IsNullOrEmpty(tempZipPath))
+            {
+                try
+                {
+                    File.Delete(tempZipPath);
+                }
+                catch
+                {
+                }
+            }
+
+            await MainThread.InvokeOnMainThreadAsync(() =>
+            {
+                IsExportingLogBundle = false;
+                ExportLogBundleCommand.NotifyCanExecuteChanged();
+            });
+        }
+    }
+
     [RelayCommand]
     async Task OpenLogFolderAsync()
     {
@@ -161,6 +264,13 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
             var builder = new StringBuilder();
             builder.AppendLine($"数据目录：{dataDirectory}");
             builder.AppendLine($"日志目录：{logDirectory}");
+            var exportHint = _settings.Current.LogExportDirectory;
+            var exportDisplay = string.IsNullOrWhiteSpace(exportHint)
+                ? $"{AppPaths.DefaultLogExportDirectory}（默认，打包时会弹出目录选择）"
+                : exportHint.StartsWith("content://", StringComparison.OrdinalIgnoreCase)
+                    ? $"已授权存储：{exportHint}（打包时可改选 USB/SD 卡）"
+                    : exportHint;
+            builder.AppendLine($"日志打包输出：{exportDisplay}");
             builder.AppendLine($"本页(UI)日志：{LogPathText}");
             var lineName = _settings.Current.LineName;
             var excelPath = LineConfigPaths.GetLineExcelPath(lineName);

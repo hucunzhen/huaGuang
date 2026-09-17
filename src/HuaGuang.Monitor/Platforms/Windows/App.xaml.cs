@@ -15,6 +15,10 @@ public partial class App : MauiWinUIApplication
 	static App()
 	{
 		CrashExitLogger.RegisterEarly("ui");
+		if (!WindowsSingleInstanceGuard.TryAcquirePrimaryInstance())
+		{
+			Environment.Exit(0);
+		}
 	}
 
 	/// <summary>

@@ -51,8 +51,22 @@ public static class Program
             AppPaths.CurrentRuntimeLogFile);
 
         var store = host.Services.GetRequiredService<SettingsStore>();
-        store.LoadAsync().GetAwaiter().GetResult();
-        host.Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
+        if (!store.TryLoad())
+        {
+            logger.LogCritical(
+                "产线 Excel 加载失败，后台服务仍将启动以便在界面中修复 error={Error}",
+                store.LastLoadError);
+        }
+        try
+        {
+            host.Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "历史库初始化失败，服务无法安全启动");
+            throw;
+        }
+
         host.Run();
     }
 }

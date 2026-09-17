@@ -245,21 +245,23 @@ public sealed class HistoryStore
         try
         {
             await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
             var ids = samples.Select(sample => sample.Id).ToList();
-            command.CommandText = BuildInClause(
-                """
-                SELECT sample_id, tag_name, unit, value_real, value_text, value_kind, quality
-                FROM tag_values
-                WHERE sample_id IN 
-                """,
-                ids,
-                command).TrimEnd(';') + " ORDER BY sample_id, tag_name;";
-
             var valuesBySample = new Dictionary<long, Dictionary<string, string>>();
             var tagUnits = new Dictionary<string, string?>(StringComparer.Ordinal);
-            await using (var reader = await command.ExecuteReaderAsync().ConfigureAwait(false))
+            for (var offset = 0; offset < ids.Count; offset += MaxInClauseParameters)
             {
+                var chunk = ids.Skip(offset).Take(MaxInClauseParameters).ToList();
+                await using var command = connection.CreateCommand();
+                command.CommandText = BuildInClause(
+                    """
+                    SELECT sample_id, tag_name, unit, value_real, value_text, value_kind, quality
+                    FROM tag_values
+                    WHERE sample_id IN 
+                    """,
+                    chunk,
+                    command).TrimEnd(';') + " ORDER BY sample_id, tag_name;";
+
+                await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
                 while (await reader.ReadAsync().ConfigureAwait(false))
                 {
                     var sampleId = reader.GetInt64(0);
@@ -726,35 +728,15 @@ public sealed class HistoryStore
         string sampleWhereClause,
         Action<SqliteCommand>? configure)
     {
-        await using (var selectIds = connection.CreateCommand())
-        {
-            selectIds.Transaction = transaction;
-            selectIds.CommandText = $"SELECT id FROM telemetry_samples WHERE {sampleWhereClause};";
-            configure?.Invoke(selectIds);
-
-            var ids = new List<long>();
-            await using var reader = await selectIds.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                ids.Add(reader.GetInt64(0));
-            }
-
-            if (ids.Count == 0)
-            {
-                return 0;
-            }
-
-            await using var deleteTags = connection.CreateCommand();
-            deleteTags.Transaction = transaction;
-            deleteTags.CommandText = BuildInClause("DELETE FROM tag_values WHERE sample_id IN ", ids, deleteTags);
-            await deleteTags.ExecuteNonQueryAsync().ConfigureAwait(false);
-
-            await using var deleteSamples = connection.CreateCommand();
-            deleteSamples.Transaction = transaction;
-            deleteSamples.CommandText = BuildInClause("DELETE FROM telemetry_samples WHERE id IN ", ids, deleteSamples);
-            return await deleteSamples.ExecuteNonQueryAsync().ConfigureAwait(false);
-        }
+        await using var deleteSamples = connection.CreateCommand();
+        deleteSamples.Transaction = transaction;
+        deleteSamples.CommandText = $"DELETE FROM telemetry_samples WHERE {sampleWhereClause};";
+        configure?.Invoke(deleteSamples);
+        return await deleteSamples.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
+
+    /// <summary>SQLite 单语句绑定参数上限约 999；分页查询 tag_values 时分批 IN。</summary>
+    internal const int MaxInClauseParameters = 500;
 
     static string BuildInClause(string prefix, IReadOnlyList<long> ids, SqliteCommand command)
     {
@@ -800,7 +782,7 @@ public sealed class HistoryStore
 
     SqliteConnection OpenConnection()
     {
-        var connection = new SqliteConnection($"Data Source={_databasePath}");
+        var connection = new SqliteConnection($"Data Source={_databasePath};Cache=Shared;Default Timeout=5");
         connection.Open();
         using var pragma = connection.CreateCommand();
         pragma.CommandText = "PRAGMA foreign_keys = ON;";

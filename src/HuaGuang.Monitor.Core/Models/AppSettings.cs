@@ -41,8 +41,13 @@ public sealed class AppSettings
     public bool EnableHistoryRecording { get; set; } = true;
     /// <summary>历史数据保留天数；超出后自动清理。</summary>
     public int HistoryRetentionDays { get; set; } = 1;
+    /// <summary>诊断页「打包日志」输出目录；为空时使用数据目录下 log-export。</summary>
+    public string LogExportDirectory { get; set; } = string.Empty;
     /// <summary>一次性迁移标记；避免每次启动重复覆盖用户配置。</summary>
     public int SettingsMigrationVersion { get; set; }
+
+    /// <summary>最近一次从产线 Excel 加载时的非致命告警（如地址与协议不匹配而被禁用的点位）。</summary>
+    public List<string> ConfigLoadWarnings { get; set; } = [];
 }
 
 public sealed class PlcSettings
@@ -55,8 +60,8 @@ public sealed class PlcSettings
     public int TimeoutMs { get; set; } = 2000;
     /// <summary>S7 机架号（Rack）。</summary>
     public int Rack { get; set; }
-    /// <summary>S7 槽位（Slot）；S7-1200/1500 通常为 1。</summary>
-    public int Slot { get; set; } = 1;
+    /// <summary>S7 槽位（Slot）；S7-1200/1500 在 S7.Net 中通常为 0，S7-300/400 常为 2。</summary>
+    public int Slot { get; set; }
     /// <summary>S7 CPU 类型，如 S71200、S71500。</summary>
     public string CpuType { get; set; } = "S71200";
 }

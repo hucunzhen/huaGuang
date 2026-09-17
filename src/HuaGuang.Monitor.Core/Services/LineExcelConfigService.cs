@@ -70,6 +70,7 @@ public static class LineExcelConfigService
         ("AutoStartAcquisition", "启动后自动运行"),
         ("EnableHistoryRecording", "记录历史数据"),
         ("HistoryRetentionDays", "历史保留天数"),
+        ("LogExportDirectory", "日志打包目录"),
     ];
 
     public static void Export(AppSettings settings, string filePath)
@@ -129,7 +130,11 @@ public static class LineExcelConfigService
         Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
         var useTemplate = !File.Exists(filePath);
-        if (File.Exists(filePath))
+        if (NeedsShippedTemplateRefresh(filePath, lineName, templateFilePath))
+        {
+            useTemplate = true;
+        }
+        else if (File.Exists(filePath))
         {
             using var workbook = new XLWorkbook(filePath);
             useTemplate = !ConfigSheetMatchesLine(workbook, lineName);
@@ -165,11 +170,12 @@ public static class LineExcelConfigService
         string? expectedLineName = null)
     {
         ValidateWorkbookFormat(workbook);
+        settings.ConfigLoadWarnings.Clear();
         ApplyConfigSheet(settings, workbook, expectedLineName);
         ApplyMqttEndpointsSheet(settings, workbook);
         MqttEndpointCatalog.Normalize(settings);
         ApplyMqttPayloadSheet(settings, workbook);
-        settings.Tags = ReadTagsSheet(workbook, settings.Plc.Protocol);
+        settings.Tags = ReadTagsSheet(workbook, settings.Plc.Protocol, settings.ConfigLoadWarnings);
         PlcTagIdentity.AssignStableIds(settings);
         ApplyFieldMappings(settings, workbook);
     }
@@ -502,7 +508,7 @@ public static class LineExcelConfigService
         if (workbook.Worksheets.TryGetWorksheet(TagsSheetName, out _))
         {
             var protocol = PlcSettingsHelper.ParseProtocol(GetString(map, "PLC协议", string.Empty), GetString(map, "PLC型号", string.Empty));
-            settings.Tags = ReadTagsSheet(workbook, protocol);
+            settings.Tags = ReadTagsSheet(workbook, protocol, settings.ConfigLoadWarnings);
         }
 
         ApplyFieldMappings(settings, workbook);
@@ -685,9 +691,58 @@ public static class LineExcelConfigService
             throw new InvalidOperationException($"产线 Excel 缺少工作表「{FieldMappingSheetName}」。");
         }
 
-        if (MqttFieldMappingImporter.ApplyFromWorkbookTags(settings, workbook) == 0)
+        var applied = MqttFieldMappingImporter.ApplyFromWorkbookTags(settings, workbook);
+        if (applied == 0)
+        {
+            MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, settings.LineName);
+            applied = settings.Tags.Count(tag => !string.IsNullOrWhiteSpace(tag.MqttField));
+        }
+
+        if (applied == 0)
         {
             throw new InvalidOperationException($"产线 Excel「{FieldMappingSheetName}」中没有有效的 id/name 映射行。");
+        }
+    }
+
+    /// <summary>
+    /// Android 等场景若曾用空种子生成过 Excel，点表为空；有安装包模板时应重新解压覆盖。
+    /// </summary>
+    public static bool NeedsShippedTemplateRefresh(string filePath, string lineName, string? templateFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(templateFilePath) || !File.Exists(templateFilePath))
+        {
+            return false;
+        }
+
+        if (!File.Exists(filePath))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var workbook = new XLWorkbook(filePath);
+            if (!ConfigSheetMatchesLine(workbook, lineName))
+            {
+                return true;
+            }
+
+            if (!workbook.Worksheets.TryGetWorksheet(TagsSheetName, out var tagsSheet))
+            {
+                return true;
+            }
+
+            var tagRowCount = Math.Max(0, (tagsSheet.LastRowUsed()?.RowNumber() ?? 1) - 1);
+            if (tagRowCount > 0)
+            {
+                return false;
+            }
+
+            return LineCatalog.Resolve(lineName).Tags.Count == 0;
+        }
+        catch
+        {
+            return true;
         }
     }
 
@@ -875,6 +930,7 @@ public static class LineExcelConfigService
         ["AutoStartAcquisition"] = settings.AutoStartAcquisition ? "是" : "否",
         ["EnableHistoryRecording"] = settings.EnableHistoryRecording ? "是" : "否",
         ["HistoryRetentionDays"] = settings.HistoryRetentionDays.ToString(),
+        ["LogExportDirectory"] = settings.LogExportDirectory ?? string.Empty,
     };
 
     static void WriteTagsSheet(XLWorkbook workbook, IReadOnlyList<PlcTag> tags)
@@ -980,6 +1036,12 @@ public static class LineExcelConfigService
         settings.DeviceId = GetString(map, "设备编号", settings.DeviceId);
         settings.Plc.Model = GetString(map, "PLC型号", settings.Plc.Model);
         settings.Plc.Protocol = PlcSettingsHelper.ParseProtocol(GetString(map, "PLC协议", string.Empty), settings.Plc.Model);
+        if (settings.Plc.Protocol == PlcProtocol.S7 && PlcSettingsHelper.InferProtocolFromModel(settings.Plc.Model) == PlcProtocol.ModbusTcp)
+        {
+            settings.ConfigLoadWarnings.Add(
+                $"PLC 型号为「{settings.Plc.Model}」（信捷 Modbus），但「PLC协议」为西门子 S7；请确认协议是否正确，并确保点表使用 S7 地址。");
+        }
+
         settings.Plc.Host = GetString(map, "PLC_IP", settings.Plc.Host);
         settings.Plc.Port = GetInt(map, "PLC端口", settings.Plc.Port);
         settings.Plc.Station = (byte)GetInt(map, "PLC站号", settings.Plc.Station);
@@ -1007,6 +1069,7 @@ public static class LineExcelConfigService
         settings.AutoStartAcquisition = GetBool(map, "启动后自动运行", settings.AutoStartAcquisition);
         settings.EnableHistoryRecording = GetBool(map, "记录历史数据", settings.EnableHistoryRecording);
         settings.HistoryRetentionDays = GetInt(map, "历史保留天数", settings.HistoryRetentionDays);
+        settings.LogExportDirectory = GetString(map, "日志打包目录", settings.LogExportDirectory);
 
         ApplySubscribeTopics(settings, map);
     }
@@ -1085,6 +1148,7 @@ public static class LineExcelConfigService
         settings.AutoStartAcquisition = preserveFrom.AutoStartAcquisition;
         settings.EnableHistoryRecording = preserveFrom.EnableHistoryRecording;
         settings.HistoryRetentionDays = preserveFrom.HistoryRetentionDays;
+        settings.LogExportDirectory = preserveFrom.LogExportDirectory;
     }
 
     static string FormatOperationMode(AppOperationMode mode) =>
@@ -1115,7 +1179,7 @@ public static class LineExcelConfigService
         settings.SubscribeTopic = topics[0];
     }
 
-    static List<PlcTag> ReadTagsSheet(XLWorkbook workbook, PlcProtocol protocol)
+    static List<PlcTag> ReadTagsSheet(XLWorkbook workbook, PlcProtocol protocol, List<string> loadWarnings)
     {
         if (!workbook.Worksheets.TryGetWorksheet(TagsSheetName, out var sheet))
         {
@@ -1189,7 +1253,11 @@ public static class LineExcelConfigService
 
             if (tag.Source != TagSource.Manual)
             {
-                PlcAddressMapper.ApplyTo(tag, protocol);
+                if (!PlcAddressMapper.TryApplyTo(tag, protocol, out var addressError))
+                {
+                    tag.Enabled = false;
+                    loadWarnings.Add($"点位「{tag.Name}」地址「{tag.XinjeAddress}」已禁用：{addressError}");
+                }
             }
 
             tags.Add(tag);

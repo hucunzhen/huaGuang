@@ -41,6 +41,14 @@ public static class AppPaths
 
     public static string CurrentRuntimeLogFile =>
         Path.Combine(LogDirectory, $"{RuntimeLogPrefix}-{DateTime.Now:yyyyMMdd}.log");
+
+    public static string DefaultLogExportDirectory =>
+        Path.Combine(UserDataDirectory, "log-export");
+
+    public static string ResolveLogExportDirectory(string? configured) =>
+        string.IsNullOrWhiteSpace(configured)
+            ? DefaultLogExportDirectory
+            : configured.Trim();
 }
 
 public sealed class WindowsAppDataPaths : IAppDataPaths

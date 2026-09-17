@@ -1,5 +1,7 @@
+using System.Net.Sockets;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Protocols;
+using HuaGuang.Monitor.Services;
 using HuaGuang.Monitor.Services.Logging;
 using Microsoft.Extensions.Logging;
 using S7.Net;
@@ -29,9 +31,13 @@ public sealed class S7PlcClient : IPlcClient
     {
         await DisconnectAsync().ConfigureAwait(false);
 
+        PlcSettingsHelper.Normalize(settings);
         var timeoutMs = Math.Clamp(settings.TimeoutMs, 500, 10_000);
         var cpu = ParseCpuType(settings.CpuType);
-        var plc = new Plc(cpu, settings.Host, (short)settings.Rack, (short)settings.Slot)
+        var port = settings.Port > 0 ? settings.Port : 102;
+        var rack = (short)Math.Clamp(settings.Rack, 0, 7);
+        var slot = (short)Math.Clamp(settings.Slot, 0, 31);
+        var plc = new Plc(cpu, settings.Host, port, rack, slot)
         {
             ReadTimeout = timeoutMs,
             WriteTimeout = timeoutMs
@@ -45,11 +51,24 @@ public sealed class S7PlcClient : IPlcClient
                 _plc = plc;
             }
 
-            _logger.LogInformation("PLC 已连接 {Plc}", LogFormatting.DescribePlc(settings));
+            _logger.LogInformation(
+                "PLC 已连接 {Plc} cpu={Cpu} rack={Rack} slot={Slot} port={Port}",
+                LogFormatting.DescribePlc(settings),
+                settings.CpuType,
+                settings.Rack,
+                settings.Slot,
+                port);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "PLC 连接失败 {Plc}", LogFormatting.DescribePlc(settings));
+            _logger.LogWarning(
+                ex,
+                "PLC 连接失败 {Plc} cpu={Cpu} rack={Rack} slot={Slot} port={Port}",
+                LogFormatting.DescribePlc(settings),
+                settings.CpuType,
+                settings.Rack,
+                settings.Slot,
+                port);
             try
             {
                 plc.Close();
@@ -59,7 +78,10 @@ public sealed class S7PlcClient : IPlcClient
                 // 忽略清理时的二次异常
             }
 
-            throw;
+            var networkHint = DescribeNetworkFailure(ex);
+            throw new InvalidOperationException(
+                $"S7 连接失败：{ex.Message}{networkHint}（CPU={settings.CpuType}，{settings.Host}:{port}，rack={settings.Rack}，slot={settings.Slot}。1200/1500 常见 rack 0 slot 0；需启用 PUT/GET；DB 点位正确仍报此错时多为 IP/网络不通）",
+                ex);
         }
     }
 
@@ -119,14 +141,13 @@ public sealed class S7PlcClient : IPlcClient
             {
                 result[tag.Name] = await Task.Run(() => ReadCore(tag), cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(
                     ex,
                     "S7 读取失败 tag={TagName} address={Address}",
                     tag.Name,
                     tag.DisplayAddress);
-                throw;
             }
         }
 
@@ -163,12 +184,26 @@ public sealed class S7PlcClient : IPlcClient
         _ => throw new ArgumentOutOfRangeException(nameof(area), area, "不支持的 S7 区域")
     };
 
+    static string DescribeNetworkFailure(Exception ex)
+    {
+        for (Exception? walk = ex; walk is not null; walk = walk.InnerException)
+        {
+            if (walk is SocketException socket && socket.ErrorCode == 10060)
+            {
+                return "。TCP 连接超时：工控机到 PLC 的 102 端口无响应，请核对 PLC 实际 IP、子网、网线/交换机、Windows 防火墙及 PLC 是否 RUN。";
+            }
+        }
+
+        return string.Empty;
+    }
+
     static CpuType ParseCpuType(string? cpuType) => cpuType?.Trim().ToUpperInvariant() switch
     {
         "S7200" or "S7200SMART" or "S7-200" or "S7-200SMART" => CpuType.S7200,
         "S7300" or "S7-300" => CpuType.S7300,
         "S7400" or "S7-400" => CpuType.S7400,
         "S71500" or "S7-1500" => CpuType.S71500,
+        "S71200" or "S7-1200" => CpuType.S71200,
         _ => CpuType.S71200
     };
 

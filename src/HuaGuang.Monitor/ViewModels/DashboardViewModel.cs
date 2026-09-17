@@ -16,6 +16,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     readonly SettingsStore _settings;
     readonly ILogger<DashboardViewModel> _logger;
     static bool _autoStartAttempted;
+    /// <summary>用户在本进程内手动停止过采集/订阅时，切回监控页不再自动启动。</summary>
+    static bool _manualRuntimeStopRequested;
     List<string> _cachedDeviceKeys = [];
     readonly Dictionary<string, TagRowViewModel> _rowLookup = new(StringComparer.Ordinal);
     readonly Dictionary<string, TagRowViewModel> _rowLookupByName = new(StringComparer.Ordinal);
@@ -150,7 +152,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     {
         RefreshStatus();
 
-        if (_autoStartAttempted || !_settings.Current.AutoStartAcquisition || MauiProgram.IsWindowsBackgroundServiceAvailable())
+        if (_manualRuntimeStopRequested ||
+            _autoStartAttempted ||
+            !_settings.Current.AutoStartAcquisition ||
+            MauiProgram.IsWindowsBackgroundServiceAvailable())
         {
             return;
         }
@@ -187,16 +192,22 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanToggle))]
     async Task ToggleAsync()
     {
-        IsToggleBusy = true;
-        ToggleCommand.NotifyCanExecuteChanged();
-        LastError = string.Empty;
-        var previousToggleText = ToggleText;
-        ToggleText = IsSubscribeMode ? "连接中..." : "启动中...";
+        await MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            IsToggleBusy = true;
+            ApplyToggleText();
+            ToggleCommand.NotifyCanExecuteChanged();
+            LastError = string.Empty;
+        }).ConfigureAwait(false);
+
         try
         {
             await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
 
-            if (!IsRunning && MauiProgram.IsWindowsBackgroundServiceAvailable())
+            var subscribeMode = _settings.Current.OperationMode == AppOperationMode.Subscribe;
+            var serviceRunning = subscribeMode ? _subscription.IsRunning : _acquisition.IsRunning;
+
+            if (!serviceRunning && MauiProgram.IsWindowsBackgroundServiceAvailable())
             {
                 try
                 {
@@ -209,9 +220,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 }
             }
 
-            if (IsRunning)
+            if (serviceRunning)
             {
-                if (IsSubscribeMode)
+                if (subscribeMode)
                 {
                     await _subscription.StopAsync().ConfigureAwait(false);
                 }
@@ -219,6 +230,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 {
                     await _acquisition.StopAsync().ConfigureAwait(false);
                 }
+
+                _manualRuntimeStopRequested = true;
             }
             else
             {
@@ -228,7 +241,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                     _appliedSettingsRevision = _settings.Revision;
                 }).ConfigureAwait(false);
 
-                if (IsSubscribeMode)
+                if (subscribeMode)
                 {
                     await _subscription.StartAsync().ConfigureAwait(false);
                 }
@@ -236,6 +249,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 {
                     await _acquisition.StartAsync().ConfigureAwait(false);
                 }
+
+                _manualRuntimeStopRequested = false;
             }
         }
         catch (Exception ex)
@@ -245,10 +260,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            IsToggleBusy = false;
             var toggleError = LastError;
-            MainThread.BeginInvokeOnMainThread(() =>
+            await MainThread.InvokeOnMainThreadAsync(() =>
             {
+                IsToggleBusy = false;
                 RefreshStatus(preserveLastError: !string.IsNullOrWhiteSpace(toggleError));
                 if (!string.IsNullOrWhiteSpace(toggleError))
                 {
@@ -256,11 +271,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 }
 
                 ToggleCommand.NotifyCanExecuteChanged();
-                if (!string.IsNullOrWhiteSpace(toggleError))
-                {
-                    ToggleText = previousToggleText;
-                }
-            });
+            }).ConfigureAwait(false);
         }
     }
 
@@ -518,8 +529,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
                 row.Apply(snapshot);
             }
-
-            RefreshStatus();
         });
     }
 
@@ -570,8 +579,16 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         ModeText = BuildModeText();
     }
 
-    void OnServiceConnectionChanged(object? sender, EventArgs e) =>
+    void OnServiceConnectionChanged(object? sender, EventArgs e)
+    {
+        // 用户点启停时由 ToggleAsync.finally 刷新，避免与 ConnectionChanged 各刷一遍。
+        if (IsToggleBusy)
+        {
+            return;
+        }
+
         MainThread.BeginInvokeOnMainThread(() => RefreshStatus());
+    }
 
     void RebuildTopicFilters()
     {
@@ -1076,6 +1093,31 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         return $"采集模式 · {mode} · {runState}";
     }
 
+    void ApplyToggleText()
+    {
+        string text;
+        if (IsToggleBusy)
+        {
+            text = IsRunning
+                ? "停止中..."
+                : IsSubscribeMode ? "连接中..." : "启动中...";
+        }
+        else
+        {
+            var action = IsSubscribeMode ? "订阅" : "采集";
+            text = IsRunning ? $"停止{action}" : $"启动{action}";
+        }
+
+        if (ToggleText == text)
+        {
+            // Android 上偶发不刷新 Button.Text；文案未变时再通知一次。
+            OnPropertyChanged(nameof(ToggleText));
+            return;
+        }
+
+        ToggleText = text;
+    }
+
     void RefreshStatus(bool preserveLastError = false)
     {
         var preservedError = preserveLastError ? LastError : null;
@@ -1088,7 +1130,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             IsRunning = _subscription.IsRunning;
             PlcConnected = false;
             MqttConnected = _subscription.IsConnected;
-            ToggleText = IsRunning ? "停止订阅" : "启动订阅";
             var topics = SubscribeTopicHelper.NormalizeTopics(settings.SubscribeTopics);
             TopicPreview = _subscription.IsRunning && _subscription.ActiveSubscribeTopics.Count > 0
                 ? $"已订阅：{string.Join("，", _subscription.ActiveSubscribeTopics)}"
@@ -1103,29 +1144,31 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             _cachedDeviceKeys = [];
             RefreshRemoteDevices();
             RebuildRemoteView();
-            return;
+        }
+        else
+        {
+            RemoteDevicePanels.Clear();
+            _multiRowLookup.Clear();
+
+            IsRunning = _acquisition.IsRunning;
+            PlcConnected = _acquisition.PlcConnected;
+            MqttConnected = _acquisition.MqttConnected;
+            DeviceId = settings.DeviceId;
+            MqttEndpointCatalog.Normalize(settings);
+            var publishTopics = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings)
+                .Select(endpoint => MqttEndpointCatalog.ResolveTopic(endpoint, settings))
+                .ToList();
+            TopicPreview = publishTopics.Count == 0
+                ? "发布主题：未配置"
+                : $"发布主题：{string.Join("，", publishTopics)}";
+            ModeText = BuildModeText();
+            LastError = preservedError ?? _acquisition.LastError;
+            EmptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
+
+            ShowRemoteDevicePicker = false;
         }
 
-        RemoteDevicePanels.Clear();
-        _multiRowLookup.Clear();
-
-        IsRunning = _acquisition.IsRunning;
-        PlcConnected = _acquisition.PlcConnected;
-        MqttConnected = _acquisition.MqttConnected;
-        ToggleText = IsRunning ? "停止采集" : "启动采集";
-        DeviceId = settings.DeviceId;
-        MqttEndpointCatalog.Normalize(settings);
-        var publishTopics = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings)
-            .Select(endpoint => MqttEndpointCatalog.ResolveTopic(endpoint, settings))
-            .ToList();
-        TopicPreview = publishTopics.Count == 0
-            ? "发布主题：未配置"
-            : $"发布主题：{string.Join("，", publishTopics)}";
-        ModeText = BuildModeText();
-        LastError = preservedError ?? _acquisition.LastError;
-        EmptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
-
-        ShowRemoteDevicePicker = false;
+        ApplyToggleText();
     }
 
     IEnumerable<(string Name, object? Value, PlcTag? CatalogTag)> OrderRemoteTags(

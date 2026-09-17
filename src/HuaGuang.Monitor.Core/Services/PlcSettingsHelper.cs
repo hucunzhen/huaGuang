@@ -18,6 +18,7 @@ public static class PlcSettingsHelper
                 plc.CpuType = "S71200";
             }
 
+            ApplyS7RackSlotDefaults(plc);
             return;
         }
 
@@ -76,4 +77,52 @@ public static class PlcSettingsHelper
         plc.Protocol == PlcProtocol.S7
             ? $"PLC · 西门子 {plc.CpuType}"
             : $"PLC · {plc.Model}";
+
+    public static int RecommendedDefaultSlot(string? cpuType)
+    {
+        var cpu = NormalizeCpuKey(cpuType);
+        return cpu is "S7300" or "S7400" ? 2 : 0;
+    }
+
+    static void ApplyS7RackSlotDefaults(PlcSettings plc)
+    {
+        var cpu = NormalizeCpuKey(plc.CpuType);
+        plc.Rack = Math.Clamp(plc.Rack, 0, 7);
+
+        switch (cpu)
+        {
+            case "S71200":
+            case "S71500":
+                // S7.Net / ISO-on-TCP：1200/1500 常用 rack 0 slot 0（旧配置默认 slot 1 会导致连接失败）
+                if (plc.Rack == 0 && plc.Slot == 1)
+                {
+                    plc.Slot = 0;
+                }
+
+                break;
+            case "S7300":
+            case "S7400":
+                if (plc.Slot is 0 or 1)
+                {
+                    plc.Rack = 0;
+                    plc.Slot = 2;
+                }
+
+                break;
+        }
+
+        plc.Slot = Math.Clamp(plc.Slot, 0, 31);
+    }
+
+    static string NormalizeCpuKey(string? cpuType)
+    {
+        if (string.IsNullOrWhiteSpace(cpuType))
+        {
+            return "S71200";
+        }
+
+        return cpuType.Trim().ToUpperInvariant()
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace(" ", string.Empty, StringComparison.Ordinal);
+    }
 }

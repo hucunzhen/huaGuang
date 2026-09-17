@@ -30,20 +30,65 @@ public static class PlcAddressMapper
         return true;
     }
 
-    public static void ApplyTo(PlcTag tag, PlcProtocol protocol)
+    public static bool TryApplyTo(PlcTag tag, PlcProtocol protocol, out string error)
     {
+        error = string.Empty;
         if (tag.Source == TagSource.Manual)
         {
-            return;
+            return true;
         }
 
         if (protocol == PlcProtocol.S7)
         {
-            SiemensS7AddressMapper.ApplyTo(tag);
-            return;
+            if (!SiemensS7AddressMapper.TryResolve(tag.XinjeAddress, tag.DataType, out var resolved, out error))
+            {
+                error = EnhanceS7LoadError(tag.XinjeAddress, error);
+                return false;
+            }
+
+            if (resolved.IsBit)
+            {
+                tag.DataType = TagDataType.Bool;
+            }
+
+            return true;
         }
 
-        XinjeXd5eMapper.ApplyTo(tag);
+        if (!XinjeXd5eMapper.TryResolve(tag.XinjeAddress, out var modbus, out error))
+        {
+            return false;
+        }
+
+        tag.XinjeAddress = modbus.Normalized;
+        tag.Table = modbus.Table;
+        tag.Address = modbus.Address;
+        if (modbus.IsBit)
+        {
+            tag.DataType = TagDataType.Bool;
+        }
+
+        return true;
+    }
+
+    public static void ApplyTo(PlcTag tag, PlcProtocol protocol)
+    {
+        if (!TryApplyTo(tag, protocol, out var error))
+        {
+            throw new InvalidOperationException($"点位「{tag.Name}」：{error}");
+        }
+    }
+
+    static string EnhanceS7LoadError(string? address, string error)
+    {
+        var text = address?.Trim() ?? string.Empty;
+        if (text.Length >= 2
+            && (text[0] is 'D' or 'd')
+            && text[1..].All(static c => char.IsDigit(c)))
+        {
+            return $"{error} 当前为信捷 Modbus 型 D 地址；若 PLC 仍是 XD5E，请把产线 Excel「PLC协议」改回 Modbus TCP，或改为 S7 地址（如 DB1.DBD0、IW64）。";
+        }
+
+        return error;
     }
 
     public static string AddressLabel(PlcProtocol protocol) =>

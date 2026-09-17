@@ -19,6 +19,9 @@ public sealed class SettingsStore
 
     public AppSettings Current { get; private set; }
 
+    /// <summary>最近一次加载失败时的摘要；成功加载后清空。</summary>
+    public string? LastLoadError { get; private set; }
+
     /// <summary>配置变更序号；Save/Load 成功后递增，供 UI 判断是否需要重建监控卡片。</summary>
     public int Revision { get; private set; }
 
@@ -38,11 +41,44 @@ public sealed class SettingsStore
             return false;
         }
 
-        await LoadAsync().ConfigureAwait(false);
-        return true;
+        _ = await TryLoadAsync().ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(LastLoadError);
     }
 
+    public Task<bool> TryLoadAsync() => Task.FromResult(TryLoad());
+
+    /// <summary>加载产线 Excel；失败时不抛异常，保留当前内存配置并写入 <see cref="LastLoadError"/>。</summary>
+    public bool TryLoad()
+    {
+        try
+        {
+            LoadCore();
+            LastLoadError = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LastLoadError = ex.Message;
+            _logger.LogCritical(
+                ex,
+                "产线配置加载失败 excel={ExcelPath}",
+                LineConfigPaths.GetLineExcelPath(LineConfigPaths.ReadActiveLineName()));
+            return false;
+        }
+    }
+
+    /// <summary>加载配置；失败时抛出异常（供测试等场景）。</summary>
     public Task LoadAsync()
+    {
+        if (!TryLoad())
+        {
+            throw new InvalidOperationException(LastLoadError ?? "产线配置加载失败。");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    void LoadCore()
     {
         LineConfigPaths.EnsureAllLineExcels();
 
@@ -53,6 +89,7 @@ public sealed class SettingsStore
             templateFilePath: null);
 
         MqttEndpointCatalog.Normalize(Current);
+        LastLoadError = null;
         _logger.LogInformation(
             "配置已加载 line={LineName} mode={Mode} excel={ExcelPath} plc={Plc} mqtt={Mqtt} mqttTargets={TargetCount}",
             Current.LineName,
@@ -70,6 +107,11 @@ public sealed class SettingsStore
                 LogFormatting.DescribeMqtt(endpoint.ToSettings(), Current.LineName));
         }
 
+        foreach (var warning in Current.ConfigLoadWarnings)
+        {
+            _logger.LogWarning("产线配置告警 {Warning}", warning);
+        }
+
         foreach (var group in Current.MqttEndpoints
                      .Where(endpoint => endpoint.Enabled)
                      .GroupBy(endpoint => $"{endpoint.Host}:{endpoint.Port}:{endpoint.ClientId}", StringComparer.OrdinalIgnoreCase)
@@ -82,10 +124,12 @@ public sealed class SettingsStore
 
         _loadedFingerprint = CaptureConfigFingerprint();
         Revision++;
-        return Task.CompletedTask;
     }
 
-    public Task SaveAsync(AppSettings settings)
+    public Task SaveAsync(AppSettings settings) =>
+        Task.Run(() => SaveCore(settings));
+
+    void SaveCore(AppSettings settings)
     {
         Current = settings;
         var excelPath = LineConfigPaths.GetLineExcelPath(Current.LineName);
@@ -96,7 +140,6 @@ public sealed class SettingsStore
             "配置已保存 line={LineName} excel={ExcelPath}",
             Current.LineName,
             excelPath);
-        return Task.CompletedTask;
     }
 
     public static AppSettings CreateDefault()

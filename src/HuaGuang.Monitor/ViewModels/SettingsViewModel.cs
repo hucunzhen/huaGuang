@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using HuaGuang.Monitor.Ipc;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
+using HuaGuang.Monitor.Services.LogExport;
 using HuaGuang.Monitor.Services.Logging;
 using Microsoft.Extensions.Logging;
 
@@ -19,8 +20,11 @@ public partial class SettingsViewModel : ObservableObject
     readonly IStartupRegistration _startup;
     readonly DashboardViewModel _dashboard;
     readonly ILogger<SettingsViewModel> _logger;
+    readonly ILogExportLocationService _logExport;
     bool _isApplyingLine;
-    bool _isSwitchingLine;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanChangeLinePicker))]
+    bool isSwitchingLine;
     bool _isLoadingSettings;
 
     public SettingsViewModel(
@@ -29,6 +33,7 @@ public partial class SettingsViewModel : ObservableObject
         IMonitorSubscription subscription,
         IStartupRegistration startup,
         DashboardViewModel dashboard,
+        ILogExportLocationService logExport,
         ILogger<SettingsViewModel> logger)
     {
         _store = store;
@@ -36,6 +41,7 @@ public partial class SettingsViewModel : ObservableObject
         _subscription = subscription;
         _startup = startup;
         _dashboard = dashboard;
+        _logExport = logExport;
         _logger = logger;
         MqttEndpoints.CollectionChanged += OnMqttEndpointsCollectionChanged;
         _isApplyingLine = true;
@@ -64,6 +70,10 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] bool autoStartAcquisition = true;
     [ObservableProperty] bool enableHistoryRecording = true;
     [ObservableProperty] string historyRetentionDays = "1";
+    [ObservableProperty] string logExportDirectory = string.Empty;
+
+    public string LogExportDirectoryHint =>
+        "留空时打包会弹出系统目录选择；Android 请在侧栏选 USB 存储或 SD 卡。";
 
     public bool StartupSupported => _startup.IsSupported;
     public bool IsSubscribeSettings => SelectedOperationMode == "订阅模式";
@@ -108,12 +118,14 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty] string statusMessage = string.Empty;
 
+    public bool CanChangeLinePicker => !IsSwitchingLine;
+
     public string LineExcelPath => LineConfigPaths.GetLineExcelPath(SelectedLineName);
 
     partial void OnSelectedLineNameChanged(string value)
     {
         OnPropertyChanged(nameof(LineExcelPath));
-        if (_isApplyingLine || _isSwitchingLine || string.IsNullOrWhiteSpace(value))
+        if (_isApplyingLine || IsSwitchingLine || string.IsNullOrWhiteSpace(value))
         {
             return;
         }
@@ -132,22 +144,27 @@ public partial class SettingsViewModel : ObservableObject
 
     async Task LoadSelectedLineFromExcelSilentAsync(string lineName)
     {
-        if (_isSwitchingLine)
+        if (IsSwitchingLine)
         {
             return;
         }
 
-        _isSwitchingLine = true;
+        IsSwitchingLine = true;
+        StatusMessage = "正在切换产线，请稍候…";
         try
         {
-            var settings = LineExcelConfigService.SwitchLine(
-                lineName,
-                LineConfigPaths.GetLineExcelPath(lineName),
-                LineConfigPaths.ResolveShippedLineExcelPath(lineName),
-                _store.Current);
-            await _store.SaveAsync(settings);
-            await ApplyLoadedSettingsOnMainThreadAsync(settings, $"已切换产线：{lineName}（PLC {settings.Plc.Host}，ClientId {settings.Mqtt.ClientId}）");
-            _dashboard.Reload();
+            var preserve = _store.Current;
+            var filePath = LineConfigPaths.GetLineExcelPath(lineName);
+            var templatePath = LineConfigPaths.ResolveShippedLineExcelPath(lineName);
+            var settings = await Task.Run(() =>
+                    LineExcelConfigService.SwitchLine(lineName, filePath, templatePath, preserve))
+                .ConfigureAwait(false);
+            await _store.SaveAsync(settings).ConfigureAwait(false);
+            await ApplyLoadedSettingsOnMainThreadAsync(
+                    settings,
+                    $"已切换产线：{lineName}（PLC {settings.Plc.Host}，ClientId {settings.Mqtt.ClientId}）")
+                .ConfigureAwait(false);
+            await MainThread.InvokeOnMainThreadAsync(() => _dashboard.Reload()).ConfigureAwait(false);
             _logger.LogInformation(
                 "产线已切换 line={LineName} plc={Plc} mqtt={Mqtt}",
                 lineName,
@@ -163,17 +180,17 @@ public partial class SettingsViewModel : ObservableObject
                 SelectedLineName = _store.Current.LineName;
                 _isApplyingLine = false;
                 StatusMessage = $"切换产线失败：{ex.Message}";
-            });
+            }).ConfigureAwait(false);
         }
         finally
         {
-            _isSwitchingLine = false;
+            await MainThread.InvokeOnMainThreadAsync(() => IsSwitchingLine = false).ConfigureAwait(false);
         }
     }
 
     public void Reload()
     {
-        if (_isSwitchingLine)
+        if (IsSwitchingLine)
         {
             return;
         }
@@ -246,17 +263,18 @@ public partial class SettingsViewModel : ObservableObject
         try
         {
             var lineName = SelectedLineName;
-            var settings = LineExcelConfigService.LoadLineExcel(
-                lineName,
-                LineConfigPaths.GetLineExcelPath(lineName),
-                LineConfigPaths.ResolveShippedLineExcelPath(lineName));
-            await _store.SaveAsync(settings);
+            var filePath = LineConfigPaths.GetLineExcelPath(lineName);
+            var templatePath = LineConfigPaths.ResolveShippedLineExcelPath(lineName);
+            var settings = await Task.Run(() =>
+                    LineExcelConfigService.LoadLineExcel(lineName, filePath, templatePath))
+                .ConfigureAwait(false);
+            await _store.SaveAsync(settings).ConfigureAwait(false);
             var plcCount = settings.Tags.Count(t => !t.IsManual);
             var manualCount = settings.Tags.Count(t => t.IsManual);
             await ApplyLoadedSettingsOnMainThreadAsync(
                 settings,
                 $"已从 Excel 载入：{settings.LineName}，PLC {plcCount} 个，手动 {manualCount} 个。");
-            _dashboard.Reload();
+            await MainThread.InvokeOnMainThreadAsync(() => _dashboard.Reload());
         }
         catch (Exception ex)
         {
@@ -295,6 +313,27 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
+    async Task PickLogExportDirectoryAsync()
+    {
+        try
+        {
+            var pick = await _logExport.PickDirectoryAsync(LogExportDirectory).ConfigureAwait(false);
+            if (pick is null)
+            {
+                StatusMessage = "未选择目录。";
+                return;
+            }
+
+            LogExportDirectory = pick.SettingsStorageValue;
+            StatusMessage = $"已选择输出目录：{pick.DisplayPath}。点「保存设置」后记住该位置（Android 含 USB 存储）。";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"选择目录失败：{ex.Message}";
+        }
+    }
+
+    [RelayCommand]
     async Task ImportLineExcelFromFileAsync()
     {
         if (IsServiceRunning())
@@ -327,13 +366,14 @@ public partial class SettingsViewModel : ObservableObject
             LineExcelConfigService.ImportToLineFile(tempPath, destPath, SelectedLineName);
             File.Delete(tempPath);
 
-            settings = LineExcelConfigService.LoadLineExcel(
-                SelectedLineName,
-                destPath,
-                LineConfigPaths.ResolveShippedLineExcelPath(SelectedLineName));
-            await _store.SaveAsync(settings);
+            var lineName = SelectedLineName;
+            var templatePath = LineConfigPaths.ResolveShippedLineExcelPath(lineName);
+            settings = await Task.Run(() =>
+                    LineExcelConfigService.LoadLineExcel(lineName, destPath, templatePath))
+                .ConfigureAwait(false);
+            await _store.SaveAsync(settings).ConfigureAwait(false);
             await ApplyLoadedSettingsOnMainThreadAsync(settings, $"已导入并保存到产线文件：{destPath}");
-            _dashboard.Reload();
+            await MainThread.InvokeOnMainThreadAsync(() => _dashboard.Reload());
         }
         catch (Exception ex)
         {
@@ -466,7 +506,7 @@ public partial class SettingsViewModel : ObservableObject
     /// </summary>
     void SyncMqttEndpointsToStore()
     {
-        if (_isApplyingLine || _isSwitchingLine || _isLoadingSettings)
+        if (_isApplyingLine || IsSwitchingLine || _isLoadingSettings)
         {
             return;
         }
@@ -487,9 +527,13 @@ public partial class SettingsViewModel : ObservableObject
             1,
             65535);
         settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
-        settings.Plc.Rack = ParseInt(PlcRack, 0, 0, 7);
-        settings.Plc.Slot = ParseInt(PlcSlot, 1, 0, 31);
         settings.Plc.CpuType = string.IsNullOrWhiteSpace(PlcCpuType) ? "S71200" : PlcCpuType.Trim();
+        settings.Plc.Rack = ParseInt(PlcRack, 0, 0, 7);
+        settings.Plc.Slot = ParseInt(
+            PlcSlot,
+            PlcSettingsHelper.RecommendedDefaultSlot(settings.Plc.CpuType),
+            0,
+            31);
         settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
         PlcSettingsHelper.Normalize(settings.Plc);
     }
@@ -532,13 +576,14 @@ public partial class SettingsViewModel : ObservableObject
             settings.AutoStartAcquisition = AutoStartAcquisition;
             settings.EnableHistoryRecording = EnableHistoryRecording;
             settings.HistoryRetentionDays = ParseInt(HistoryRetentionDays, 1, 1, 365);
+            settings.LogExportDirectory = LogExportDirectory.Trim();
             ApplyPlcSettingsTo(settings);
             ApplyMqttEndpointsToSettings(settings);
 
             _startup.Apply(settings.StartWithWindows);
             await _store.SaveAsync(settings);
             await NotifyRuntimeReloadAsync();
-            _dashboard.Reload();
+            await MainThread.InvokeOnMainThreadAsync(() => _dashboard.Reload());
             StatusMessage = running
                 ? "设置已保存。部分项需停止采集/订阅后重新启动才会生效。"
                 : settings.StartWithWindows && _startup.IsSupported
@@ -586,6 +631,7 @@ public partial class SettingsViewModel : ObservableObject
         AutoStartAcquisition = settings.AutoStartAcquisition;
         EnableHistoryRecording = settings.EnableHistoryRecording;
         HistoryRetentionDays = settings.HistoryRetentionDays.ToString();
+        LogExportDirectory = settings.LogExportDirectory ?? string.Empty;
         PlcSettingsHelper.Normalize(settings.Plc);
         SelectedPlcProtocol = PlcSettingsHelper.FormatProtocol(settings.Plc.Protocol);
         PlcModel = settings.Plc.Model;

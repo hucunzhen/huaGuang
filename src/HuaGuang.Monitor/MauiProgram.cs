@@ -14,11 +14,44 @@ public static class MauiProgram
 	public static IServiceProvider Services { get; private set; } = default!;
 	public static bool UsesWindowsBackgroundService { get; private set; }
 
+#if WINDOWS
+	static volatile int _windowsServiceProbeCompleted;
+	static Task? _windowsServiceProbeTask;
+#endif
+
 	public static bool IsWindowsBackgroundServiceAvailable() =>
 #if WINDOWS
-		MonitorIpcClient.IsServiceAvailable();
+		Volatile.Read(ref _windowsServiceProbeCompleted) == 1 && UsesWindowsBackgroundService;
 #else
 		false;
+#endif
+
+#if WINDOWS
+	public static Task EnsureWindowsServiceProbeAsync()
+	{
+		if (Volatile.Read(ref _windowsServiceProbeCompleted) == 1)
+		{
+			return Task.CompletedTask;
+		}
+
+		_windowsServiceProbeTask ??= Task.Run(() =>
+		{
+			try
+			{
+				UsesWindowsBackgroundService = MonitorIpcClient.IsServiceAvailable();
+			}
+			catch
+			{
+				UsesWindowsBackgroundService = false;
+			}
+			finally
+			{
+				Volatile.Write(ref _windowsServiceProbeCompleted, 1);
+			}
+		});
+
+		return _windowsServiceProbeTask;
+	}
 #endif
 
 	public static MauiApp CreateMauiApp()
@@ -67,8 +100,10 @@ public static class MauiProgram
 		RegisterMonitorRuntime(builder.Services);
 #if ANDROID
 		builder.Services.AddSingleton<IAcquisitionBackgroundGuard, Platforms.Android.AndroidAcquisitionBackgroundGuard>();
+		builder.Services.AddSingleton<Services.LogExport.ILogExportLocationService, Platforms.Android.AndroidLogExportLocationService>();
 #endif
 #if WINDOWS
+		builder.Services.AddSingleton<Services.LogExport.ILogExportLocationService, Platforms.Windows.WindowsLogExportLocationService>();
 		builder.Services.AddSingleton<IStartupRegistration, Platforms.Windows.WindowsStartupRegistration>();
 		builder.Services.AddSingleton<IPlatformFullScreenPresenter, Platforms.Windows.WindowsFullScreenPresenter>();
 		builder.Services.AddSingleton<IScannerInputMethodGuard, Platforms.Windows.WindowsScannerInputMethodGuard>();
@@ -103,7 +138,8 @@ public static class MauiProgram
 		GlobalExceptionLogging.Register(Services);
 		CrashExitLogger.SetContext(AppVersionInfo.Display, "ui");
 #if WINDOWS
-		UsesWindowsBackgroundService = MonitorIpcClient.IsServiceAvailable();
+		Platforms.Windows.StartupBootstrapLog.Write("CreateMauiApp: before settings load");
+		_ = EnsureWindowsServiceProbeAsync();
 #endif
 		var startupLogger = Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 		startupLogger.LogInformation(
@@ -113,16 +149,47 @@ public static class MauiProgram
 			AppPaths.CurrentRuntimeLogFile,
 			UsesWindowsBackgroundService);
 		var store = Services.GetRequiredService<SettingsStore>();
-		store.LoadAsync().GetAwaiter().GetResult();
-		startupLogger.LogInformation(
-			"配置已加载 line={LineName} mode={Mode} deviceId={DeviceId} simulator={Simulator}",
-			store.Current.LineName,
-			store.Current.OperationMode,
-			store.Current.DeviceId,
-			store.Current.UseSimulator);
+		if (!store.TryLoad())
+		{
+			startupLogger.LogCritical(
+				"产线 Excel 加载失败，界面以降级模式启动 error={Error} logDir={LogDir}",
+				store.LastLoadError,
+				AppPaths.LogDirectory);
+#if WINDOWS
+			Platforms.Windows.StartupBootstrapLog.Write(
+				$"CreateMauiApp: settings load FAILED: {store.LastLoadError}");
+#endif
+		}
+		else
+		{
+#if WINDOWS
+			Platforms.Windows.StartupBootstrapLog.Write("CreateMauiApp: settings loaded");
+#endif
+			startupLogger.LogInformation(
+				"配置已加载 line={LineName} mode={Mode} deviceId={DeviceId} simulator={Simulator}",
+				store.Current.LineName,
+				store.Current.OperationMode,
+				store.Current.DeviceId,
+				store.Current.UseSimulator);
+		}
 		Services.GetRequiredService<IStartupRegistration>().Apply(store.Current.StartWithWindows);
-		// 始终初始化：后台服务在时由服务进程写入；仅 UI 采集/服务不可用时由本进程写入。
+#if WINDOWS
+		_ = Task.Run(async () =>
+		{
+			try
+			{
+				await Services.GetRequiredService<HistoryRecorder>().InitializeAsync().ConfigureAwait(false);
+				Platforms.Windows.StartupBootstrapLog.Write("CreateMauiApp: history store ready (deferred)");
+			}
+			catch (Exception ex)
+			{
+				Platforms.Windows.StartupBootstrapLog.Write("CreateMauiApp: history init failed (deferred)", ex);
+			}
+		});
+		Platforms.Windows.StartupBootstrapLog.Write("CreateMauiApp: complete");
+#else
 		Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
+#endif
 
 		return app;
 	}

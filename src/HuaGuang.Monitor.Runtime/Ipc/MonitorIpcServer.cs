@@ -104,7 +104,15 @@ public sealed class MonitorIpcServer : BackgroundService
                 return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
 
             case MonitorIpcCommand.Start:
-                await _settings.LoadAsync().ConfigureAwait(false);
+                if (!await _settings.TryLoadAsync().ConfigureAwait(false))
+                {
+                    return new MonitorIpcResponse
+                    {
+                        Success = false,
+                        Error = _settings.LastLoadError ?? "产线配置加载失败。"
+                    };
+                }
+
                 if (ResolveSubscribeStart(request, _settings.Current))
                 {
                     if (_acquisition.IsRunning)
@@ -132,7 +140,15 @@ public sealed class MonitorIpcServer : BackgroundService
                 return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
 
             case MonitorIpcCommand.ReloadSettings:
-                await _settings.LoadAsync().ConfigureAwait(false);
+                if (!await _settings.TryLoadAsync().ConfigureAwait(false))
+                {
+                    return new MonitorIpcResponse
+                    {
+                        Success = false,
+                        Error = _settings.LastLoadError ?? "产线配置加载失败。"
+                    };
+                }
+
                 return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
 
             case MonitorIpcCommand.RequestPublish:

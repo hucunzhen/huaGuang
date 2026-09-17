@@ -34,7 +34,7 @@
 
 		<!-- Versions: DisplayVersion=版本号, ApplicationVersion=修订号(Android versionCode) -->
 		<ApplicationDisplayVersion>1.1.10</ApplicationDisplayVersion>
-		<ApplicationVersion>3</ApplicationVersion>
+		<ApplicationVersion>4</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
 		<WindowsPackageType>None</WindowsPackageType>
@@ -151,6 +151,18 @@
 		<MauiAsset Include="..\..\config\lines\华迪热熔胶复合机.xlsx"
 		           Link="Resources\Raw\lines\huadi.xlsx"
 		           LogicalName="lines/huadi.xlsx" />
+		<MauiAsset Include="..\..\config\lines\撒粉复合机.xlsx"
+		           Link="Resources\Raw\lines\safen.xlsx"
+		           LogicalName="lines/safen.xlsx" />
+		<MauiAsset Include="..\..\config\lines\平板复合机.xlsx"
+		           Link="Resources\Raw\lines\pingban.xlsx"
+		           LogicalName="lines/pingban.xlsx" />
+		<MauiAsset Include="..\..\config\lines\C型火焰复合机.xlsx"
+		           Link="Resources\Raw\lines\cyhy.xlsx"
+		           LogicalName="lines/cyhy.xlsx" />
+		<MauiAsset Include="..\..\config\lines\S7测试产线.xlsx"
+		           Link="Resources\Raw\lines\s7test.xlsx"
+		           LogicalName="lines/s7test.xlsx" />
 		<Content Include="..\..\config\lines\*.xlsx"
 		          Exclude="..\..\config\lines\~$*;..\..\config\lines\*.new.xlsx"
 		          Link="lines\%(Filename)%(Extension)"
