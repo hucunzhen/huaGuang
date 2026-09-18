@@ -41,6 +41,8 @@ public sealed class MonitorRuntimeState
 {
     public string OperationMode { get; set; } = "Acquisition";
     public bool IsRunning { get; set; }
+    /// <summary>界面或 IPC 已发送 Stop，守护服务不应因 AutoStart 再次拉起。</summary>
+    public bool OperatorStopRequested { get; set; }
     public bool PlcConnected { get; set; }
     public bool MqttConnected { get; set; }
     public string MqttTargetsStatus { get; set; } = string.Empty;

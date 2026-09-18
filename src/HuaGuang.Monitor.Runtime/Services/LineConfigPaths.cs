@@ -74,7 +74,7 @@ public static class LineConfigPaths
                 templatePath is not null &&
                 File.Exists(templatePath))
             {
-                File.Copy(templatePath, path, overwrite: true);
+                TryCopyLineExcelTemplate(templatePath, path);
             }
 
             LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
@@ -95,9 +95,12 @@ public static class LineConfigPaths
 
         if (templatePath is not null && File.Exists(templatePath))
         {
-            File.Copy(templatePath, path, overwrite: true);
-            LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
-            return;
+            TryCopyLineExcelTemplate(templatePath, path);
+            if (File.Exists(path))
+            {
+                LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
+                return;
+            }
         }
 
         LineExcelConfigService.Export(LineExcelConfigService.CreateSeedSettings(lineName), path);
@@ -126,8 +129,20 @@ public static class LineConfigPaths
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-        File.Copy(shipped, destinationPath, overwrite: true);
-        return true;
+        TryCopyLineExcelTemplate(shipped, destinationPath);
+        return File.Exists(destinationPath);
+    }
+
+    static void TryCopyLineExcelTemplate(string sourcePath, string destinationPath)
+    {
+        try
+        {
+            File.Copy(sourcePath, destinationPath, overwrite: true);
+        }
+        catch (IOException) when (File.Exists(destinationPath))
+        {
+            // 目标已被占用（如 Excel 打开中）时沿用现有文件，避免整应用无法加载。
+        }
     }
 
     static bool UsesInstallLinesDirectory() => false;

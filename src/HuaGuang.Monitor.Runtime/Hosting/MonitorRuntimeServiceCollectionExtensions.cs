@@ -159,6 +159,12 @@ public sealed class MonitorAutoStartWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Delay(1500, stoppingToken).ConfigureAwait(false);
+        if (MonitorRuntimeOperatorControl.IsPausedByOperator)
+        {
+            _logger.LogInformation("操作员已停止采集/订阅（持久化），跳过服务自动启动");
+            return;
+        }
+
         if (!_settings.Current.AutoStartAcquisition)
         {
             return;

@@ -76,6 +76,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             await ConnectAsync(settings, topics).ConfigureAwait(false);
             IsRunning = true;
             LastError = string.Empty;
+            MonitorRuntimeOperatorControl.SetPausedByOperator(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation(
                 "启动订阅 line={LineName} topics={Topics} mqtt={Mqtt}",
@@ -108,6 +109,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             _devices.Clear();
             _devicesUpdatedCoalescer.Flush();
             await DisconnectAsync().ConfigureAwait(false);
+            MonitorRuntimeOperatorControl.SetPausedByOperator(true);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation("订阅已停止");
         }

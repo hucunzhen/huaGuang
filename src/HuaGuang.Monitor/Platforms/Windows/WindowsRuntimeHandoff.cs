@@ -17,6 +17,12 @@ static class WindowsRuntimeHandoff
             return;
         }
 
+        if (WindowsUiShutdownState.IsProgramExitRequested
+            || WindowsInstallerExitHelper.IsInstallerExitRequested())
+        {
+            return;
+        }
+
         var services = MauiProgram.Services;
         var settings = services.GetService<SettingsStore>();
         if (settings?.Current.OperationMode != AppOperationMode.Acquisition)

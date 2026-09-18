@@ -8,27 +8,30 @@ public sealed class AndroidAcquisitionBackgroundGuard : IAcquisitionBackgroundGu
 {
     public IDisposable Begin()
     {
-        var powerManager = (PowerManager?)Application.Context.GetSystemService(global::Android.Content.Context.PowerService);
+        var context = Application.Context;
+        AcquisitionForegroundServiceStarter.Start(context);
+
+        var powerManager = (PowerManager?)context.GetSystemService(global::Android.Content.Context.PowerService);
         var wakeLock = powerManager?.NewWakeLock(WakeLockFlags.Partial, "HuaGuang.Monitor:Acquisition");
         wakeLock?.Acquire();
-        return new WakeLockLease(wakeLock);
+        return new AcquisitionBackgroundLease(context, wakeLock);
     }
 
-    sealed class WakeLockLease(PowerManager.WakeLock? wakeLock) : IDisposable
+    sealed class AcquisitionBackgroundLease(global::Android.Content.Context context, PowerManager.WakeLock? wakeLock) : IDisposable
     {
         public void Dispose()
         {
-            if (wakeLock is null)
+            if (wakeLock is not null)
             {
-                return;
+                if (wakeLock.IsHeld)
+                {
+                    wakeLock.Release();
+                }
+
+                wakeLock.Dispose();
             }
 
-            if (wakeLock.IsHeld)
-            {
-                wakeLock.Release();
-            }
-
-            wakeLock.Dispose();
+            AcquisitionForegroundServiceStarter.Stop(context);
         }
     }
 }

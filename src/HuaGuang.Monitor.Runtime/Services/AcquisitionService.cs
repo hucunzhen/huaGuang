@@ -125,6 +125,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 Priority = ThreadPriority.AboveNormal
             };
             _loopThread.Start();
+            MonitorRuntimeOperatorControl.SetPausedByOperator(false);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation("采集线程已启动");
         }
@@ -153,6 +154,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             ResetPublishBaseline();
             _plcConnectRetryAfter = DateTimeOffset.MinValue;
             await _mqttOutbound.StopAsync().ConfigureAwait(false);
+            MonitorRuntimeOperatorControl.SetPausedByOperator(true);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation("采集已停止 cycleCount={CycleCount}", CycleCount);
         }

@@ -28,8 +28,11 @@ static class WindowsWindowCloseGuard
 
             nativeWindow.AppWindow.Closing += (_, args) =>
             {
-                if (WindowsUiShutdownState.IsProgramExitRequested)
+                if (WindowsUiShutdownState.IsProgramExitRequested
+                    || Environment.HasShutdownStarted
+                    || WindowsInstallerExitHelper.IsInstallerExitRequested())
                 {
+                    WindowsUiShutdownState.IsProgramExitRequested = true;
                     return;
                 }
 

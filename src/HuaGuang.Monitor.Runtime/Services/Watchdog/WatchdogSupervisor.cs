@@ -123,6 +123,11 @@ public sealed class WatchdogSupervisor
             return;
         }
 
+        if (statusResponse.State.OperatorStopRequested)
+        {
+            return;
+        }
+
         var mode = _settings.Current.OperationMode == AppOperationMode.Subscribe
             ? nameof(AppOperationMode.Subscribe)
             : nameof(AppOperationMode.Acquisition);

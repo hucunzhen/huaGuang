@@ -62,6 +62,7 @@ public static class MauiProgram
 		AppPaths.ConfigureRuntimeLogging("runtime-ui");
 		WindowsAppDataPaths.WarmUp();
 		Directory.CreateDirectory(AppPaths.LogDirectory);
+		Platforms.Windows.WindowsInstallerExitHelper.ClearFlagIfPresent();
 		CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory}");
 		WatchdogHeartbeat.Start(WatchdogConstants.UiRole);
 #else

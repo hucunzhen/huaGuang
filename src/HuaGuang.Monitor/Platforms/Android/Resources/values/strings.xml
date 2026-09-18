@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<string name="acquisition_fg_notification_channel">采集后台运行</string>
+	<string name="acquisition_fg_notification_channel_desc">采集开启时在通知栏显示运行状态，便于系统在后台保持 PLC 与 MQTT 连接。</string>
+	<string name="acquisition_fg_notification_title">工业监控 · 采集中</string>
+	<string name="acquisition_fg_notification_text">PLC 扫描与 MQTT 推送正在后台运行</string>
+</resources>

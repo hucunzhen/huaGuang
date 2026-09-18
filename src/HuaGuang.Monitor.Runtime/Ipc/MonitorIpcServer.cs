@@ -208,6 +208,7 @@ public sealed class MonitorIpcServer : BackgroundService
         {
             OperationMode = settings.Current.OperationMode.ToString(),
             IsRunning = isSubscribe ? subscription.IsRunning : acquisition.IsRunning,
+            OperatorStopRequested = MonitorRuntimeOperatorControl.IsPausedByOperator,
             PlcConnected = isSubscribe ? false : acquisition.PlcConnected,
             MqttConnected = isSubscribe ? subscription.IsConnected : acquisition.MqttConnected,
             LastError = isSubscribe ? subscription.LastError : acquisition.LastError,

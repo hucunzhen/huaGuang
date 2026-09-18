@@ -16,8 +16,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     readonly SettingsStore _settings;
     readonly ILogger<DashboardViewModel> _logger;
     static bool _autoStartAttempted;
-    /// <summary>用户在本进程内手动停止过采集/订阅时，切回监控页不再自动启动。</summary>
-    static bool _manualRuntimeStopRequested;
     List<string> _cachedDeviceKeys = [];
     readonly Dictionary<string, TagRowViewModel> _rowLookup = new(StringComparer.Ordinal);
     readonly Dictionary<string, TagRowViewModel> _rowLookupByName = new(StringComparer.Ordinal);
@@ -152,7 +150,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     {
         RefreshStatus();
 
-        if (_manualRuntimeStopRequested ||
+        if (MonitorRuntimeOperatorControl.IsPausedByOperator ||
             _autoStartAttempted ||
             !_settings.Current.AutoStartAcquisition ||
             MauiProgram.IsWindowsBackgroundServiceAvailable())
@@ -231,7 +229,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                     await _acquisition.StopAsync().ConfigureAwait(false);
                 }
 
-                _manualRuntimeStopRequested = true;
             }
             else
             {
@@ -250,7 +247,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                     await _acquisition.StartAsync().ConfigureAwait(false);
                 }
 
-                _manualRuntimeStopRequested = false;
             }
         }
         catch (Exception ex)

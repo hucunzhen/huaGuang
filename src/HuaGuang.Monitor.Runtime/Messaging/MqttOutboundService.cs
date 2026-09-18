@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace HuaGuang.Monitor.Messaging;
 
 /// <summary>
-/// 后台发送 MQTT，采集线程只入队，连接/发布失败时缓存待重试。
+/// 后台发送 MQTT，采集线程只入队；每个目标独立队列，失败重试不阻塞其它目标。
 /// </summary>
 public sealed class MqttOutboundService : IDisposable
 {
@@ -20,8 +20,10 @@ public sealed class MqttOutboundService : IDisposable
     readonly object _publisherGate = new();
     readonly Dictionary<string, MqttPublisher> _publishers = new(StringComparer.Ordinal);
     readonly Dictionary<string, DateTimeOffset> _connectRetryAfter = new(StringComparer.Ordinal);
+    readonly Dictionary<string, DateTimeOffset> _publishRetryAfter = new(StringComparer.Ordinal);
     readonly Dictionary<string, string> _lastConnectErrors = new(StringComparer.Ordinal);
-    readonly Queue<MqttOutboundItem> _queue = new();
+    readonly Dictionary<string, Queue<MqttOutboundItem>> _queuesByEndpoint = new(StringComparer.Ordinal);
+    int _roundRobinIndex;
     readonly AutoResetEvent _signal = new(false);
 
     CancellationTokenSource? _cts;
@@ -112,7 +114,7 @@ public sealed class MqttOutboundService : IDisposable
         {
             lock (_queueGate)
             {
-                return _queue.Count;
+                return _queuesByEndpoint.Values.Sum(queue => queue.Count);
             }
         }
     }
@@ -169,7 +171,8 @@ public sealed class MqttOutboundService : IDisposable
 
         lock (_queueGate)
         {
-            _queue.Clear();
+            _queuesByEndpoint.Clear();
+            _publishRetryAfter.Clear();
         }
 
         await DisconnectAllAsync().ConfigureAwait(false);
@@ -193,12 +196,40 @@ public sealed class MqttOutboundService : IDisposable
             return;
         }
 
+        if (item.Targets.Count == 1)
+        {
+            EnqueueForEndpoint(item.Targets[0].EndpointId, item);
+            return;
+        }
+
+        for (var i = 0; i < item.Targets.Count; i++)
+        {
+            var target = item.Targets[i];
+            EnqueueForEndpoint(
+                target.EndpointId,
+                new MqttOutboundItem
+                {
+                    Payload = item.Payload,
+                    Targets = [target],
+                    OnPublished = i == item.Targets.Count - 1 ? item.OnPublished : null
+                });
+        }
+    }
+
+    void EnqueueForEndpoint(string endpointId, MqttOutboundItem item)
+    {
         lock (_queueGate)
         {
-            _queue.Enqueue(item);
-            while (_queue.Count > MaxPending)
+            if (!_queuesByEndpoint.TryGetValue(endpointId, out var queue))
             {
-                _queue.Dequeue();
+                queue = new Queue<MqttOutboundItem>();
+                _queuesByEndpoint[endpointId] = queue;
+            }
+
+            queue.Enqueue(item);
+            while (queue.Count > MaxPending)
+            {
+                queue.Dequeue();
             }
         }
 
@@ -211,7 +242,7 @@ public sealed class MqttOutboundService : IDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (!TryDequeue(out var item))
+                if (!TryDequeue(out var endpointId, out var item))
                 {
                     _signal.WaitOne(500);
                     continue;
@@ -226,6 +257,12 @@ public sealed class MqttOutboundService : IDisposable
                     var started = Stopwatch.GetTimestamp();
                     foreach (var target in item.Targets)
                     {
+                        if (!string.Equals(target.EndpointId, endpointId, StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException(
+                                $"队列目标不一致：队列={endpointId} item={target.EndpointId}");
+                        }
+
                         var endpoint = settings.MqttEndpoints.FirstOrDefault(e => e.Id == target.EndpointId)
                                        ?? throw new InvalidOperationException($"找不到 MQTT 目标 {target.EndpointId}。");
 
@@ -237,6 +274,7 @@ public sealed class MqttOutboundService : IDisposable
                             .GetResult();
                     }
 
+                    _publishRetryAfter.Remove(endpointId);
                     LastPublishElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                     LastPayload = TruncatePayload(item.Payload);
                     LastPublishTime = DateTimeOffset.Now;
@@ -244,14 +282,15 @@ public sealed class MqttOutboundService : IDisposable
                     item.OnPublished?.Invoke();
                     StateChanged?.Invoke(this, EventArgs.Empty);
                     _logger.LogDebug(
-                        "MQTT 发布成功 targets={TargetCount} elapsedMs={ElapsedMs:0} bytes={Bytes}",
+                        "MQTT 发布成功 endpoint={EndpointId} targets={TargetCount} elapsedMs={ElapsedMs:0} bytes={Bytes}",
+                        endpointId,
                         item.Targets.Count,
                         LastPublishElapsedMs,
                         item.Payload.Length);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    RequeueFront(item);
+                    RequeueFront(endpointId, item);
                     break;
                 }
                 catch (Exception ex)
@@ -259,12 +298,13 @@ public sealed class MqttOutboundService : IDisposable
                     LastError = $"MQTT: {ex.Message}";
                     _logger.LogWarning(
                         ex,
-                        "MQTT 发布失败 targets={TargetCount} pending={Pending}",
+                        "MQTT 发布失败 endpoint={EndpointId} targets={TargetCount} pending={Pending}",
+                        endpointId,
                         item.Targets.Count,
                         PendingCount);
-                    RequeueFront(item);
+                    RequeueFront(endpointId, item);
+                    _publishRetryAfter[endpointId] = DateTimeOffset.UtcNow.AddSeconds(1);
                     StateChanged?.Invoke(this, EventArgs.Empty);
-                    _signal.WaitOne(1000);
                 }
             }
         }
@@ -274,31 +314,64 @@ public sealed class MqttOutboundService : IDisposable
         }
     }
 
-    bool TryDequeue(out MqttOutboundItem item)
+    bool TryDequeue(out string endpointId, out MqttOutboundItem item)
     {
         lock (_queueGate)
         {
-            if (_queue.Count == 0)
+            endpointId = string.Empty;
+            item = null!;
+            if (_queuesByEndpoint.Count == 0)
             {
-                item = null!;
                 return false;
             }
 
-            item = _queue.Dequeue();
-            return true;
+            var keys = _queuesByEndpoint.Keys.ToList();
+            var now = DateTimeOffset.UtcNow;
+            for (var n = 0; n < keys.Count; n++)
+            {
+                var index = (_roundRobinIndex + n) % keys.Count;
+                var id = keys[index];
+                if (_publishRetryAfter.TryGetValue(id, out var retryAfter) && now < retryAfter)
+                {
+                    continue;
+                }
+
+                if (!_queuesByEndpoint.TryGetValue(id, out var queue) || queue.Count == 0)
+                {
+                    continue;
+                }
+
+                item = queue.Dequeue();
+                endpointId = id;
+                _roundRobinIndex = (index + 1) % keys.Count;
+                if (queue.Count == 0)
+                {
+                    _queuesByEndpoint.Remove(id);
+                }
+
+                return true;
+            }
+
+            return false;
         }
     }
 
-    void RequeueFront(MqttOutboundItem item)
+    void RequeueFront(string endpointId, MqttOutboundItem item)
     {
         lock (_queueGate)
         {
-            var pending = _queue.ToList();
-            _queue.Clear();
-            _queue.Enqueue(item);
+            if (!_queuesByEndpoint.TryGetValue(endpointId, out var queue))
+            {
+                queue = new Queue<MqttOutboundItem>();
+                _queuesByEndpoint[endpointId] = queue;
+            }
+
+            var pending = queue.ToList();
+            queue.Clear();
+            queue.Enqueue(item);
             foreach (var existing in pending)
             {
-                _queue.Enqueue(existing);
+                queue.Enqueue(existing);
             }
         }
     }
@@ -333,7 +406,9 @@ public sealed class MqttOutboundService : IDisposable
                 }
 
                 _connectRetryAfter.Remove(id);
+                _publishRetryAfter.Remove(id);
                 _lastConnectErrors.Remove(id);
+                _queuesByEndpoint.Remove(id);
             }
         }
 

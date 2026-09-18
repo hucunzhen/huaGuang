@@ -31,6 +31,7 @@ public partial class DashboardPage : MonitorPageBase
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        await StartupConfigNotice.TryShowAsync(this);
         if (BindingContext is DashboardViewModel viewModel)
         {
             _viewModel = viewModel;

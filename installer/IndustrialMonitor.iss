@@ -48,6 +48,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=appicon.ico
 UninstallDisplayIcon={app}\appicon.ico
 SetupLogging=yes
+; 界面进程拦截关闭仅隐藏窗口，Restart Manager 无法结束进程会导致安装卡住。
+CloseApplications=no
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
@@ -77,6 +79,41 @@ Type: filesandordirs; Name: "{app}"
 [Code]
 var
   DeleteUserData: Boolean;
+
+const
+  ForceUiExitFlagRel = 'com.industrial.monitor\Data\installer-force-ui-exit.flag';
+
+function ForceUiExitFlagPath(): String;
+begin
+  Result := ExpandConstant('{commonappdata}') + '\' + ForceUiExitFlagRel;
+end;
+
+procedure EnsureForceUiExitFlag();
+begin
+  ForceDirectories(ExtractFileDir(ForceUiExitFlagPath()));
+  SaveStringToFile(ForceUiExitFlagPath(), '1', False);
+end;
+
+procedure RemoveForceUiExitFlag();
+begin
+  if FileExists(ForceUiExitFlagPath()) then
+    DeleteFile(ForceUiExitFlagPath());
+end;
+
+procedure KillMonitorUiProcess();
+var
+  ResultCode: Integer;
+begin
+  EnsureForceUiExitFlag();
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#MyAppExeName} /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(800);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  KillMonitorUiProcess();
+end;
 
 function ServiceExePath(): String;
 begin
@@ -181,8 +218,12 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+    KillMonitorUiProcess();
+
   if CurStep = ssPostInstall then
   begin
+    RemoveForceUiExitFlag();
     ConfigureOldWindowsCompat();
     if WizardIsTaskSelected('installservice') then
       InstallMonitorService();
