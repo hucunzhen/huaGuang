@@ -20,7 +20,7 @@ public sealed class TagConfigViewModel
 
     public Color AccentColor => Color.FromArgb(TagDisplayCategoryHelper.GetAccentColor(Category));
 
-    public string SourceLabel => Tag.IsManual ? "手动输入" : "PLC 采集";
+    public string SourceLabel => Tag.IsManual ? "手动输入" : Tag.IsComputed ? "计算" : "PLC 采集";
 
     public string MqttFieldLabel => string.IsNullOrWhiteSpace(Tag.MqttField)
         ? "（按名称或映射表）"

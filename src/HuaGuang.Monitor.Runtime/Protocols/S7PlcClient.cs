@@ -132,7 +132,7 @@ public sealed class S7PlcClient : IPlcClient
         foreach (var tag in tags)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (tag.IsManual || string.IsNullOrWhiteSpace(tag.Name))
+            if (tag.IsManual || tag.IsComputed || string.IsNullOrWhiteSpace(tag.Name))
             {
                 continue;
             }

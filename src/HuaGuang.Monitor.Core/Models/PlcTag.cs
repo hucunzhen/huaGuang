@@ -27,13 +27,23 @@ public sealed class PlcTag
     /// <summary>手动文本点位是否在监控页支持 USB 扫码枪输入。</summary>
     public bool UseScannerInput { get; set; }
 
-    public string DisplayAddress => Source == TagSource.Manual
-        ? "手动输入"
-        : string.IsNullOrWhiteSpace(XinjeAddress)
+    /// <summary>计算点位表达式，引用其它点位用 [名称]；仅 <see cref="TagSource.Computed"/> 有效。</summary>
+    public string Expression { get; set; } = string.Empty;
+
+    public string DisplayAddress => Source switch
+    {
+        TagSource.Manual => "手动输入",
+        TagSource.Computed => string.IsNullOrWhiteSpace(Expression) ? "计算" : $"计算: {Expression}",
+        _ => string.IsNullOrWhiteSpace(XinjeAddress)
             ? $"{Table}:{Address}"
-            : XinjeAddress;
+            : XinjeAddress
+    };
 
     public bool IsManual => Source == TagSource.Manual;
+
+    public bool IsComputed => Source == TagSource.Computed;
+
+    public bool IsPlc => Source == TagSource.Plc;
 
     public bool IsTemperature =>
         Unit.Contains('℃', StringComparison.Ordinal) ||

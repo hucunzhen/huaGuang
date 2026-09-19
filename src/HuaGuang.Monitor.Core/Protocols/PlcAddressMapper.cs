@@ -33,7 +33,7 @@ public static class PlcAddressMapper
     public static bool TryApplyTo(PlcTag tag, PlcProtocol protocol, out string error)
     {
         error = string.Empty;
-        if (tag.Source == TagSource.Manual)
+        if (tag.Source is TagSource.Manual or TagSource.Computed)
         {
             return true;
         }

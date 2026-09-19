@@ -34,6 +34,13 @@
             <Label Text="手动输入：不参与 PLC 读取，值随 MQTT 一起发布（如胶辊型号、产品货号、门幅）。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
                    IsVisible="{Binding IsManualSource}" />
+            <Label Text="计算：用表达式引用其它点位，如 [温度A]-[温度B] 或 ([设定]-[实际])/[设定]*100。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding IsComputedSource}" />
+
+            <Label Text="表达式" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsComputedSource}" />
+            <Entry Text="{Binding Expression}" Placeholder="例如 [DB温度Real]+10"
+                   IsVisible="{Binding IsComputedSource}" />
 
             <Label Text="手动值" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsManualSource}" />
             <Entry Text="{Binding ManualValue}" Placeholder="例如：A型 / 1200 / 0.12"
@@ -59,6 +66,11 @@
             <Label Text="{Binding PlcAddressHelp}" TextColor="#6E8499" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsPlcSource}" />
             <Label Text="数据类型（位地址会自动按 Bool 读取）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Picker ItemsSource="{Binding PlcDataTypes}" SelectedItem="{Binding DataTypeName}" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="结果数据类型" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsComputedSource}" />
+            <Picker ItemsSource="{Binding PlcDataTypes}" SelectedItem="{Binding DataTypeName}" IsVisible="{Binding IsComputedSource}" />
+            <Label Text="倍率 / 偏移（对表达式结果再 y=k×x+b）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsComputedSource}" />
+            <Entry Text="{Binding Scale}" Keyboard="Numeric" IsVisible="{Binding IsComputedSource}" />
+            <Entry Text="{Binding Offset}" Keyboard="Numeric" IsVisible="{Binding IsComputedSource}" />
             <Label Text="字节序（32 位）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Picker ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrderName}" IsVisible="{Binding IsPlcSource}" />
             <Label Text="比例 Scale" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />

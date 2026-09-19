@@ -146,7 +146,7 @@ public sealed class ModbusTcpPlcClient : IPlcClient
         var result = values.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal);
         foreach (var tag in tags)
         {
-            if (tag.IsManual || string.IsNullOrWhiteSpace(tag.Name) || result.ContainsKey(tag.Name))
+            if (tag.IsManual || tag.IsComputed || string.IsNullOrWhiteSpace(tag.Name) || result.ContainsKey(tag.Name))
             {
                 continue;
             }

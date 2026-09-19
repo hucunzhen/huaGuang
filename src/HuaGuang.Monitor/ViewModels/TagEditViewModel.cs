@@ -32,7 +32,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         .Where(name => name != nameof(TagDataType.String))
         .ToArray();
     public string[] ByteOrders { get; } = Enum.GetNames<ByteOrder>();
-    public string[] SourceTypes { get; } = ["PLC 采集", "手动输入"];
+    public string[] SourceTypes { get; } = ["PLC 采集", "手动输入", "计算"];
     public string[] DisplayCategoryOptions { get; } =
     [
         "自动推断",
@@ -50,8 +50,12 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPlcSource))]
     [NotifyPropertyChangedFor(nameof(IsManualSource))]
+    [NotifyPropertyChangedFor(nameof(IsComputedSource))]
     [NotifyPropertyChangedFor(nameof(ShowScannerInputOption))]
     string selectedSourceType = "PLC 采集";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ResolvedHint))]
+    string expression = string.Empty;
     [ObservableProperty] string manualValue = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ResolvedHint))]
@@ -71,6 +75,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
 
     public bool IsPlcSource => SelectedSourceType == "PLC 采集";
     public bool IsManualSource => SelectedSourceType == "手动输入";
+    public bool IsComputedSource => SelectedSourceType == "计算";
     public bool ShowScannerInputOption =>
         IsManualSource && DataTypeName == nameof(TagDataType.String);
     public bool ShowPrecision =>
@@ -89,9 +94,14 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     partial void OnSelectedSourceTypeChanged(string value)
     {
         OnPropertyChanged(nameof(ShowScannerInputOption));
-        if (value == "PLC 采集" && DataTypeName == nameof(TagDataType.String))
+        if (value is "PLC 采集" or "计算" && DataTypeName == nameof(TagDataType.String))
         {
             DataTypeName = nameof(TagDataType.Float32);
+            UseScannerInput = false;
+        }
+
+        if (value == "计算")
+        {
             UseScannerInput = false;
         }
     }
@@ -129,8 +139,9 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 Name = tag.Name;
                 Unit = tag.Unit;
                 Enabled = tag.Enabled;
-                SelectedSourceType = tag.IsManual ? "手动输入" : "PLC 采集";
+                SelectedSourceType = tag.IsManual ? "手动输入" : tag.IsComputed ? "计算" : "PLC 采集";
                 ManualValue = tag.ManualValue;
+                Expression = tag.Expression;
                 XinjeAddress = string.IsNullOrWhiteSpace(tag.XinjeAddress) ? $"D{tag.Address}" : tag.XinjeAddress;
                 DataTypeName = tag.DataType.ToString();
                 ByteOrderName = tag.ByteOrder.ToString();
@@ -196,9 +207,43 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 : TagDisplayCategoryHelper.InferCategory(tag);
         tag.UseScannerInput = UseScannerInput && IsManualSource && dataType == TagDataType.String;
 
-        if (IsManualSource)
+        if (IsComputedSource)
+        {
+            if (string.IsNullOrWhiteSpace(Expression))
+            {
+                StatusMessage = "请填写计算表达式，例如 [温度A]-[温度B]。";
+                return;
+            }
+
+            if (!TagComputedCatalog.TryBuildPlan(
+                    BuildDraftTagList(tag),
+                    out _,
+                    out var planError))
+            {
+                StatusMessage = planError;
+                return;
+            }
+
+            if (!double.TryParse(Scale, out var scale))
+            {
+                scale = 1;
+            }
+
+            if (!double.TryParse(Offset, out var offset))
+            {
+                offset = 0;
+            }
+
+            tag.Source = TagSource.Computed;
+            tag.Expression = Expression.Trim();
+            tag.ManualValue = string.Empty;
+            tag.Scale = scale;
+            tag.Offset = offset;
+        }
+        else if (IsManualSource)
         {
             tag.Source = TagSource.Manual;
+            tag.Expression = string.Empty;
             tag.ManualValue = ManualValue.Trim();
             if (string.IsNullOrWhiteSpace(tag.ManualValue))
             {
@@ -238,6 +283,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
             }
 
             tag.Source = TagSource.Plc;
+            tag.Expression = string.Empty;
             tag.ManualValue = string.Empty;
             tag.XinjeAddress = XinjeAddress.Trim();
             tag.Scale = scale;
@@ -255,6 +301,13 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         await Shell.Current.GoToAsync("..");
     }
 
+    List<PlcTag> BuildDraftTagList(PlcTag draft)
+    {
+        var tags = _store.Current.Tags.Where(t => t.Id != draft.Id).ToList();
+        tags.Add(draft);
+        return tags;
+    }
+
     void ResetForNew()
     {
         _tagId = null;
@@ -264,6 +317,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         Enabled = true;
         SelectedSourceType = "手动输入";
         ManualValue = string.Empty;
+        Expression = string.Empty;
         XinjeAddress = "D0";
         DataTypeName = nameof(TagDataType.String);
         ByteOrderName = nameof(Models.ByteOrder.CDAB);

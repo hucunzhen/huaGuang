@@ -242,7 +242,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         try
         {
             var enabledTags = settings.Tags.Where(t => t.Enabled).ToList();
-            var plcTags = enabledTags.Where(tag => !tag.IsManual).ToList();
+            var plcTags = enabledTags.Where(tag => tag.IsPlc).ToList();
 
             if (settings.UseSimulator)
             {
@@ -281,7 +281,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 }
             }
 
-            foreach (var tag in enabledTags)
+            foreach (var tag in enabledTags.Where(t => !t.IsComputed))
             {
                 try
                 {
@@ -331,6 +331,14 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                     _plcError = $"点位 {tag.Name}: {ex.Message}";
                 }
             }
+
+            AppendComputedTagSnapshots(
+                settings,
+                enabledTags,
+                values,
+                snapshots,
+                settings.TemperaturePrecision,
+                ref allGood);
 
             LastPlcElapsedMs = Stopwatch.GetElapsedTime(plcStarted).TotalMilliseconds;
             RememberSnapshots(snapshots);
@@ -431,7 +439,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             return true;
         }
 
-        if (!settings.Tags.Any(t => t.Enabled && !t.IsManual))
+        if (!settings.Tags.Any(t => t.Enabled && t.IsPlc))
         {
             return true;
         }
@@ -580,11 +588,82 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         return $"未发布：温度变化未达 {settings.TemperaturePublishThresholdC:G}℃ 且未满 {publishSeconds:G} 秒发布周期";
     }
 
+    static void AppendComputedTagSnapshots(
+        AppSettings settings,
+        IReadOnlyList<PlcTag> enabledTags,
+        Dictionary<string, object?> values,
+        List<TagSnapshot> snapshots,
+        int temperaturePrecision,
+        ref bool allGood)
+    {
+        if (!TagComputedCatalog.TryBuildPlan(settings.Tags, out var plan, out var planError))
+        {
+            foreach (var tag in enabledTags.Where(t => t.IsComputed))
+            {
+                allGood = false;
+                snapshots.Add(new TagSnapshot
+                {
+                    TagId = tag.Id,
+                    Name = tag.Name,
+                    Unit = tag.Unit,
+                    Quality = "Bad",
+                    Error = planError,
+                    Timestamp = DateTimeOffset.Now
+                });
+                values[tag.Name] = null;
+            }
+
+            return;
+        }
+
+        foreach (var tag in plan.EvaluationOrder.Where(t => t.Enabled))
+        {
+            try
+            {
+                if (!TagComputedEvaluator.TryEvaluateTag(tag, values, out var value, out var error))
+                {
+                    throw new InvalidOperationException(error);
+                }
+
+                value = ValueFormatting.ApplyTemperaturePrecision(tag, value, temperaturePrecision);
+                snapshots.Add(new TagSnapshot
+                {
+                    TagId = tag.Id,
+                    Name = tag.Name,
+                    Unit = tag.Unit,
+                    Value = value,
+                    Quality = "Good",
+                    Timestamp = DateTimeOffset.Now
+                });
+                values[tag.Name] = value;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                allGood = false;
+                snapshots.Add(new TagSnapshot
+                {
+                    TagId = tag.Id,
+                    Name = tag.Name,
+                    Unit = tag.Unit,
+                    Quality = "Bad",
+                    Error = ex.Message,
+                    Timestamp = DateTimeOffset.Now
+                });
+                values[tag.Name] = null;
+            }
+        }
+    }
+
     static object Simulate(PlcTag tag, int temperaturePrecision)
     {
         if (tag.IsManual)
         {
             return ValueFormatting.ResolveManualValue(tag);
+        }
+
+        if (tag.IsComputed)
+        {
+            throw new InvalidOperationException("模拟模式下请先配置 PLC/手动依赖点位。");
         }
 
         var wave = DateTime.UtcNow.TimeOfDay.TotalSeconds;

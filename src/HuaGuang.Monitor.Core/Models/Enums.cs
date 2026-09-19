@@ -23,7 +23,8 @@ public enum S7MemoryArea
 public enum TagSource
 {
     Plc,
-    Manual
+    Manual,
+    Computed
 }
 
 public enum TagDataType

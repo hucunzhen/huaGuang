@@ -25,6 +25,7 @@ public static class MonitorCoreTests
         Run("数值显示精度", TestValueFormatting),
         Run("产线点位数量", TestLineCatalog),
         Run("S7 测试产线种子", TestS7TestLineCatalog),
+        Run("计算点位表达式", TestTagComputedExpression),
         Run("设置读写", TestSettingsRoundTrip),
         Run("Excel 配置读写", TestLineExcelRoundTrip),
         Run("Excel 缺发布周期", TestLegacyExcelMissingPublishInterval),
@@ -565,6 +566,44 @@ public static class MonitorCoreTests
         {
             AssertTrue(SiemensS7AddressMapper.TryResolve(tag.XinjeAddress, tag.DataType, out _, out _));
         }
+
+        AssertTrue(TagComputedCatalog.TryBuildPlan(settings.Tags, out _, out _));
+    }
+
+    static void TestTagComputedExpression()
+    {
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["A"] = 10d,
+            ["B"] = 4d,
+            ["运行"] = true
+        };
+
+        AssertTrue(TagExpressionEngine.TryEvaluate("[A]+[B]*2", values, out var result, out _));
+        AssertTrue(Math.Abs(result - 18) < 0.0001);
+
+        AssertTrue(TagExpressionEngine.TryEvaluate("([A]-[B])/[A]*100", values, out result, out _));
+        AssertTrue(Math.Abs(result - 60) < 0.0001);
+
+        AssertTrue(TagExpressionEngine.TryEvaluate("[运行]*50", values, out result, out _));
+        AssertTrue(Math.Abs(result - 50) < 0.0001);
+
+        var tags = new List<PlcTag>
+        {
+            new() { Name = "A", Source = TagSource.Plc },
+            new() { Name = "B", Source = TagSource.Computed, Expression = "[A]+1" },
+            new() { Name = "C", Source = TagSource.Computed, Expression = "[B]*2" }
+        };
+        AssertTrue(TagComputedCatalog.TryBuildPlan(tags, out var plan, out _));
+        AssertTrue(plan.EvaluationOrder.Select(t => t.Name).SequenceEqual(["B", "C"]));
+
+        var cyclic = new List<PlcTag>
+        {
+            new() { Name = "X", Source = TagSource.Computed, Expression = "[Y]+1" },
+            new() { Name = "Y", Source = TagSource.Computed, Expression = "[X]+1" }
+        };
+        AssertFalse(TagComputedCatalog.TryBuildPlan(cyclic, out _, out var cycleError));
+        AssertTrue(cycleError.Contains("循环", StringComparison.Ordinal));
     }
 
     static void TestLineCatalog()

@@ -20,7 +20,7 @@ public static class LineExcelConfigService
 
     static readonly string[] TagHeaders =
     [
-        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "显示分组", "扫码输入"
+        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "显示分组", "扫码输入", "表达式"
     ];
 
     static readonly (string Key, string Label, string Hint)[] MqttPayloadRows =
@@ -947,8 +947,8 @@ public static class LineExcelConfigService
         foreach (var tag in tags)
         {
             sheet.Cell(row, 1).Value = tag.Name;
-            sheet.Cell(row, 2).Value = tag.Source == TagSource.Manual ? "手动" : "PLC";
-            sheet.Cell(row, 3).Value = tag.Source == TagSource.Manual ? string.Empty : tag.XinjeAddress;
+            sheet.Cell(row, 2).Value = FormatTagSource(tag.Source);
+            sheet.Cell(row, 3).Value = tag.IsPlc ? tag.XinjeAddress : string.Empty;
             sheet.Cell(row, 4).Value = tag.DataType.ToString();
             sheet.Cell(row, 5).Value = tag.Unit;
             sheet.Cell(row, 6).Value = tag.ByteOrder.ToString();
@@ -960,6 +960,7 @@ public static class LineExcelConfigService
             sheet.Cell(row, 12).Value = TagDisplayCategoryHelper.ToLabel(
                 tag.DisplayCategory ?? TagDisplayCategoryHelper.InferCategory(tag));
             sheet.Cell(row, 13).Value = tag.UseScannerInput ? "是" : "否";
+            sheet.Cell(row, 14).Value = tag.IsComputed ? tag.Expression : string.Empty;
             row++;
         }
 
@@ -1203,9 +1204,7 @@ public static class LineExcelConfigService
             }
 
             var sourceText = sheet.Cell(row, 2).GetString().Trim();
-            var source = sourceText is "手动" or "Manual"
-                ? TagSource.Manual
-                : TagSource.Plc;
+            var source = ParseTagSource(sourceText);
             var address = sheet.Cell(row, 3).GetString().Trim();
             var dataType = ParseEnum(sheet.Cell(row, 4).GetString(), TagDataType.Float32);
             var unit = sheet.Cell(row, 5).GetString().Trim();
@@ -1216,6 +1215,11 @@ public static class LineExcelConfigService
             int? precision = int.TryParse(precisionText, out var parsedPrecision) ? parsedPrecision : null;
             var scale = ParseDoubleCell(sheet.Cell(row, 10), 1);
             var offset = ParseDoubleCell(sheet.Cell(row, 11), 0);
+
+            var expressionColumn = FindTagColumn(sheet, "表达式");
+            var expression = expressionColumn > 0
+                ? sheet.Cell(row, expressionColumn).GetString().Trim()
+                : string.Empty;
 
             var tag = new PlcTag
             {
@@ -1229,7 +1233,8 @@ public static class LineExcelConfigService
                 ManualValue = manualValue,
                 DisplayPrecision = precision,
                 Scale = scale,
-                Offset = offset
+                Offset = offset,
+                Expression = source == TagSource.Computed ? expression : string.Empty
             };
 
             if (displayCategoryColumn > 0)
@@ -1251,13 +1256,18 @@ public static class LineExcelConfigService
                 tag.UseScannerInput = true;
             }
 
-            if (tag.Source != TagSource.Manual)
+            if (tag.IsPlc)
             {
                 if (!PlcAddressMapper.TryApplyTo(tag, protocol, out var addressError))
                 {
                     tag.Enabled = false;
                     loadWarnings.Add($"点位「{tag.Name}」地址「{tag.XinjeAddress}」已禁用：{addressError}");
                 }
+            }
+            else if (tag.IsComputed && string.IsNullOrWhiteSpace(tag.Expression))
+            {
+                tag.Enabled = false;
+                loadWarnings.Add($"计算点位「{tag.Name}」缺少表达式，已禁用。");
             }
 
             tags.Add(tag);
@@ -1268,8 +1278,27 @@ public static class LineExcelConfigService
             throw new InvalidOperationException("点表为空，请至少保留一行点位。");
         }
 
+        if (!TagComputedCatalog.TryBuildPlan(tags, out _, out var computedPlanError))
+        {
+            loadWarnings.Add(computedPlanError);
+        }
+
         return tags;
     }
+
+    static TagSource ParseTagSource(string sourceText) => sourceText switch
+    {
+        "手动" or "Manual" => TagSource.Manual,
+        "计算" or "Computed" => TagSource.Computed,
+        _ => TagSource.Plc
+    };
+
+    static string FormatTagSource(TagSource source) => source switch
+    {
+        TagSource.Manual => "手动",
+        TagSource.Computed => "计算",
+        _ => "PLC"
+    };
 
     static int FindTagColumn(IXLWorksheet sheet, string headerName)
     {

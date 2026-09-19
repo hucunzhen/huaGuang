@@ -235,6 +235,16 @@ public static class LineCatalog
         S7Word("运行状态", "DB1.DBW0", TagDisplayCategory.Switch),
         S7Real("DB温度Real", "DB1.DBD4", "℃"),
         S7Real("DB工艺Real", "DB1.DBD8"),
+        new PlcTag
+        {
+            Name = "温度示例加10",
+            Source = TagSource.Computed,
+            Expression = "[DB温度Real]+10",
+            DataType = TagDataType.Float32,
+            Unit = "℃",
+            Enabled = false,
+            DisplayCategory = TagDisplayCategory.Temperature
+        },
         // I/Q 区地址因 CPU/模块而异，默认禁用；在 TIA 确认偏移后再启用。
         S7Word("输入字IW64", "IW64", enabled: false),
         S7Real("输入Real_ID100", "ID100", enabled: false),
@@ -288,10 +298,14 @@ public static class LineCatalog
             DisplayPrecision = source.DisplayPrecision,
             MqttField = source.MqttField,
             DisplayCategory = source.DisplayCategory,
-            UseScannerInput = source.UseScannerInput
+            UseScannerInput = source.UseScannerInput,
+            Expression = source.Expression,
+            Scale = source.Scale,
+            Offset = source.Offset,
+            Enabled = source.Enabled
         };
 
-        if (tag.Source != TagSource.Manual)
+        if (tag.IsPlc)
         {
             if (lineName == S7TestLineName)
             {
