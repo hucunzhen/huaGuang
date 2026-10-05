@@ -53,6 +53,7 @@ Write-Host ""
 Write-Host "Installed:" -ForegroundColor Green
 Write-Host "  $exe"
 Write-Host "  Desktop shortcut: $shortcut"
+Write-Host "  Extra windows (subscribe / per-line acquisition): add from Settings in the app"
 if (-not $NoStartup) {
     Write-Host "  Startup: enabled (disable with -NoStartup or in app Settings)"
 }

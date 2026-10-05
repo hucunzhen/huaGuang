@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Text;
+using HuaGuang.Monitor.Services;
 using Microsoft.Maui.Controls;
 
 namespace HuaGuang.Monitor.Platforms.Windows;
@@ -7,7 +8,9 @@ namespace HuaGuang.Monitor.Platforms.Windows;
 /// <summary>第二次启动时唤醒已隐藏/在后台的主窗口，而不是再开一份或静默退出。</summary>
 static class WindowsUiActivation
 {
-    const string PipeName = "HuaGuang.Monitor.Ui.Activate";
+    static string PipeName => MonitorProcessInstance.IsIsolated
+        ? $"HuaGuang.Monitor.Ui.Activate.{MonitorProcessInstance.Id}"
+        : "HuaGuang.Monitor.Ui.Activate";
     static CancellationTokenSource? _serverCts;
 
     public static bool TryActivateExistingInstance()

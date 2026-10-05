@@ -380,6 +380,8 @@ public static class MonitorCoreTests
         AssertTrue(xianhe.Mqtt.Password == LineMqttDefaults.Password);
         AssertTrue(xianhe.Mqtt.Topic == LineMqttDefaults.XianhePublishTopic);
         AssertTrue(xianhe.Mqtt.ClientId == LineMqttDefaults.XianheClientId);
+        AssertTrue(xianhe.SubscribeMqtt.ClientId == MqttSubscribeAccount.DefaultClientId);
+        AssertTrue(string.IsNullOrEmpty(xianhe.SubscribeMqtt.Username));
 
         var huadi = new AppSettings();
         LineCatalog.Apply(huadi, LineCatalog.Huadi.Name);
@@ -746,6 +748,10 @@ public static class MonitorCoreTests
                     Topic = "/backup/topic"
                 }
             ];
+            original.SubscribeMqtt.Host = "10.0.0.9";
+            original.SubscribeMqtt.ClientId = "SUBSCREEN";
+            original.SubscribeMqtt.Username = "sub-user";
+            original.SubscribeMqtt.Password = "sub-pass";
             LineExcelConfigService.Export(original, tempPath);
 
             var loaded = new AppSettings();
@@ -757,6 +763,10 @@ public static class MonitorCoreTests
             AssertTrue(loaded.MqttEndpoints[1].Password == "pass2");
             MqttEndpointCatalog.Normalize(loaded);
             AssertTrue(loaded.Mqtt.Host == loaded.MqttEndpoints[0].Host);
+            AssertTrue(loaded.SubscribeMqtt.Host == "10.0.0.9");
+            AssertTrue(loaded.SubscribeMqtt.ClientId == "SUBSCREEN");
+            AssertTrue(loaded.SubscribeMqtt.Username == "sub-user");
+            AssertTrue(loaded.SubscribeMqtt.Password == "sub-pass");
         }
         finally
         {
@@ -1083,6 +1093,16 @@ public static class MonitorCoreTests
             }).GetAwaiter().GetResult();
             AssertTrue(deviceATags.SequenceEqual(["车速", "运行状态"], StringComparer.Ordinal));
 
+            var deviceATable = store.QueryTableAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddHours(-1),
+                To = DateTimeOffset.Now.AddHours(1),
+                DeviceId = "测试设备",
+                Limit = 10
+            }, 1, ["车速", "运行状态", "新增点位"]).GetAwaiter().GetResult();
+            AssertTrue(deviceATable.Columns.Count == 2);
+            AssertTrue(!deviceATable.Columns.Any(column => column.TagName == "新增点位"));
+
             var secondId = store.AppendAsync(new HistorySampleWriteRequest
             {
                 DeviceId = "另一设备",
@@ -1138,16 +1158,45 @@ public static class MonitorCoreTests
             AssertTrue(store.GetStatsAsync().GetAwaiter().GetResult().SampleCount == 0);
 
             store.AppendAsync(request).GetAwaiter().GetResult();
-            AssertTrue(store.DeleteAllAsync().GetAwaiter().GetResult() == 1);
+            var yesterday = DateTimeOffset.Now.AddDays(-1);
+            store.AppendAsync(new HistorySampleWriteRequest
+            {
+                RecordedAt = yesterday,
+                DeviceId = request.DeviceId,
+                OperationMode = request.OperationMode,
+                Quality = request.Quality,
+                Tags = request.Tags
+            }).GetAwaiter().GetResult();
+            var spanCount = store.CountMatchingAsync(new HistoryQuery
+            {
+                From = DateTimeOffset.Now.AddDays(-2),
+                To = DateTimeOffset.Now.AddHours(1)
+            }).GetAwaiter().GetResult();
+            AssertTrue(spanCount == 2);
+            var shardDir = Path.Combine(Path.GetDirectoryName(dbPath)!, Path.GetFileNameWithoutExtension(dbPath)!);
+            AssertTrue(Directory.GetFiles(shardDir, "*.db").Length >= 2);
+
+            AssertTrue(store.DeleteAllAsync().GetAwaiter().GetResult() == 2);
             AssertTrue(store.GetStatsAsync().GetAwaiter().GetResult().SampleCount == 0);
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
-            if (File.Exists(dbPath))
-            {
-                File.Delete(dbPath);
-            }
+            DeleteHistoryFiles(dbPath);
+        }
+    }
+
+    static void DeleteHistoryFiles(string dbPath)
+    {
+        SqliteConnection.ClearAllPools();
+        var shardDir = Path.Combine(Path.GetDirectoryName(dbPath)!, Path.GetFileNameWithoutExtension(dbPath)!);
+        if (Directory.Exists(shardDir))
+        {
+            Directory.Delete(shardDir, recursive: true);
+        }
+
+        if (File.Exists(dbPath))
+        {
+            File.Delete(dbPath);
         }
     }
 
@@ -1246,11 +1295,7 @@ public static class MonitorCoreTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
-            if (File.Exists(dbPath))
-            {
-                File.Delete(dbPath);
-            }
+            DeleteHistoryFiles(dbPath);
         }
     }
 

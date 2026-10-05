@@ -67,6 +67,20 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\appicon.ico"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\appicon.ico"; Tasks: desktopicon; WorkingDir: "{app}"
 
+[InstallDelete]
+Type: files; Name: "{group}\先河订阅.lnk"
+Type: files; Name: "{group}\华迪订阅.lnk"
+Type: files; Name: "{group}\撒粉订阅.lnk"
+Type: files; Name: "{group}\平板订阅.lnk"
+Type: files; Name: "{group}\C型火焰订阅.lnk"
+Type: files; Name: "{group}\S7订阅.lnk"
+Type: files; Name: "{autodesktop}\先河订阅.lnk"
+Type: files; Name: "{autodesktop}\华迪订阅.lnk"
+Type: files; Name: "{autodesktop}\撒粉订阅.lnk"
+Type: files; Name: "{autodesktop}\平板订阅.lnk"
+Type: files; Name: "{autodesktop}\C型火焰订阅.lnk"
+Type: files; Name: "{autodesktop}\S7订阅.lnk"
+
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "IndustrialMonitor"; ValueData: """{app}\{#MyAppExeName}"""; Tasks: startup; Flags: uninsdeletevalue
 
@@ -100,19 +114,50 @@ begin
     DeleteFile(ForceUiExitFlagPath());
 end;
 
-procedure KillMonitorUiProcess();
+procedure KillImage(const ImageName: String);
 var
   ResultCode: Integer;
 begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM "' + ImageName + '" /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure StopWindowsService(const ServiceName: String);
+var
+  ResultCode: Integer;
+begin
+  { net stop 会等到服务真正退出；服务不存在时忽略错误。 }
+  Exec(ExpandConstant('{sys}\net.exe'), 'stop ' + ServiceName, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+{ 升级/覆盖安装前必须先停守护、采集服务并结束界面，否则 exe 被占用会复制失败。 }
+procedure StopRunningAppAndServices();
+begin
   EnsureForceUiExitFlag();
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#MyAppExeName} /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(800);
+  { 先停守护，避免它把采集服务或界面再拉起来。 }
+  StopWindowsService('{#WatchdogServiceName}');
+  StopWindowsService('{#ServiceName}');
+  StopWindowsService('{#ServiceName}-acq-xianhe');
+  StopWindowsService('{#ServiceName}-acq-huadi');
+  StopWindowsService('{#ServiceName}-acq-safen');
+  StopWindowsService('{#ServiceName}-acq-pingban');
+  StopWindowsService('{#ServiceName}-acq-cyhy');
+  StopWindowsService('{#ServiceName}-acq-s7');
+  StopWindowsService('{#ServiceName}-sub');
+  KillImage('{#MyAppExeName}');
+  KillImage('{#ServiceExeName}');
+  KillImage('{#WatchdogExeName}');
+  Sleep(1000);
+end;
+
+procedure KillMonitorUiProcess();
+begin
+  StopRunningAppAndServices();
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  KillMonitorUiProcess();
+  StopRunningAppAndServices();
 end;
 
 function ServiceExePath(): String;
@@ -277,6 +322,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
+    StopRunningAppAndServices();
     StopAndDeleteWatchdogService();
     StopAndDeleteMonitorService();
   end;

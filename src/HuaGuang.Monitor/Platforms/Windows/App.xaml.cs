@@ -15,6 +15,7 @@ public partial class App : MauiWinUIApplication
 	static App()
 	{
 		CrashExitLogger.RegisterEarly("ui");
+		HuaGuang.Monitor.Services.MonitorProcessInstance.Initialize();
 		if (!WindowsSingleInstanceGuard.TryAcquirePrimaryInstance())
 		{
 			Environment.Exit(0);

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using HuaGuang.Monitor.Ipc;
 using HuaGuang.Monitor.Models;
+using HuaGuang.Monitor.Services;
 using Microsoft.Extensions.Logging;
 
 namespace HuaGuang.Monitor.Services.Watchdog;
@@ -34,7 +35,8 @@ public sealed class WatchdogSupervisor
             return;
         }
 
-        if (options.ProtectAcquisitionService)
+        if (options.ProtectAcquisitionService
+            && !InstanceHostProfileStore.HasAutoStartInstance())
         {
             await EnsureAcquisitionWindowsServiceAsync(options, cancellationToken).ConfigureAwait(false);
         }
@@ -64,7 +66,7 @@ public sealed class WatchdogSupervisor
 
     async Task EnsureAcquisitionWindowsServiceAsync(WatchdogOptions options, CancellationToken cancellationToken)
     {
-        if (IsWindowsServiceRunning(MonitorIpcConstants.ServiceName))
+        if (IsWindowsServiceRunning(MonitorIpcConstants.DefaultServiceName))
         {
             return;
         }
@@ -74,8 +76,8 @@ public sealed class WatchdogSupervisor
             return;
         }
 
-        _logger.LogWarning("采集 Windows 服务未运行，尝试启动 {ServiceName}", MonitorIpcConstants.ServiceName);
-        if (TryStartWindowsService(MonitorIpcConstants.ServiceName))
+        _logger.LogWarning("采集 Windows 服务未运行，尝试启动 {ServiceName}", MonitorIpcConstants.DefaultServiceName);
+        if (TryStartWindowsService(MonitorIpcConstants.DefaultServiceName))
         {
             _lastAcquisitionServiceRestartUtc = DateTimeOffset.UtcNow;
             await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
@@ -100,6 +102,16 @@ public sealed class WatchdogSupervisor
         }
 
         if (!_settings.Current.AutoStartAcquisition)
+        {
+            return;
+        }
+
+        if (!MonitorProcessInstance.IsIsolated && InstanceHostProfileStore.HasAutoStartInstance())
+        {
+            return;
+        }
+
+        if (!LineConfigPaths.HasConfirmedActiveLine())
         {
             return;
         }
@@ -164,7 +176,7 @@ public sealed class WatchdogSupervisor
         var registryWatch = _shouldWatchUi?.Invoke() == true;
         if (!ShouldWatchUi())
         {
-            var msg = "跳过 UI 重启：未启用监视（无开机自启且 24h 内无 UI 心跳）";
+            var msg = "跳过 UI 重启：未启用主窗口开机启动（独立实例开机只跑后台，不拉主窗口）";
             _logger.LogDebug(msg);
             WatchdogDiagLog.Write(msg);
             return;

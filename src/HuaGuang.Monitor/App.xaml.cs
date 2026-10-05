@@ -1,3 +1,4 @@
+using HuaGuang.Monitor.Services;
 using HuaGuang.Monitor.Services.Logging;
 using HuaGuang.Monitor.Services.Watchdog;
 
@@ -15,6 +16,8 @@ public partial class App : Application
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
 		var window = new Window(new AppShell());
+		window.Destroying += (_, _) => LineAcquisitionOccupancy.ReleaseAllForSelf();
+		AppDomain.CurrentDomain.ProcessExit += (_, _) => LineAcquisitionOccupancy.ReleaseAllForSelf();
 #if WINDOWS
 		Platforms.Windows.WindowsMauiTitleBar.Apply(window);
 		Platforms.Windows.WindowsUiActivation.StartServer(window);
@@ -25,7 +28,8 @@ public partial class App : Application
 			CrashExitLogger.Record("Window.Destroying", null, fatal: false, "UI window closing");
 			Platforms.Windows.WindowsRuntimeHandoff.TryHandoffAcquisitionToService();
 		};
-		AppDomain.CurrentDomain.ProcessExit += (_, _) => Platforms.Windows.WindowsRuntimeHandoff.TryHandoffAcquisitionToService();
+		AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+			Platforms.Windows.WindowsRuntimeHandoff.TryHandoffAcquisitionToService();
 #endif
 		return window;
 	}

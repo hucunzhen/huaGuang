@@ -158,6 +158,16 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (!MonitorProcessInstance.IsIsolated && InstanceHostProfileStore.HasAutoStartInstance())
+        {
+            return;
+        }
+
+        if (!LineConfigPaths.HasConfirmedActiveLine())
+        {
+            return;
+        }
+
         if (IsRunning)
         {
             _autoStartAttempted = true;
@@ -237,6 +247,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                     RebuildRows();
                     _appliedSettingsRevision = _settings.Revision;
                 }).ConfigureAwait(false);
+
+                LineConfigPaths.WriteActiveLineName(_settings.Current.LineName);
 
                 if (subscribeMode)
                 {
@@ -1078,6 +1090,11 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     string BuildModeText()
     {
         var settings = _settings.Current;
+        if (!LineConfigPaths.HasConfirmedActiveLine())
+        {
+            return "未选择产线 · 请到「设置」选择后再启动";
+        }
+
         if (settings.OperationMode == AppOperationMode.Subscribe)
         {
             var state = _subscription.IsRunning ? "运行中" : "已停止";
@@ -1132,9 +1149,11 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 : $"订阅主题：{string.Join("，", topics)}";
             ModeText = BuildModeText();
             LastError = preservedError ?? _subscription.LastError;
-            EmptyTagsHint = _subscription.IsRunning
-                ? "等待遥测数据…"
-                : "请启动订阅。";
+            EmptyTagsHint = !LineConfigPaths.HasConfirmedActiveLine()
+                ? "请先到「设置」选择产线。首次安装后不会自动订阅。"
+                : _subscription.IsRunning
+                    ? "等待遥测数据…"
+                    : "请启动订阅。";
 
             NotifyRemoteLayoutChanged();
             _cachedDeviceKeys = [];
@@ -1159,7 +1178,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
                 : $"发布主题：{string.Join("，", publishTopics)}";
             ModeText = BuildModeText();
             LastError = preservedError ?? _acquisition.LastError;
-            EmptyTagsHint = "还没有启用的点位，请到“点位”页添加。";
+            EmptyTagsHint = LineConfigPaths.HasConfirmedActiveLine()
+                ? "还没有启用的点位，请到“点位”页添加。"
+                : "请先到「设置」选择产线。首次安装后不会自动采集。";
 
             ShowRemoteDevicePicker = false;
         }

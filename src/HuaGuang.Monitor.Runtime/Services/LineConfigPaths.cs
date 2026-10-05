@@ -17,7 +17,9 @@ public static class LineConfigPaths
         ? InstallLinesDirectory
         : UserLinesDirectory;
 
-    public static string ActiveLineFilePath => Path.Combine(LinesDirectory, "当前产线.txt");
+    public static string ActiveLineFilePath => MonitorProcessInstance.IsIsolated
+        ? Path.Combine(AppPaths.UserDataDirectory, "当前产线.txt")
+        : Path.Combine(LinesDirectory, "当前产线.txt");
 
     public static string GetLineExcelPath(string lineName) =>
         Path.Combine(LinesDirectory, $"{lineName}.xlsx");
@@ -34,23 +36,48 @@ public static class LineConfigPaths
         return BundledLineFileProviderRegistry.Current?.ResolveBundledTemplatePath(lineName);
     }
 
-    public static string ReadActiveLineName()
+    /// <summary>
+    /// 用户已明确选择产线（存在有效的 <c>当前产线.txt</c>）。
+    /// 首次安装尚未选择时为 false，此时仍可预览目录中的默认产线 Excel，但不得自动采集。
+    /// </summary>
+    public static bool HasConfirmedActiveLine() => TryReadConfirmedActiveLineName(out _);
+
+    public static bool TryReadConfirmedActiveLineName(out string lineName)
     {
-        if (File.Exists(ActiveLineFilePath))
+        lineName = string.Empty;
+        var startupLine = MonitorProcessInstance.StartupLineName;
+        if (!string.IsNullOrWhiteSpace(startupLine) && LineCatalog.LineNames.Contains(startupLine))
         {
-            var name = File.ReadAllText(ActiveLineFilePath).Trim();
-            if (LineCatalog.LineNames.Contains(name))
-            {
-                return name;
-            }
+            lineName = startupLine;
+            return true;
         }
 
-        return LineCatalog.LineNames[0];
+        if (!File.Exists(ActiveLineFilePath))
+        {
+            return false;
+        }
+
+        var name = File.ReadAllText(ActiveLineFilePath).Trim();
+        if (!LineCatalog.LineNames.Contains(name))
+        {
+            return false;
+        }
+
+        lineName = name;
+        return true;
     }
+
+    public static string ReadActiveLineName() =>
+        TryReadConfirmedActiveLineName(out var name) ? name : LineCatalog.LineNames[0];
 
     public static void WriteActiveLineName(string lineName)
     {
-        Directory.CreateDirectory(LinesDirectory);
+        var directory = Path.GetDirectoryName(ActiveLineFilePath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
         File.WriteAllText(ActiveLineFilePath, lineName);
     }
 

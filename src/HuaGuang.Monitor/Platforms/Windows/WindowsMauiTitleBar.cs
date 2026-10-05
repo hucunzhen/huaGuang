@@ -1,3 +1,4 @@
+using HuaGuang.Monitor.Services;
 using Microsoft.Maui.Controls;
 
 namespace HuaGuang.Monitor.Platforms.Windows;
@@ -5,11 +6,10 @@ namespace HuaGuang.Monitor.Platforms.Windows;
 /// <summary>使用 MAUI <see cref="TitleBar"/> 在系统标题栏左侧显示 icon + 标题（不替换 WinUI Content）。</summary>
 static class WindowsMauiTitleBar
 {
-    const string WindowTitle = "工业监控";
-
     public static void Apply(Window window)
     {
-        window.Title = WindowTitle;
+        var windowTitle = MonitorProcessInstance.WindowTitle;
+        window.Title = windowTitle;
 
         ImageSource? icon = null;
         var pngPath = WindowsAppIcon.ResolveBrandPngPath();
@@ -20,7 +20,7 @@ static class WindowsMauiTitleBar
 
         window.TitleBar = new TitleBar
         {
-            Title = WindowTitle,
+            Title = windowTitle,
             Icon = icon,
             ForegroundColor = Color.FromArgb("#FFFFFF"),
             BackgroundColor = Color.FromArgb("#0B1522")

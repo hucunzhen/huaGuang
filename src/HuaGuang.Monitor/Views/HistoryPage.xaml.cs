@@ -38,6 +38,25 @@ public partial class HistoryPage : MonitorPageBase
         }
     }
 
+    void OnDevicePickerSelectedIndexChanged(object? sender, EventArgs e)
+    {
+        if (BindingContext is not HistoryViewModel viewModel ||
+            sender is not Microsoft.Maui.Controls.Picker picker)
+        {
+            return;
+        }
+
+        if (picker.SelectedIndex < 0 || picker.SelectedItem is not string name || string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        if (!string.Equals(viewModel.SelectedDevice, name, StringComparison.Ordinal))
+        {
+            viewModel.SelectedDevice = name;
+        }
+    }
+
 #if WINDOWS
     void HookTableMouseWheel()
     {

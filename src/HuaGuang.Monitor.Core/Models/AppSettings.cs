@@ -33,6 +33,8 @@ public sealed class AppSettings
     public string SubscribeTopic { get; set; } = LineMqttDefaults.XianhePublishTopic;
     public PlcSettings Plc { get; set; } = new();
     public MqttSettings Mqtt { get; set; } = new();
+    /// <summary>订阅模式专用 MQTT 账号（权限与采集发布账号分开）。</summary>
+    public MqttSettings SubscribeMqtt { get; set; } = MqttSubscribeAccount.CreateDefault();
     /// <summary>多个 MQTT 发布目标；采集模式下会同时向所有已启用目标发送。</summary>
     public List<MqttEndpoint> MqttEndpoints { get; set; } = [];
     public MqttPayloadProfile MqttPayload { get; set; } = new();

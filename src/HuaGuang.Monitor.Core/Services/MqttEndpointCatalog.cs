@@ -36,6 +36,7 @@ public static class MqttEndpointCatalog
         }
 
         GetPrimary(settings).ApplyTo(settings.Mqtt);
+        MqttSubscribeAccount.Normalize(settings);
     }
 
     public static MqttEndpoint GetPrimary(AppSettings settings) =>

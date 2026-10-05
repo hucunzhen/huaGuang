@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using HuaGuang.Monitor.Services;
 
 namespace HuaGuang.Monitor.Platforms.Windows;
 
@@ -17,6 +18,12 @@ static class WindowsSingleInstanceGuard
 
     public static bool TryAcquirePrimaryInstance()
     {
+        MonitorProcessInstance.Initialize();
+        if (MonitorProcessInstance.IsIsolated)
+        {
+            return TryAcquireNamedInstance(MonitorProcessInstance.Id!);
+        }
+
         if (TryFindPeerUiProcess(out var peerPid))
         {
             var activated = WindowsUiActivation.TryActivateExistingInstance();
@@ -79,13 +86,14 @@ static class WindowsSingleInstanceGuard
     {
         peerPid = 0;
         var self = Environment.ProcessId;
+        var isolatedPids = ListIsolatedInstancePids();
         try
         {
             foreach (var process in Process.GetProcessesByName(ProcessBaseName))
             {
                 try
                 {
-                    if (process.Id == self || process.HasExited)
+                    if (process.Id == self || process.HasExited || isolatedPids.Contains(process.Id))
                     {
                         continue;
                     }
@@ -106,16 +114,87 @@ static class WindowsSingleInstanceGuard
         return false;
     }
 
-    static bool TryAcquireLockFile()
+    static bool TryAcquireNamedInstance(string instanceId)
+    {
+        var lockPath = Path.Combine(
+            WindowsSharedDataDirectory.Resolve(),
+            "instances",
+            instanceId,
+            "ui-instance.lock");
+
+        if (!TryAcquireLockFileAt(lockPath))
+        {
+            var activated = WindowsUiActivation.TryActivateExistingInstance();
+            StartupBootstrapLog.Write(
+                activated
+                    ? $"WinUI.App: instance '{instanceId}' already running, brought window to front"
+                    : $"WinUI.App: instance '{instanceId}' lock in use, could not activate, exit");
+            return false;
+        }
+
+        try
+        {
+            _mutex = new Mutex(
+                initiallyOwned: true,
+                name: $@"Local\HuaGuang.Monitor.Ui.SingleInstance.{instanceId}",
+                createdNew: out var createdNew);
+            if (!createdNew)
+            {
+                ReleaseLockFile();
+                _mutex.Dispose();
+                _mutex = null;
+                WindowsUiActivation.TryActivateExistingInstance();
+                StartupBootstrapLog.Write($"WinUI.App: instance '{instanceId}' mutex held, exit");
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            StartupBootstrapLog.Write("WinUI.App: instance mutex advisory failed (continue)", ex);
+        }
+
+        StartupBootstrapLog.Write($"WinUI.App: isolated instance '{instanceId}' acquired");
+        return true;
+    }
+
+    static HashSet<int> ListIsolatedInstancePids()
+    {
+        var pids = new HashSet<int>();
+        try
+        {
+            var root = Path.Combine(WindowsSharedDataDirectory.Resolve(), "instances");
+            if (!Directory.Exists(root))
+            {
+                return pids;
+            }
+
+            foreach (var lockFile in Directory.EnumerateFiles(root, "ui-instance.lock", SearchOption.AllDirectories))
+            {
+                if (TryReadLockOwnerPidFrom(lockFile, out var pid) && pid > 0 && pid != Environment.ProcessId && IsProcessAlive(pid))
+                {
+                    pids.Add(pid);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return pids;
+    }
+
+    static bool TryAcquireLockFile() => TryAcquireLockFileAt(LockFilePath);
+
+    static bool TryAcquireLockFileAt(string lockFilePath)
     {
         try
         {
-            var directory = Path.GetDirectoryName(LockFilePath)!;
+            var directory = Path.GetDirectoryName(lockFilePath)!;
             Directory.CreateDirectory(directory);
 
             _lockStream?.Dispose();
             _lockStream = new FileStream(
-                LockFilePath,
+                lockFilePath,
                 FileMode.OpenOrCreate,
                 FileAccess.ReadWrite,
                 FileShare.None);
@@ -166,17 +245,19 @@ static class WindowsSingleInstanceGuard
         }
     }
 
-    static bool TryReadLockOwnerPid(out int pid)
+    static bool TryReadLockOwnerPid(out int pid) => TryReadLockOwnerPidFrom(LockFilePath, out pid);
+
+    static bool TryReadLockOwnerPidFrom(string lockFilePath, out int pid)
     {
         pid = 0;
         try
         {
-            if (!File.Exists(LockFilePath))
+            if (!File.Exists(lockFilePath))
             {
                 return false;
             }
 
-            var firstLine = File.ReadLines(LockFilePath).FirstOrDefault();
+            var firstLine = File.ReadLines(lockFilePath).FirstOrDefault();
             return int.TryParse(firstLine, out pid);
         }
         catch

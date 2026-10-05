@@ -263,6 +263,11 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
             var dataDirectory = AppPaths.UserDataDirectory;
             var builder = new StringBuilder();
             builder.AppendLine($"数据目录：{dataDirectory}");
+            if (MonitorProcessInstance.IsIsolated)
+            {
+                builder.AppendLine($"多开实例：{MonitorProcessInstance.Id}（独立后台 {MonitorProcessInstance.WindowsServiceName}）");
+                builder.AppendLine($"产线 Excel 目录（共享）：{AppPaths.UserLinesDirectory}");
+            }
             builder.AppendLine($"日志目录：{logDirectory}");
             var exportHint = _settings.Current.LogExportDirectory;
             var exportDisplay = string.IsNullOrWhiteSpace(exportHint)
@@ -285,6 +290,12 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
                 builder.AppendLine(
                     $"  · {endpoint.Name} {(endpoint.Enabled ? "启用" : "停用")} {mqtt.Host}:{mqtt.Port} clientId={mqtt.ClientId} user={mqtt.Username} password={pwd}");
             }
+
+            MqttSubscribeAccount.Normalize(_settings.Current);
+            var sub = _settings.Current.SubscribeMqtt;
+            var subPwd = string.IsNullOrEmpty(sub.Password) ? "未设置" : "已设置";
+            builder.AppendLine(
+                $"MQTT 订阅账号：{sub.Host}:{sub.Port} clientId={sub.ClientId} user={sub.Username} password={subPwd}");
 
 #if WINDOWS
             var serviceLog = Path.Combine(logDirectory, $"runtime-{DateTime.Now:yyyyMMdd}.log");

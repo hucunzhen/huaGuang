@@ -80,7 +80,7 @@ public sealed class AdaptiveMonitorAcquisition : IMonitorAcquisition
     {
         if (!MonitorIpcClient.IsServiceAvailable())
         {
-            _launcher.EnsureRunning(TimeSpan.FromSeconds(12));
+            _launcher.EnsureRunning(TimeSpan.FromSeconds(2));
         }
 
         if (MonitorIpcClient.IsServiceAvailable())
@@ -89,14 +89,7 @@ public sealed class AdaptiveMonitorAcquisition : IMonitorAcquisition
             return;
         }
 
-        if (!_launcher.IsBackgroundPresent())
-        {
-            await _local.StartAsync().ConfigureAwait(false);
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"无法连接后台采集服务 IPC：{MonitorIpcClient.DescribeConnectionFailure()}");
+        await _local.StartAsync().ConfigureAwait(false);
     }
 
     public Task StopAsync() => Active.StopAsync();
@@ -179,7 +172,7 @@ public sealed class AdaptiveMonitorSubscription : IMonitorSubscription
     {
         if (!MonitorIpcClient.IsServiceAvailable())
         {
-            _launcher.EnsureRunning(TimeSpan.FromSeconds(12));
+            _launcher.EnsureRunning(TimeSpan.FromSeconds(2));
         }
 
         if (MonitorIpcClient.IsServiceAvailable())
@@ -188,14 +181,7 @@ public sealed class AdaptiveMonitorSubscription : IMonitorSubscription
             return;
         }
 
-        if (!_launcher.IsBackgroundPresent())
-        {
-            await _local.StartAsync().ConfigureAwait(false);
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"无法连接后台采集服务 IPC：{MonitorIpcClient.DescribeConnectionFailure()}");
+        await _local.StartAsync().ConfigureAwait(false);
     }
 
     public Task StopAsync() => Active.StopAsync();

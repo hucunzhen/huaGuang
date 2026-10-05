@@ -170,6 +170,18 @@ public sealed class MonitorAutoStartWorker : BackgroundService
             return;
         }
 
+        if (!MonitorProcessInstance.IsIsolated && InstanceHostProfileStore.HasAutoStartInstance())
+        {
+            _logger.LogInformation("独立实例已负责开机启动，跳过主服务按默认产线自动采集");
+            return;
+        }
+
+        if (!LineConfigPaths.HasConfirmedActiveLine())
+        {
+            _logger.LogInformation("尚未选择产线，跳过服务自动启动");
+            return;
+        }
+
         try
         {
             if (_settings.Current.OperationMode == AppOperationMode.Subscribe)

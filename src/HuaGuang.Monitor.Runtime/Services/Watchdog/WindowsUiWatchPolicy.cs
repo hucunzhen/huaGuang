@@ -1,3 +1,5 @@
+using HuaGuang.Monitor.Services;
+
 namespace HuaGuang.Monitor.Services.Watchdog;
 
 public static class WindowsUiWatchPolicy
@@ -11,13 +13,17 @@ public static class WindowsUiWatchPolicy
             return false;
         }
 
-        var uiState = WatchdogStateStore.Read(WatchdogConstants.UiRole);
-        if (uiState?.LastHeartbeatUtc > DateTimeOffset.UtcNow.AddHours(-24))
+        if (InstanceHostProfileStore.HasAutoStartInstance())
+        {
+            return false;
+        }
+
+        if (PrimaryUiAutoStartStore.IsEnabled())
         {
             return true;
         }
 
-        return IsStartupRunRegistered();
+        return false;
     }
 
     public static bool IsStartupRunRegistered()
@@ -46,7 +52,7 @@ public static class WindowsUiWatchPolicy
     /// </summary>
     public static bool ShouldDeferUiLaunchToStartupRegistry(WatchdogRoleState? uiState)
     {
-        if (!IsStartupRunRegistered())
+        if (!PrimaryUiAutoStartStore.IsEnabled())
         {
             return false;
         }

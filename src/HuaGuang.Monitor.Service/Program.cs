@@ -14,41 +14,62 @@ public static class Program
     public static void Main(string[] args)
     {
         CrashExitLogger.RegisterEarly("service");
+        MonitorProcessInstance.Initialize();
         AppPaths.Configure(new WindowsAppDataPaths());
+        MonitorProcessInstance.RecoverIsolatedIdentityFromWindowsService();
+        MonitorProcessInstance.ApplyPersistedHostProfile();
         WindowsAppDataPaths.WarmUp();
         Directory.CreateDirectory(AppPaths.LogDirectory);
-        CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory}");
+        AppPaths.ConfigureRuntimeLogging(
+            MonitorProcessInstance.IsIsolated
+                ? $"runtime-{MonitorProcessInstance.Id}"
+                : "runtime");
+        CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory} instance={MonitorProcessInstance.Id ?? "primary"}");
 
-        var builder = Host.CreateApplicationBuilder(args);
+        var builder = Host.CreateApplicationBuilder();
         builder.Services.AddWindowsService(options =>
         {
-            options.ServiceName = MonitorIpcConstants.ServiceName;
+            options.ServiceName = MonitorIpcConstants.CurrentServiceName;
         });
 
         builder.Services.AddSingleton<SettingsStore>();
-        builder.Services.AddSingleton(sp => new WatchdogSupervisor(
-            sp.GetRequiredService<SettingsStore>(),
-            sp.GetRequiredService<ILogger<WatchdogSupervisor>>(),
-            WatchdogSupervisor.ResolveInstallRoot(),
-            WindowsUiWatchPolicy.ShouldWatchUi));
+        if (!MonitorProcessInstance.IsIsolated)
+        {
+            builder.Services.AddSingleton(sp => new WatchdogSupervisor(
+                sp.GetRequiredService<SettingsStore>(),
+                sp.GetRequiredService<ILogger<WatchdogSupervisor>>(),
+                WatchdogSupervisor.ResolveInstallRoot(),
+                WindowsUiWatchPolicy.ShouldWatchUi));
+        }
+
         builder.Services.AddMonitorRuntimeCore(AppPaths.LogDirectory);
         builder.Services.AddHostedService<MonitorIpcServer>();
-        builder.Services.AddHostedService<UiSupervisorWorker>();
+        if (!MonitorProcessInstance.IsIsolated)
+        {
+            builder.Services.AddHostedService<UiSupervisorWorker>();
+        }
+
         builder.Services.AddHostedService<MonitorConfigWatcher>();
         builder.Services.AddHostedService<MonitorAutoStartWorker>();
-        builder.Services.AddHostedService(sp =>
-            new WatchdogRoleHeartbeatWorker(
-                WatchdogConstants.AcquisitionRole,
-                sp.GetRequiredService<ILogger<WatchdogRoleHeartbeatWorker>>()));
+        if (!MonitorProcessInstance.IsIsolated)
+        {
+            builder.Services.AddHostedService(sp =>
+                new WatchdogRoleHeartbeatWorker(
+                    WatchdogConstants.AcquisitionRole,
+                    sp.GetRequiredService<ILogger<WatchdogRoleHeartbeatWorker>>()));
+        }
 
         var host = builder.Build();
         CrashExitLogger.Register(host.Services.GetRequiredService<ILoggerFactory>());
         CrashExitLogger.SetContext(typeof(Program).Assembly.GetName().Version?.ToString(), "service");
         var logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("ServiceStartup");
         logger.LogInformation(
-            "工业监控后台服务启动 dataDir={DataDir} logFile={LogFile}",
+            "工业监控后台服务启动 dataDir={DataDir} logFile={LogFile} instance={Instance} line={Line} mode={Mode}",
             AppPaths.UserDataDirectory,
-            AppPaths.CurrentRuntimeLogFile);
+            AppPaths.CurrentRuntimeLogFile,
+            MonitorProcessInstance.Id ?? "primary",
+            MonitorProcessInstance.StartupLineName ?? "(unset)",
+            MonitorProcessInstance.StartupMode?.ToString() ?? "(unset)");
 
         var store = host.Services.GetRequiredService<SettingsStore>();
         if (!store.TryLoad())
@@ -57,15 +78,20 @@ public static class Program
                 "产线 Excel 加载失败，后台服务仍将启动以便在界面中修复 error={Error}",
                 store.LastLoadError);
         }
-        try
+
+        var history = host.Services.GetRequiredService<HistoryRecorder>();
+        _ = Task.Run(async () =>
         {
-            host.Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
-        }
-        catch (Exception ex)
-        {
-            logger.LogCritical(ex, "历史库初始化失败，服务无法安全启动");
-            throw;
-        }
+            try
+            {
+                await history.InitializeAsync().ConfigureAwait(false);
+                logger.LogInformation("历史库已在后台就绪");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "历史库后台初始化失败（采集/订阅仍继续）");
+            }
+        });
 
         host.Run();
     }

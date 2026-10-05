@@ -21,6 +21,65 @@ public static class HistoryTableFormatting
 
     public static string FormatColumnHeader(string tagName, string? unit) =>
         string.IsNullOrWhiteSpace(unit) ? tagName : $"{tagName}({unit})";
+
+    public static List<HistoryTableColumn> CreateColumns(
+        IEnumerable<string> tagNames,
+        IReadOnlyDictionary<string, string?>? units = null)
+    {
+        var columns = new List<HistoryTableColumn>();
+        foreach (var name in tagNames)
+        {
+            if (string.IsNullOrWhiteSpace(name) ||
+                columns.Exists(column => string.Equals(column.TagName, name, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            string? unit = null;
+            units?.TryGetValue(name, out unit);
+            var header = FormatColumnHeader(name, unit);
+            columns.Add(new HistoryTableColumn
+            {
+                TagName = name,
+                HeaderText = header,
+                Width = EstimateHeaderColumnWidth(header, minWidth: TagColumnWidth)
+            });
+            if (columns.Count >= MaxColumns)
+            {
+                break;
+            }
+        }
+
+        return columns;
+    }
+
+    public static List<string> OrderDeviceTagNames(
+        IEnumerable<string> deviceTagNames,
+        IReadOnlyList<string>? catalogOrder)
+    {
+        var remaining = new HashSet<string>(
+            deviceTagNames.Where(name => !string.IsNullOrWhiteSpace(name)),
+            StringComparer.Ordinal);
+        var ordered = new List<string>();
+        if (catalogOrder is not null)
+        {
+            foreach (var name in catalogOrder)
+            {
+                if (remaining.Remove(name))
+                {
+                    ordered.Add(name);
+                }
+            }
+        }
+
+        ordered.AddRange(remaining.OrderBy(name => name, StringComparer.Ordinal));
+        if (ordered.Count > MaxColumns)
+        {
+            ordered = ordered.Take(MaxColumns).ToList();
+        }
+
+        return ordered;
+    }
     /// <summary>数据区纵向滚动条占位，表头需预留同宽以免列错位。</summary>
     public const double VerticalScrollBarGutter = 12;
 

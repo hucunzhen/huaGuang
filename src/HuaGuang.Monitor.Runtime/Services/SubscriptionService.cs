@@ -82,7 +82,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
                 "启动订阅 line={LineName} topics={Topics} mqtt={Mqtt}",
                 settings.LineName,
                 string.Join(", ", topics),
-                LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
+                LogFormatting.DescribeMqtt(settings.SubscribeMqtt, settings.LineName));
         }
         catch (Exception ex)
         {
@@ -171,15 +171,17 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             return Task.CompletedTask;
         };
 
-        var options = MqttConnectionFactory.BuildOptions(settings.Mqtt, settings.LineName);
+        MqttSubscribeAccount.Normalize(settings);
+        MqttSubscribeAccount.Validate(settings.SubscribeMqtt);
+        var options = MqttConnectionFactory.BuildOptions(settings.SubscribeMqtt, settings.LineName);
         await MqttConnectionFactory.ConnectClientAsync(
             client,
             options,
-            settings.Mqtt,
+            settings.SubscribeMqtt,
             MqttTimeouts.Connect,
             CancellationToken.None).ConfigureAwait(false);
 
-        var qos = settings.Mqtt.Qos switch
+        var qos = settings.SubscribeMqtt.Qos switch
         {
             1 => MqttQualityOfServiceLevel.AtLeastOnce,
             2 => MqttQualityOfServiceLevel.ExactlyOnce,
@@ -199,7 +201,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         _logger.LogInformation(
             "MQTT 订阅已连接 topics={Topics} mqtt={Mqtt}",
             string.Join(", ", topics),
-            LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName));
+            LogFormatting.DescribeMqtt(settings.SubscribeMqtt, settings.LineName));
     }
 
     /// <summary>Diagnostics only: inject telemetry without a live MQTT broker.</summary>

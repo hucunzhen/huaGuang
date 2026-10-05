@@ -20,13 +20,13 @@ public static class StartupConfigNotice
         var store = MauiProgram.Services.GetRequiredService<SettingsStore>();
         var error = store.LastLoadError;
         var warnings = store.Current.ConfigLoadWarnings;
-        if (string.IsNullOrWhiteSpace(error) && warnings.Count == 0)
+        var needLine = !LineConfigPaths.HasConfirmedActiveLine();
+        if (!needLine && string.IsNullOrWhiteSpace(error) && warnings.Count == 0)
         {
             Interlocked.Exchange(ref _shown, 0);
             return;
         }
 
-        var body = BuildBody(error, warnings);
         if (!await WaitForPageAlertHostAsync(host).ConfigureAwait(true))
         {
             CrashExitLogger.Record(
@@ -39,6 +39,22 @@ public static class StartupConfigNotice
 
         try
         {
+            if (needLine && string.IsNullOrWhiteSpace(error) && warnings.Count == 0)
+            {
+                var goSettings = await host.DisplayAlert(
+                    "请选择产线",
+                    "首次安装后请先到「设置」选择产线。选择之前不会自动采集或订阅。",
+                    "去设置",
+                    "稍后").ConfigureAwait(true);
+                if (goSettings && Shell.Current is not null)
+                {
+                    await Shell.Current.GoToAsync("//settings").ConfigureAwait(true);
+                }
+
+                return;
+            }
+
+            var body = BuildBody(error, warnings, needLine);
             await host.DisplayAlert("产线配置需要检查", body, "知道了").ConfigureAwait(true);
         }
         catch (Exception ex)
@@ -47,9 +63,15 @@ public static class StartupConfigNotice
         }
     }
 
-    static string BuildBody(string? error, IReadOnlyList<string> warnings)
+    static string BuildBody(string? error, IReadOnlyList<string> warnings, bool needLine)
     {
         var body = new System.Text.StringBuilder();
+        if (needLine)
+        {
+            body.AppendLine("尚未选择产线，首次安装后不会自动采集。请到「设置」选择产线。");
+            body.AppendLine();
+        }
+
         if (!string.IsNullOrWhiteSpace(error))
         {
             body.AppendLine(error);

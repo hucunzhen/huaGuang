@@ -18,6 +18,7 @@ public partial class SettingsViewModel : ObservableObject
     readonly IMonitorAcquisition _acquisition;
     readonly IMonitorSubscription _subscription;
     readonly IStartupRegistration _startup;
+    readonly IDesktopShortcutService _shortcuts;
     readonly DashboardViewModel _dashboard;
     readonly ILogger<SettingsViewModel> _logger;
     readonly ILogExportLocationService _logExport;
@@ -25,6 +26,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanChangeLinePicker))]
     bool isSwitchingLine;
+    bool _isApplyingMode;
     bool _isLoadingSettings;
 
     public SettingsViewModel(
@@ -32,6 +34,7 @@ public partial class SettingsViewModel : ObservableObject
         IMonitorAcquisition acquisition,
         IMonitorSubscription subscription,
         IStartupRegistration startup,
+        IDesktopShortcutService shortcuts,
         DashboardViewModel dashboard,
         ILogExportLocationService logExport,
         ILogger<SettingsViewModel> logger)
@@ -40,6 +43,7 @@ public partial class SettingsViewModel : ObservableObject
         _acquisition = acquisition;
         _subscription = subscription;
         _startup = startup;
+        _shortcuts = shortcuts;
         _dashboard = dashboard;
         _logExport = logExport;
         _logger = logger;
@@ -50,12 +54,59 @@ public partial class SettingsViewModel : ObservableObject
             ? LineCatalog.LineNames[0]
             : _store.Current.LineName;
         _isApplyingLine = false;
+        OccupancyWarning = LineAcquisitionOccupancy.LastError ?? string.Empty;
+        foreach (var definition in _shortcuts.Definitions)
+        {
+            ShortcutItems.Add(new DesktopShortcutItemViewModel(definition, _shortcuts, message => StatusMessage = message));
+        }
     }
 
     public IReadOnlyList<string> LineNames => LineCatalog.LineNames;
     public string[] OperationModes { get; } = ["采集模式", "订阅模式"];
     public ObservableCollection<string> SubscribeTopics { get; } = [];
     public ObservableCollection<MqttEndpointViewModel> MqttEndpoints { get; } = [];
+    public MqttEndpointViewModel SubscribeMqtt { get; } = new()
+    {
+        Name = "订阅账号",
+        ClientId = MqttSubscribeAccount.DefaultClientId,
+        Username = string.Empty,
+        Password = string.Empty
+    };
+
+    public bool HasInstanceBanner => MonitorProcessInstance.IsIsolated;
+
+    public string InstanceBanner
+    {
+        get
+        {
+            if (!MonitorProcessInstance.IsIsolated)
+            {
+                return string.Empty;
+            }
+
+            var line = LineCatalog.GetShortDisplayName(SelectedLineName);
+            if (SelectedOperationMode == "订阅模式")
+            {
+                return "独立订阅大屏。「开机自动启动」会拉起本实例后台，关窗口后订阅可继续。";
+            }
+
+            return $"独立窗口 {MonitorProcessInstance.Id} · {line}采集。关闭窗口后本实例后台可继续采集；「开机自动启动」只控制本实例。";
+        }
+    }
+
+    public bool HasOccupancyWarning => !string.IsNullOrWhiteSpace(OccupancyWarning);
+
+    public string StartWithWindowsLabel => MonitorProcessInstance.IsIsolated
+        ? "开机自动启动本实例后台（仅本采集/订阅，不影响其它窗口）"
+        : "开机自动启动（Windows 登录后运行本程序）";
+
+    public string SaveButtonText => MonitorProcessInstance.IsIsolated
+        ? "保存本窗口"
+        : "保存设置";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasOccupancyWarning))]
+    string occupancyWarning = string.Empty;
 
     [ObservableProperty] string selectedOperationMode = "采集模式";
     [ObservableProperty] string newSubscribeTopic = string.Empty;
@@ -76,6 +127,8 @@ public partial class SettingsViewModel : ObservableObject
         "留空时打包会弹出系统目录选择；Android 请在侧栏选 USB 存储或 SD 卡。";
 
     public bool StartupSupported => _startup.IsSupported;
+    public bool ShortcutsSupported => _shortcuts.IsSupported;
+    public ObservableCollection<DesktopShortcutItemViewModel> ShortcutItems { get; } = [];
     public bool IsSubscribeSettings => SelectedOperationMode == "订阅模式";
     public bool IsAcquisitionSettings => SelectedOperationMode == "采集模式";
 
@@ -83,6 +136,33 @@ public partial class SettingsViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsSubscribeSettings));
         OnPropertyChanged(nameof(IsAcquisitionSettings));
+        OnPropertyChanged(nameof(InstanceBanner));
+        if (_isLoadingSettings || _isApplyingMode)
+        {
+            return;
+        }
+
+        if (value == "采集模式")
+        {
+            if (!LineAcquisitionOccupancy.TryClaim(SelectedLineName, out var occupancyError))
+            {
+                _isApplyingMode = true;
+                SelectedOperationMode = "订阅模式";
+                _isApplyingMode = false;
+                OccupancyWarning = occupancyError;
+                StatusMessage = occupancyError;
+                OnPropertyChanged(nameof(IsSubscribeSettings));
+                OnPropertyChanged(nameof(IsAcquisitionSettings));
+                OnPropertyChanged(nameof(InstanceBanner));
+                return;
+            }
+        }
+        else
+        {
+            LineAcquisitionOccupancy.ReleaseAllForSelf();
+        }
+
+        OccupancyWarning = string.Empty;
     }
 
     [ObservableProperty] string selectedPlcProtocol = "Modbus TCP";
@@ -139,6 +219,27 @@ public partial class SettingsViewModel : ObservableObject
             return;
         }
 
+        if (SelectedOperationMode == "采集模式"
+            && !LineAcquisitionOccupancy.TryClaim(value, out var occupancyError))
+        {
+            _isApplyingLine = true;
+            SelectedLineName = _store.Current.LineName;
+            _isApplyingLine = false;
+            OccupancyWarning = occupancyError;
+            StatusMessage = occupancyError;
+            return;
+        }
+
+        var previousLine = _store.Current.LineName;
+        if (SelectedOperationMode == "采集模式"
+            && !string.Equals(previousLine, value, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(previousLine))
+        {
+            LineAcquisitionOccupancy.Release(previousLine);
+        }
+
+        OccupancyWarning = string.Empty;
+        OnPropertyChanged(nameof(InstanceBanner));
         _ = LoadSelectedLineFromExcelSilentAsync(value);
     }
 
@@ -196,6 +297,10 @@ public partial class SettingsViewModel : ObservableObject
         }
 
         LoadFrom(_store.Current);
+        foreach (var item in ShortcutItems)
+        {
+            item.Refresh();
+        }
     }
 
     async Task ApplyLoadedSettingsOnMainThreadAsync(AppSettings settings, string successMessage)
@@ -401,6 +506,7 @@ public partial class SettingsViewModel : ObservableObject
         settings.UseSimulator = UseSimulator;
         ApplyPlcSettingsTo(settings);
         ApplyMqttEndpointsToSettings(settings);
+        ApplySubscribeMqttToSettings(settings);
         return settings;
     }
 
@@ -437,11 +543,24 @@ public partial class SettingsViewModel : ObservableObject
                 message = $"请填写 MQTT 目标「{endpoint.Name}」的 Broker 地址。";
                 return false;
             }
-        }
+            }
 
-        message = string.Empty;
-        return true;
-    }
+            if (SelectedOperationMode == "订阅模式")
+            {
+                try
+                {
+                    MqttSubscribeAccount.Validate(SubscribeMqtt.ToModel().ToSettings());
+                }
+                catch (Exception ex)
+                {
+                    message = ex.Message;
+                    return false;
+                }
+            }
+
+            message = string.Empty;
+            return true;
+        }
 
     [RelayCommand]
     void AddMqttEndpoint()
@@ -475,6 +594,14 @@ public partial class SettingsViewModel : ObservableObject
     {
         settings.MqttEndpoints = MqttEndpoints.Select(endpoint => endpoint.ToModel()).ToList();
         MqttEndpointCatalog.Normalize(settings);
+    }
+
+    void ApplySubscribeMqttToSettings(AppSettings settings)
+    {
+        var endpoint = SubscribeMqtt.ToModel();
+        settings.SubscribeMqtt = endpoint.ToSettings();
+        settings.SubscribeMqtt.Topic = string.Empty;
+        MqttSubscribeAccount.Normalize(settings);
     }
 
     void OnMqttEndpointsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -579,16 +706,48 @@ public partial class SettingsViewModel : ObservableObject
             settings.LogExportDirectory = LogExportDirectory.Trim();
             ApplyPlcSettingsTo(settings);
             ApplyMqttEndpointsToSettings(settings);
+            ApplySubscribeMqttToSettings(settings);
 
-            _startup.Apply(settings.StartWithWindows);
+            if (!MonitorProcessInstance.IsIsolated &&
+                !LineAcquisitionOccupancy.TrySync(settings.LineName, settings.OperationMode, out var occupancyError))
+            {
+                OccupancyWarning = occupancyError;
+                StatusMessage = occupancyError;
+                return;
+            }
+
+            OccupancyWarning = string.Empty;
+#if WINDOWS
+            if (MonitorProcessInstance.IsIsolated)
+            {
+                Platforms.Windows.WindowsInstanceBackgroundHost.Apply(
+                    settings.StartWithWindows,
+                    settings.OperationMode,
+                    settings.LineName);
+            }
+            else
+            {
+                _startup.Apply(settings.StartWithWindows);
+            }
+#else
+            if (!MonitorProcessInstance.IsIsolated)
+            {
+                _startup.Apply(settings.StartWithWindows);
+            }
+#endif
+
             await _store.SaveAsync(settings);
             await NotifyRuntimeReloadAsync();
             await MainThread.InvokeOnMainThreadAsync(() => _dashboard.Reload());
             StatusMessage = running
                 ? "设置已保存。部分项需停止采集/订阅后重新启动才会生效。"
-                : settings.StartWithWindows && _startup.IsSupported
-                    ? "设置已保存，已启用开机启动。"
-                    : "设置已保存。";
+                : MonitorProcessInstance.IsIsolated
+                    ? settings.StartWithWindows
+                        ? "本窗口设置已保存，已按本实例设置开机后台采集/订阅。"
+                        : "本窗口设置已保存（共享 Excel 的运行模式未改写）。"
+                    : settings.StartWithWindows && _startup.IsSupported
+                        ? "设置已保存，已启用开机启动。"
+                        : "设置已保存。";
         }
         catch (Exception ex)
         {
@@ -654,6 +813,19 @@ public partial class SettingsViewModel : ObservableObject
             var fallback = MqttEndpointViewModel.FromModel(MqttEndpoint.FromSettings(settings.Mqtt, "默认"));
             MqttEndpoints.Add(fallback);
         }
+
+        var subscribe = MqttEndpointViewModel.FromModel(MqttEndpoint.FromSettings(settings.SubscribeMqtt, "订阅账号"));
+        SubscribeMqtt.Id = subscribe.Id;
+        SubscribeMqtt.Name = "订阅账号";
+        SubscribeMqtt.Enabled = true;
+        SubscribeMqtt.Host = subscribe.Host;
+        SubscribeMqtt.Port = subscribe.Port;
+        SubscribeMqtt.ClientId = subscribe.ClientId;
+        SubscribeMqtt.Username = subscribe.Username;
+        SubscribeMqtt.Password = subscribe.Password;
+        SubscribeMqtt.UseTls = subscribe.UseTls;
+        SubscribeMqtt.Qos = subscribe.Qos;
+        SubscribeMqtt.Topic = string.Empty;
 
         StatusMessage = string.Empty;
     }

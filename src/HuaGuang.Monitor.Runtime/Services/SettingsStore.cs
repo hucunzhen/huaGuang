@@ -78,17 +78,32 @@ public sealed class SettingsStore
         return Task.CompletedTask;
     }
 
+    AppOperationMode _excelOperationMode = AppOperationMode.Acquisition;
+    bool _excelStartWithWindows = true;
+
     void LoadCore()
     {
         LineConfigPaths.EnsureAllLineExcels();
 
-        var lineName = LineConfigPaths.ReadActiveLineName();
+        var lineName = MonitorProcessInstance.StartupLineName;
+        if (string.IsNullOrWhiteSpace(lineName) || !LineCatalog.LineNames.Contains(lineName))
+        {
+            lineName = LineConfigPaths.ReadActiveLineName();
+        }
+        else
+        {
+            LineConfigPaths.WriteActiveLineName(lineName);
+        }
+
         Current = LineExcelConfigService.LoadLineExcel(
             lineName,
             LineConfigPaths.GetLineExcelPath(lineName),
             templateFilePath: null);
 
         MqttEndpointCatalog.Normalize(Current);
+        _excelOperationMode = Current.OperationMode;
+        _excelStartWithWindows = Current.StartWithWindows;
+        ApplyInstanceOverlay();
         LastLoadError = null;
         _logger.LogInformation(
             "配置已加载 line={LineName} mode={Mode} excel={ExcelPath} plc={Plc} mqtt={Mqtt} mqttTargets={TargetCount}",
@@ -126,6 +141,25 @@ public sealed class SettingsStore
         Revision++;
     }
 
+    void ApplyInstanceOverlay()
+    {
+        if (MonitorInstanceOverlay.TryLoad(out var overlayMode, out var startWithWindows, out _))
+        {
+            Current.OperationMode = MonitorProcessInstance.StartupMode ?? overlayMode;
+            if (startWithWindows is { } enabled)
+            {
+                Current.StartWithWindows = enabled;
+            }
+
+            return;
+        }
+
+        if (MonitorProcessInstance.StartupMode is { } commandMode)
+        {
+            Current.OperationMode = commandMode;
+        }
+    }
+
     public Task SaveAsync(AppSettings settings) =>
         Task.Run(() => SaveCore(settings));
 
@@ -133,7 +167,22 @@ public sealed class SettingsStore
     {
         Current = settings;
         var excelPath = LineConfigPaths.GetLineExcelPath(Current.LineName);
-        LineConfigPaths.SaveLine(Current);
+        if (MonitorProcessInstance.IsIsolated)
+        {
+            MonitorInstanceOverlay.Save(Current.OperationMode, Current.LineName, Current.StartWithWindows);
+            var memoryMode = Current.OperationMode;
+            var memoryStart = Current.StartWithWindows;
+            Current.OperationMode = _excelOperationMode;
+            Current.StartWithWindows = _excelStartWithWindows;
+            LineConfigPaths.SaveLine(Current);
+            Current.OperationMode = memoryMode;
+            Current.StartWithWindows = memoryStart;
+        }
+        else
+        {
+            LineConfigPaths.SaveLine(Current);
+            _excelOperationMode = Current.OperationMode;
+        }
         _loadedFingerprint = CaptureConfigFingerprint();
         Revision++;
         _logger.LogInformation(

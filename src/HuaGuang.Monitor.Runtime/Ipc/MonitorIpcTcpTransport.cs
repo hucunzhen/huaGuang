@@ -45,7 +45,7 @@ static class MonitorIpcTcpTransport
         TcpListener listener;
         try
         {
-            listener = new TcpListener(IPAddress.Loopback, MonitorIpcConstants.TcpPort);
+            listener = new TcpListener(IPAddress.Loopback, MonitorIpcConstants.CurrentTcpPort);
             listener.Start();
         }
         catch (Exception ex)
@@ -53,7 +53,7 @@ static class MonitorIpcTcpTransport
             logger.LogWarning(
                 ex,
                 "IPC TCP 端口 127.0.0.1:{Port} 不可用，将仅使用命名管道",
-                MonitorIpcConstants.TcpPort);
+                MonitorIpcConstants.CurrentTcpPort);
             try
             {
                 await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
@@ -65,7 +65,7 @@ static class MonitorIpcTcpTransport
             return;
         }
 
-        logger.LogInformation("IPC TCP 已监听 127.0.0.1:{Port}", MonitorIpcConstants.TcpPort);
+        logger.LogInformation("IPC TCP 已监听 127.0.0.1:{Port}", MonitorIpcConstants.CurrentTcpPort);
 
         try
         {
@@ -113,7 +113,7 @@ static class MonitorIpcTcpTransport
         using var client = new TcpClient();
         using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         connectCts.CancelAfter(timeout);
-        await client.ConnectAsync(IPAddress.Loopback, MonitorIpcConstants.TcpPort, connectCts.Token).ConfigureAwait(false);
+        await client.ConnectAsync(IPAddress.Loopback, MonitorIpcConstants.CurrentTcpPort, connectCts.Token).ConfigureAwait(false);
 
         await using var stream = client.GetStream();
         var requestLine = JsonSerializer.Serialize(request, MonitorIpcJson.Options) + "\n";

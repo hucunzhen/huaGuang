@@ -25,7 +25,9 @@ public sealed class WindowsBackgroundRuntimeLauncher : IBackgroundRuntimeLaunche
 
             if (!_launchAttempted)
             {
-                _launchAttempted = TryLaunchProcess();
+                _launchAttempted = MonitorProcessInstance.IsIsolated
+                    ? WindowsInstanceBackgroundHost.EnsureRunning(timeout ?? TimeSpan.FromSeconds(3))
+                    : TryLaunchProcess();
             }
         }
 
@@ -33,7 +35,7 @@ public sealed class WindowsBackgroundRuntimeLauncher : IBackgroundRuntimeLaunche
     }
 
     public bool IsBackgroundPresent() =>
-        IsServiceProcessRunning() || WindowsServiceHelper.IsMonitorServiceRunning();
+        MonitorIpcClient.IsServiceAvailable() || WindowsServiceHelper.IsMonitorServiceRunning();
 
     static bool TryLaunchProcess()
     {
@@ -43,16 +45,12 @@ public sealed class WindowsBackgroundRuntimeLauncher : IBackgroundRuntimeLaunche
             return false;
         }
 
-        if (IsServiceProcessRunning())
-        {
-            return true;
-        }
-
         try
         {
             Process.Start(new ProcessStartInfo
             {
                 FileName = exePath,
+                Arguments = MonitorProcessInstance.FormatHostArguments(),
                 WorkingDirectory = Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory,
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -84,17 +82,5 @@ public sealed class WindowsBackgroundRuntimeLauncher : IBackgroundRuntimeLaunche
         }
 
         return candidates[0];
-    }
-
-    static bool IsServiceProcessRunning()
-    {
-        try
-        {
-            return Process.GetProcessesByName("HuaGuang.Monitor.Service").Length > 0;
-        }
-        catch
-        {
-            return false;
-        }
     }
 }

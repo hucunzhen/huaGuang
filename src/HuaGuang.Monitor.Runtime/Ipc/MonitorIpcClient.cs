@@ -145,7 +145,7 @@ public sealed class MonitorIpcClient
     {
         await using var pipe = new NamedPipeClientStream(
             ".",
-            MonitorIpcConstants.PipeName,
+            MonitorIpcConstants.CurrentPipeName,
             PipeDirection.InOut,
             PipeOptions.Asynchronous);
 

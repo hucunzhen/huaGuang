@@ -9,7 +9,7 @@ static class WindowsServiceHelper
     {
         try
         {
-            using var service = new ServiceController(MonitorIpcConstants.ServiceName);
+            using var service = new ServiceController(MonitorIpcConstants.CurrentServiceName);
             return service.Status == ServiceControllerStatus.Running;
         }
         catch

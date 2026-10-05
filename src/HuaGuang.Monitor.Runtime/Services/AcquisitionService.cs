@@ -83,6 +83,11 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 
             await _settingsStore.LoadAsyncIfChanged().ConfigureAwait(false);
             var settings = CurrentSettings;
+            if (!LineAcquisitionOccupancy.TryClaim(settings.LineName, out var occupancyError))
+            {
+                throw new InvalidOperationException(occupancyError);
+            }
+
             MqttEndpointCatalog.Normalize(settings);
             var excelPath = LineConfigPaths.GetLineExcelPath(settings.LineName);
             _logger.LogInformation(

@@ -1,60 +1,85 @@
 using System.Globalization;
-using Microsoft.Data.Sqlite;
+using System.Runtime.CompilerServices;
 using HuaGuang.Monitor.Models;
+using Microsoft.Data.Sqlite;
 
 namespace HuaGuang.Monitor.Services;
 
+/// <summary>
+/// 历史按本地日历日分文件（<c>{stem}/yyyy-MM-dd.db</c>），避免单库无限增大。
+/// 读/删只打开时间范围内的文件；整日过期可直接删文件。旧版 <c>history.db</c> 仍可读。
+/// </summary>
 public sealed class HistoryStore
 {
-    readonly string _databasePath;
+    /// <summary>SQLite 单语句绑定参数上限约 999；分页查询 tag_values 时分批 IN。</summary>
+    internal const int MaxInClauseParameters = 500;
+
+    const long SampleIdStride = 1_000_000_000L;
+
+    const string SchemaSql =
+        """
+        CREATE TABLE IF NOT EXISTS telemetry_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recorded_at TEXT NOT NULL,
+            source_timestamp TEXT,
+            device_id TEXT NOT NULL,
+            source_topic TEXT,
+            operation_mode TEXT NOT NULL,
+            quality TEXT,
+            plc_host TEXT,
+            simulator INTEGER,
+            payload_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS tag_values (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sample_id INTEGER NOT NULL,
+            tag_id TEXT,
+            tag_name TEXT NOT NULL,
+            unit TEXT,
+            value_real REAL,
+            value_text TEXT,
+            value_kind TEXT NOT NULL,
+            quality TEXT,
+            FOREIGN KEY(sample_id) REFERENCES telemetry_samples(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_samples_recorded_at ON telemetry_samples(recorded_at);
+        CREATE INDEX IF NOT EXISTS idx_samples_device ON telemetry_samples(device_id, recorded_at);
+        CREATE INDEX IF NOT EXISTS idx_tag_values_sample ON tag_values(sample_id);
+        """;
+
+    readonly string _legacyPath;
+    readonly string _shardDirectory;
     readonly SemaphoreSlim _gate = new(1, 1);
 
     public HistoryStore(string databasePath)
     {
-        _databasePath = databasePath;
+        _legacyPath = Path.GetFullPath(databasePath);
+        var directory = Path.GetDirectoryName(_legacyPath)
+            ?? throw new InvalidOperationException("历史库路径无效。");
+        var stem = Path.GetFileNameWithoutExtension(_legacyPath);
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            stem = "history";
+        }
+
+        _shardDirectory = Path.Combine(directory, stem);
     }
 
     public async Task InitializeAsync()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
+        Directory.CreateDirectory(_shardDirectory);
+        if (!File.Exists(_legacyPath))
+        {
+            return;
+        }
+
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                """
-                CREATE TABLE IF NOT EXISTS telemetry_samples (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    recorded_at TEXT NOT NULL,
-                    source_timestamp TEXT,
-                    device_id TEXT NOT NULL,
-                    source_topic TEXT,
-                    operation_mode TEXT NOT NULL,
-                    quality TEXT,
-                    plc_host TEXT,
-                    simulator INTEGER,
-                    payload_json TEXT
-                );
-
-                CREATE TABLE IF NOT EXISTS tag_values (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sample_id INTEGER NOT NULL,
-                    tag_id TEXT,
-                    tag_name TEXT NOT NULL,
-                    unit TEXT,
-                    value_real REAL,
-                    value_text TEXT,
-                    value_kind TEXT NOT NULL,
-                    quality TEXT,
-                    FOREIGN KEY(sample_id) REFERENCES telemetry_samples(id) ON DELETE CASCADE
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_samples_recorded_at ON telemetry_samples(recorded_at);
-                CREATE INDEX IF NOT EXISTS idx_samples_device ON telemetry_samples(device_id, recorded_at);
-                CREATE INDEX IF NOT EXISTS idx_tag_values_sample ON tag_values(sample_id);
-                """;
-            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            await using var connection = OpenConnection(_legacyPath);
+            await EnsureSchemaAsync(connection).ConfigureAwait(false);
         }
         finally
         {
@@ -67,10 +92,14 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
+            var day = ShardDay(request.RecordedAt);
+            var path = ShardPath(day);
+            Directory.CreateDirectory(_shardDirectory);
+            await using var connection = OpenConnection(path);
+            await EnsureSchemaAsync(connection).ConfigureAwait(false);
             await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
 
-            long sampleId;
+            long localId;
             await using (var insertSample = connection.CreateCommand())
             {
                 insertSample.Transaction = transaction;
@@ -90,7 +119,7 @@ public sealed class HistoryStore
                 insertSample.Parameters.AddWithValue("$plc_host", (object?)request.PlcHost ?? DBNull.Value);
                 insertSample.Parameters.AddWithValue("$simulator", request.Simulator.HasValue ? request.Simulator.Value ? 1 : 0 : DBNull.Value);
                 insertSample.Parameters.AddWithValue("$payload_json", (object?)request.PayloadJson ?? DBNull.Value);
-                sampleId = (long)(await insertSample.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
+                localId = (long)(await insertSample.ExecuteScalarAsync().ConfigureAwait(false) ?? 0L);
             }
 
             await using (var insertTag = connection.CreateCommand())
@@ -114,7 +143,7 @@ public sealed class HistoryStore
                 foreach (var tag in request.Tags)
                 {
                     var encoded = EncodeValue(tag.Value);
-                    sampleParam.Value = sampleId;
+                    sampleParam.Value = localId;
                     tagIdParam.Value = (object?)tag.TagId ?? DBNull.Value;
                     tagNameParam.Value = tag.Name;
                     unitParam.Value = string.IsNullOrWhiteSpace(tag.Unit) ? DBNull.Value : tag.Unit;
@@ -127,7 +156,7 @@ public sealed class HistoryStore
             }
 
             await transaction.CommitAsync().ConfigureAwait(false);
-            return sampleId;
+            return EncodeSampleId(day, localId);
         }
         finally
         {
@@ -140,25 +169,15 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                """
-                SELECT COUNT(*)
-                FROM telemetry_samples
-                WHERE recorded_at >= $from AND recorded_at <= $to
-                """;
-            command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
-            command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
-
-            if (!string.IsNullOrWhiteSpace(query.DeviceId))
+            var total = 0;
+            foreach (var path in EnumeratePathsForQuery(query))
             {
-                command.CommandText += " AND device_id = $device_id";
-                command.Parameters.AddWithValue("$device_id", query.DeviceId);
+                await using var connection = OpenConnection(path);
+                await EnsureSchemaAsync(connection).ConfigureAwait(false);
+                total += await CountOnConnectionAsync(connection, query).ConfigureAwait(false);
             }
 
-            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-            return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+            return total;
         }
         finally
         {
@@ -171,51 +190,28 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                """
-                SELECT s.id, s.recorded_at, s.device_id, s.operation_mode, s.quality, s.source_topic,
-                       COUNT(t.id) AS tag_count
-                FROM telemetry_samples s
-                LEFT JOIN tag_values t ON t.sample_id = s.id
-                WHERE s.recorded_at >= $from AND s.recorded_at <= $to
-                """;
-            command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
-            command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
-
-            if (!string.IsNullOrWhiteSpace(query.DeviceId))
+            var skip = Math.Max(0, query.Offset);
+            var take = Math.Max(0, query.Limit);
+            if (take == 0)
             {
-                command.CommandText += " AND s.device_id = $device_id";
-                command.Parameters.AddWithValue("$device_id", query.DeviceId);
+                return [];
             }
 
-            command.CommandText +=
-                """
-                 GROUP BY s.id
-                 ORDER BY s.recorded_at DESC
-                 LIMIT $limit OFFSET $offset;
-                """;
-            command.Parameters.AddWithValue("$limit", query.Limit);
-            command.Parameters.AddWithValue("$offset", query.Offset);
-
-            var results = new List<HistorySampleSummary>();
-            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
+            var results = new List<HistorySampleSummary>(Math.Min(take, 256));
+            await using var stream = IterateNewestAsync(query, CancellationToken.None).GetAsyncEnumerator();
+            while (await stream.MoveNextAsync().ConfigureAwait(false))
             {
-                var mode = Enum.TryParse<AppOperationMode>(reader.GetString(3), out var parsed)
-                    ? parsed
-                    : AppOperationMode.Acquisition;
-                results.Add(new HistorySampleSummary
+                if (skip > 0)
                 {
-                    Id = reader.GetInt64(0),
-                    RecordedAt = ParseDbDateTime(reader.GetString(1)),
-                    DeviceId = reader.GetString(2),
-                    OperationModeLabel = ModeLabel(mode),
-                    Quality = reader.IsDBNull(4) ? "—" : reader.GetString(4),
-                    SourceTopic = reader.IsDBNull(5) ? null : reader.GetString(5),
-                    TagCount = reader.GetInt32(6)
-                });
+                    skip--;
+                    continue;
+                }
+
+                results.Add(stream.Current);
+                if (results.Count >= take)
+                {
+                    break;
+                }
             }
 
             return results;
@@ -244,52 +240,61 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            var ids = samples.Select(sample => sample.Id).ToList();
             var valuesBySample = new Dictionary<long, Dictionary<string, string>>();
             var tagUnits = new Dictionary<string, string?>(StringComparer.Ordinal);
-            for (var offset = 0; offset < ids.Count; offset += MaxInClauseParameters)
+            foreach (var group in samples.GroupBy(sample => ResolvePath(sample.Id)))
             {
-                var chunk = ids.Skip(offset).Take(MaxInClauseParameters).ToList();
-                await using var command = connection.CreateCommand();
-                command.CommandText = BuildInClause(
-                    """
-                    SELECT sample_id, tag_name, unit, value_real, value_text, value_kind, quality
-                    FROM tag_values
-                    WHERE sample_id IN 
-                    """,
-                    chunk,
-                    command).TrimEnd(';') + " ORDER BY sample_id, tag_name;";
-
-                await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-                while (await reader.ReadAsync().ConfigureAwait(false))
+                if (group.Key is null || !File.Exists(group.Key))
                 {
-                    var sampleId = reader.GetInt64(0);
-                    var tagName = reader.GetString(1);
-                    var displayName = HistoryTagNameResolver.ResolveDisplayName(tagName, catalogTags, mqttProfile);
-                    var unit = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
-                    var tag = new PlcTag
-                    {
-                        Name = displayName,
-                        Unit = unit,
-                        DataType = InferDataType(reader.GetString(5))
-                    };
-                    var value = DecodeValue(
-                        reader.IsDBNull(3) ? null : reader.GetDouble(3),
-                        reader.IsDBNull(4) ? null : reader.GetString(4),
-                        reader.GetString(5));
-                    var display = ValueFormatting.FormatDisplay(tag, value, temperaturePrecision);
+                    continue;
+                }
 
-                    if (!valuesBySample.TryGetValue(sampleId, out var map))
-                    {
-                        map = new Dictionary<string, string>(StringComparer.Ordinal);
-                        valuesBySample[sampleId] = map;
-                    }
+                await using var connection = OpenConnection(group.Key);
+                await EnsureSchemaAsync(connection).ConfigureAwait(false);
+                var localIds = group.Select(sample => DecodeLocalId(sample.Id)).ToList();
+                for (var offset = 0; offset < localIds.Count; offset += MaxInClauseParameters)
+                {
+                    var chunk = localIds.Skip(offset).Take(MaxInClauseParameters).ToList();
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = BuildInClause(
+                        """
+                        SELECT sample_id, tag_name, unit, value_real, value_text, value_kind, quality
+                        FROM tag_values
+                        WHERE sample_id IN 
+                        """,
+                        chunk,
+                        command).TrimEnd(';') + " ORDER BY sample_id, tag_name;";
 
-                    map[displayName] = display;
-                    if (!tagUnits.ContainsKey(displayName) && !string.IsNullOrWhiteSpace(unit))
+                    await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                    while (await reader.ReadAsync().ConfigureAwait(false))
                     {
-                        tagUnits[displayName] = unit;
+                        var sampleId = EncodeSampleId(group.Key, reader.GetInt64(0));
+                        var tagName = reader.GetString(1);
+                        var displayName = HistoryTagNameResolver.ResolveDisplayName(tagName, catalogTags, mqttProfile);
+                        var unit = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                        var tag = new PlcTag
+                        {
+                            Name = displayName,
+                            Unit = unit,
+                            DataType = InferDataType(reader.GetString(5))
+                        };
+                        var value = DecodeValue(
+                            reader.IsDBNull(3) ? null : reader.GetDouble(3),
+                            reader.IsDBNull(4) ? null : reader.GetString(4),
+                            reader.GetString(5));
+                        var display = ValueFormatting.FormatDisplay(tag, value, temperaturePrecision);
+
+                        if (!valuesBySample.TryGetValue(sampleId, out var map))
+                        {
+                            map = new Dictionary<string, string>(StringComparer.Ordinal);
+                            valuesBySample[sampleId] = map;
+                        }
+
+                        map[displayName] = display;
+                        if (!tagUnits.ContainsKey(displayName) && !string.IsNullOrWhiteSpace(unit))
+                        {
+                            tagUnits[displayName] = unit;
+                        }
                     }
                 }
             }
@@ -307,7 +312,11 @@ public sealed class HistoryStore
 
             var columns = fixedColumns is { Count: > 0 }
                 ? fixedColumns.ToList()
-                : BuildTableColumns(valuesBySample, preferredTagOrder, tagUnits);
+                : BuildTableColumns(
+                    valuesBySample,
+                    preferredTagOrder,
+                    tagUnits,
+                    includeAbsentPreferred: string.IsNullOrWhiteSpace(query.DeviceId));
             var rows = new List<HistoryTableRow>(samples.Count);
             foreach (var sample in samples)
             {
@@ -346,7 +355,8 @@ public sealed class HistoryStore
     static List<HistoryTableColumn> BuildTableColumns(
         Dictionary<long, Dictionary<string, string>> valuesBySample,
         IReadOnlyList<string>? preferredTagOrder,
-        Dictionary<string, string?> tagUnits)
+        Dictionary<string, string?> tagUnits,
+        bool includeAbsentPreferred)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var map in valuesBySample.Values)
@@ -363,6 +373,11 @@ public sealed class HistoryStore
             foreach (var name in preferredTagOrder)
             {
                 if (ordered.Contains(name, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!includeAbsentPreferred && !names.Contains(name))
                 {
                     continue;
                 }
@@ -400,7 +415,15 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
+            var path = ResolvePath(sampleId);
+            if (path is null || !File.Exists(path))
+            {
+                return null;
+            }
+
+            var localId = DecodeLocalId(sampleId);
+            await using var connection = OpenConnection(path);
+            await EnsureSchemaAsync(connection).ConfigureAwait(false);
             await using var sampleCommand = connection.CreateCommand();
             sampleCommand.CommandText =
                 """
@@ -408,7 +431,7 @@ public sealed class HistoryStore
                 FROM telemetry_samples
                 WHERE id = $id;
                 """;
-            sampleCommand.Parameters.AddWithValue("$id", sampleId);
+            sampleCommand.Parameters.AddWithValue("$id", localId);
 
             HistorySampleDetail? detail;
             await using (var reader = await sampleCommand.ExecuteReaderAsync().ConfigureAwait(false))
@@ -423,7 +446,7 @@ public sealed class HistoryStore
                     : AppOperationMode.Acquisition;
                 detail = new HistorySampleDetail
                 {
-                    Id = reader.GetInt64(0),
+                    Id = EncodeSampleId(path, reader.GetInt64(0)),
                     RecordedAt = ParseDbDateTime(reader.GetString(1)),
                     SourceTimestamp = reader.IsDBNull(2) ? null : ParseDbDateTime(reader.GetString(2)),
                     DeviceId = reader.GetString(3),
@@ -444,7 +467,7 @@ public sealed class HistoryStore
                     WHERE sample_id = $id
                     ORDER BY tag_name;
                     """;
-                tagCommand.Parameters.AddWithValue("$id", sampleId);
+                tagCommand.Parameters.AddWithValue("$id", localId);
                 await using var reader = await tagCommand.ExecuteReaderAsync().ConfigureAwait(false);
                 while (await reader.ReadAsync().ConfigureAwait(false))
                 {
@@ -471,7 +494,6 @@ public sealed class HistoryStore
             }
 
             var tags = tagsByName.Values.OrderBy(row => row.TagName, StringComparer.Ordinal).ToList();
-
             return new HistorySampleDetail
             {
                 Id = detail.Id,
@@ -496,17 +518,21 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT DISTINCT device_id FROM telemetry_samples ORDER BY device_id;";
-            var results = new List<string>();
-            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
+            var results = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var path in EnumerateExistingDatabasePaths())
             {
-                results.Add(reader.GetString(0));
+                await using var connection = OpenConnection(path);
+                await EnsureSchemaAsync(connection).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT DISTINCT device_id FROM telemetry_samples ORDER BY device_id;";
+                await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    results.Add(reader.GetString(0));
+                }
             }
 
-            return results;
+            return results.ToList();
         }
         finally
         {
@@ -522,34 +548,29 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                """
-                SELECT DISTINCT t.tag_name
-                FROM tag_values t
-                INNER JOIN telemetry_samples s ON s.id = t.sample_id
-                WHERE s.recorded_at >= $from AND s.recorded_at <= $to
-                """;
-            command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
-            command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
-            if (!string.IsNullOrWhiteSpace(query.DeviceId))
-            {
-                command.CommandText += " AND s.device_id = $device_id";
-                command.Parameters.AddWithValue("$device_id", query.DeviceId);
-            }
-
-            command.CommandText += " ORDER BY t.tag_name;";
-
             var results = new HashSet<string>(StringComparer.Ordinal);
-            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
+            foreach (var path in EnumeratePathsForQuery(query))
             {
-                var name = HistoryTagNameResolver.ResolveDisplayName(
-                    reader.GetString(0),
-                    catalogTags,
-                    mqttProfile);
-                results.Add(name);
+                await using var connection = OpenConnection(path);
+                await EnsureSchemaAsync(connection).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                ApplySampleFilter(
+                    command,
+                    """
+                    SELECT DISTINCT t.tag_name
+                    FROM tag_values t
+                    INNER JOIN telemetry_samples s ON s.id = t.sample_id
+                    """,
+                    query,
+                    " ORDER BY t.tag_name;");
+                await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    results.Add(HistoryTagNameResolver.ResolveDisplayName(
+                        reader.GetString(0),
+                        catalogTags,
+                        mqttProfile));
+                }
             }
 
             return results.OrderBy(name => name, StringComparer.Ordinal).ToList();
@@ -568,38 +589,34 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                """
-                SELECT t.tag_name, MAX(COALESCE(t.unit, '')) AS unit
-                FROM tag_values t
-                INNER JOIN telemetry_samples s ON s.id = t.sample_id
-                WHERE s.recorded_at >= $from AND s.recorded_at <= $to
-                """;
-            command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
-            command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
-            if (!string.IsNullOrWhiteSpace(query.DeviceId))
-            {
-                command.CommandText += " AND s.device_id = $device_id";
-                command.Parameters.AddWithValue("$device_id", query.DeviceId);
-            }
-
-            command.CommandText += " GROUP BY t.tag_name ORDER BY t.tag_name;";
-
             var results = new Dictionary<string, string?>(StringComparer.Ordinal);
-            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
+            foreach (var path in EnumeratePathsForQuery(query))
             {
-                var displayName = HistoryTagNameResolver.ResolveDisplayName(
-                    reader.GetString(0),
-                    catalogTags,
-                    mqttProfile);
-                var unit = reader.GetString(1);
-                var normalizedUnit = string.IsNullOrWhiteSpace(unit) ? null : unit;
-                if (!results.ContainsKey(displayName) || results[displayName] is null)
+                await using var connection = OpenConnection(path);
+                await EnsureSchemaAsync(connection).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                ApplySampleFilter(
+                    command,
+                    """
+                    SELECT t.tag_name, MAX(COALESCE(t.unit, '')) AS unit
+                    FROM tag_values t
+                    INNER JOIN telemetry_samples s ON s.id = t.sample_id
+                    """,
+                    query,
+                    " GROUP BY t.tag_name ORDER BY t.tag_name;");
+                await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await reader.ReadAsync().ConfigureAwait(false))
                 {
-                    results[displayName] = normalizedUnit;
+                    var displayName = HistoryTagNameResolver.ResolveDisplayName(
+                        reader.GetString(0),
+                        catalogTags,
+                        mqttProfile);
+                    var unit = reader.GetString(1);
+                    var normalizedUnit = string.IsNullOrWhiteSpace(unit) ? null : unit;
+                    if (!results.ContainsKey(displayName) || results[displayName] is null)
+                    {
+                        results[displayName] = normalizedUnit;
+                    }
                 }
             }
 
@@ -616,17 +633,53 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
-            var deleted = await DeleteSamplesWhereAsync(
-                connection,
-                transaction,
-                "recorded_at < $cutoff",
-                command =>
+            var deleted = 0;
+            var cutoffDay = ShardDay(cutoff);
+            if (Directory.Exists(_shardDirectory))
+            {
+                foreach (var path in Directory.GetFiles(_shardDirectory, "*.db"))
                 {
-                    command.Parameters.AddWithValue("$cutoff", cutoff.UtcDateTime.ToString("O"));
-                }).ConfigureAwait(false);
-            await transaction.CommitAsync().ConfigureAwait(false);
+                    if (!TryParseShardDay(path, out var day))
+                    {
+                        continue;
+                    }
+
+                    if (day < cutoffDay)
+                    {
+                        await DeleteDatabaseFileAsync(path).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    if (day == cutoffDay)
+                    {
+                        deleted += await DeleteWhereAsync(
+                            path,
+                            "recorded_at < $cutoff",
+                            command => command.Parameters.AddWithValue("$cutoff", cutoff.UtcDateTime.ToString("O")))
+                            .ConfigureAwait(false);
+                        await DeleteFileIfEmptyAsync(path).ConfigureAwait(false);
+                    }
+                }
+            }
+
+            if (File.Exists(_legacyPath))
+            {
+                var legacyInfo = new FileInfo(_legacyPath);
+                if (legacyInfo.Length >= 8 * 1024 * 1024)
+                {
+                    await DeleteDatabaseFileAsync(_legacyPath).ConfigureAwait(false);
+                }
+                else
+                {
+                    deleted += await DeleteWhereAsync(
+                        _legacyPath,
+                        "recorded_at < $cutoff",
+                        command => command.Parameters.AddWithValue("$cutoff", cutoff.UtcDateTime.ToString("O")))
+                        .ConfigureAwait(false);
+                    await DeleteFileIfEmptyAsync(_legacyPath).ConfigureAwait(false);
+                }
+            }
+
             return deleted;
         }
         finally
@@ -640,14 +693,18 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
-            var deleted = await DeleteSamplesWhereAsync(
-                connection,
-                transaction,
+            var path = ResolvePath(sampleId);
+            if (path is null || !File.Exists(path))
+            {
+                return false;
+            }
+
+            var localId = DecodeLocalId(sampleId);
+            var deleted = await DeleteWhereAsync(
+                path,
                 "id = $id",
-                command => command.Parameters.AddWithValue("$id", sampleId)).ConfigureAwait(false);
-            await transaction.CommitAsync().ConfigureAwait(false);
+                command => command.Parameters.AddWithValue("$id", localId)).ConfigureAwait(false);
+            await DeleteFileIfEmptyAsync(path).ConfigureAwait(false);
             return deleted > 0;
         }
         finally
@@ -667,22 +724,24 @@ public sealed class HistoryStore
                 where = "device_id = $device_id AND " + where;
             }
 
-            await using var connection = OpenConnection();
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
-            var deleted = await DeleteSamplesWhereAsync(
-                connection,
-                transaction,
-                where,
-                command =>
-                {
-                    command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
-                    command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
-                    if (!string.IsNullOrWhiteSpace(query.DeviceId))
+            var deleted = 0;
+            foreach (var path in EnumeratePathsForQuery(query).ToList())
+            {
+                deleted += await DeleteWhereAsync(
+                    path,
+                    where,
+                    command =>
                     {
-                        command.Parameters.AddWithValue("$device_id", query.DeviceId);
-                    }
-                }).ConfigureAwait(false);
-            await transaction.CommitAsync().ConfigureAwait(false);
+                        command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
+                        command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
+                        if (!string.IsNullOrWhiteSpace(query.DeviceId))
+                        {
+                            command.Parameters.AddWithValue("$device_id", query.DeviceId);
+                        }
+                    }).ConfigureAwait(false);
+                await DeleteFileIfEmptyAsync(path).ConfigureAwait(false);
+            }
+
             return deleted;
         }
         finally
@@ -696,30 +755,189 @@ public sealed class HistoryStore
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await using var connection = OpenConnection();
-            await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
-            await using (var deleteTags = connection.CreateCommand())
+            var deleted = 0;
+            foreach (var path in EnumerateExistingDatabasePaths().ToList())
             {
-                deleteTags.Transaction = transaction;
-                deleteTags.CommandText = "DELETE FROM tag_values;";
-                await deleteTags.ExecuteNonQueryAsync().ConfigureAwait(false);
+                deleted += await CountAllSamplesAsync(path).ConfigureAwait(false);
+                await DeleteDatabaseFileAsync(path).ConfigureAwait(false);
             }
 
-            int deleted;
-            await using (var deleteSamples = connection.CreateCommand())
-            {
-                deleteSamples.Transaction = transaction;
-                deleteSamples.CommandText = "DELETE FROM telemetry_samples;";
-                deleted = await deleteSamples.ExecuteNonQueryAsync().ConfigureAwait(false);
-            }
-
-            await transaction.CommitAsync().ConfigureAwait(false);
             return deleted;
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    public async Task<(int SampleCount, DateTimeOffset? Oldest, DateTimeOffset? Newest)> GetStatsAsync()
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var count = 0;
+            DateTimeOffset? oldest = null;
+            DateTimeOffset? newest = null;
+            foreach (var path in EnumerateExistingDatabasePaths())
+            {
+                await using var connection = OpenConnection(path);
+                await EnsureSchemaAsync(connection).ConfigureAwait(false);
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    """
+                    SELECT COUNT(*), MIN(recorded_at), MAX(recorded_at)
+                    FROM telemetry_samples;
+                    """;
+                await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                if (!await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                count += reader.GetInt32(0);
+                if (!reader.IsDBNull(1))
+                {
+                    var value = ParseDbDateTime(reader.GetString(1));
+                    if (oldest is null || value < oldest)
+                    {
+                        oldest = value;
+                    }
+                }
+
+                if (!reader.IsDBNull(2))
+                {
+                    var value = ParseDbDateTime(reader.GetString(2));
+                    if (newest is null || value > newest)
+                    {
+                        newest = value;
+                    }
+                }
+            }
+
+            return (count, oldest, newest);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    async IAsyncEnumerable<HistorySampleSummary> IterateNewestAsync(
+        HistoryQuery query,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var shard = EnumerateShardSummariesAsync(query, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        await using var legacy = EnumerateSummariesOnPathAsync(
+            File.Exists(_legacyPath) ? _legacyPath : null,
+            query,
+            isLegacy: true,
+            cancellationToken).GetAsyncEnumerator(cancellationToken);
+
+        var hasShard = await shard.MoveNextAsync().ConfigureAwait(false);
+        var hasLegacy = await legacy.MoveNextAsync().ConfigureAwait(false);
+        while (hasShard || hasLegacy)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!hasLegacy || (hasShard && shard.Current.RecordedAt >= legacy.Current.RecordedAt))
+            {
+                yield return shard.Current;
+                hasShard = await shard.MoveNextAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                yield return legacy.Current;
+                hasLegacy = await legacy.MoveNextAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    async IAsyncEnumerable<HistorySampleSummary> EnumerateShardSummariesAsync(
+        HistoryQuery query,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var day in InclusiveDays(query.From, query.To).OrderByDescending(day => day))
+        {
+            var path = ShardPath(day);
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            await foreach (var row in EnumerateSummariesOnPathAsync(path, query, isLegacy: false, cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                yield return row;
+            }
+        }
+    }
+
+    async IAsyncEnumerable<HistorySampleSummary> EnumerateSummariesOnPathAsync(
+        string? path,
+        HistoryQuery query,
+        bool isLegacy,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (path is null || !File.Exists(path))
+        {
+            yield break;
+        }
+
+        await using var connection = OpenConnection(path);
+        await EnsureSchemaAsync(connection).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        ApplySampleFilter(
+            command,
+            """
+            SELECT s.id, s.recorded_at, s.device_id, s.operation_mode, s.quality, s.source_topic,
+                   COUNT(t.id) AS tag_count
+            FROM telemetry_samples s
+            LEFT JOIN tag_values t ON t.sample_id = s.id
+            """,
+            query,
+            """
+             GROUP BY s.id
+             ORDER BY s.recorded_at DESC;
+            """);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var mode = Enum.TryParse<AppOperationMode>(reader.GetString(3), out var parsed)
+                ? parsed
+                : AppOperationMode.Acquisition;
+            var localId = reader.GetInt64(0);
+            yield return new HistorySampleSummary
+            {
+                Id = isLegacy ? localId : EncodeSampleId(path, localId),
+                RecordedAt = ParseDbDateTime(reader.GetString(1)),
+                DeviceId = reader.GetString(2),
+                OperationModeLabel = ModeLabel(mode),
+                Quality = reader.IsDBNull(4) ? "—" : reader.GetString(4),
+                SourceTopic = reader.IsDBNull(5) ? null : reader.GetString(5),
+                TagCount = reader.GetInt32(6)
+            };
+        }
+    }
+
+    static async Task<int> CountOnConnectionAsync(SqliteConnection connection, HistoryQuery query)
+    {
+        await using var command = connection.CreateCommand();
+        ApplySampleFilter(command, "SELECT COUNT(*) FROM telemetry_samples s", query, string.Empty);
+        var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+        return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+    }
+
+    static void ApplySampleFilter(SqliteCommand command, string fromClause, HistoryQuery query, string suffix)
+    {
+        command.CommandText = fromClause + " WHERE s.recorded_at >= $from AND s.recorded_at <= $to";
+        command.Parameters.AddWithValue("$from", query.From.UtcDateTime.ToString("O"));
+        command.Parameters.AddWithValue("$to", query.To.UtcDateTime.ToString("O"));
+        if (!string.IsNullOrWhiteSpace(query.DeviceId))
+        {
+            command.CommandText += " AND s.device_id = $device_id";
+            command.Parameters.AddWithValue("$device_id", query.DeviceId);
+        }
+
+        command.CommandText += suffix;
     }
 
     static async Task<int> DeleteSamplesWhereAsync(
@@ -735,8 +953,66 @@ public sealed class HistoryStore
         return await deleteSamples.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
-    /// <summary>SQLite 单语句绑定参数上限约 999；分页查询 tag_values 时分批 IN。</summary>
-    internal const int MaxInClauseParameters = 500;
+    async Task<int> DeleteWhereAsync(string path, string where, Action<SqliteCommand> configure)
+    {
+        await using var connection = OpenConnection(path);
+        await EnsureSchemaAsync(connection).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync().ConfigureAwait(false);
+        var deleted = await DeleteSamplesWhereAsync(connection, transaction, where, configure).ConfigureAwait(false);
+        await transaction.CommitAsync().ConfigureAwait(false);
+        return deleted;
+    }
+
+    async Task<int> CountAllSamplesAsync(string path)
+    {
+        await using var connection = OpenConnection(path);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM telemetry_samples;";
+        var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+        return Convert.ToInt32(result, CultureInfo.InvariantCulture);
+    }
+
+    async Task DeleteFileIfEmptyAsync(string path)
+    {
+        if (!File.Exists(path) || await CountAllSamplesAsync(path).ConfigureAwait(false) > 0)
+        {
+            return;
+        }
+
+        await DeleteDatabaseFileAsync(path).ConfigureAwait(false);
+    }
+
+    async Task DeleteDatabaseFileAsync(string path)
+    {
+        try
+        {
+            await using (var connection = OpenConnection(path))
+            {
+                SqliteConnection.ClearPool(connection);
+            }
+
+            File.Delete(path);
+            TryDelete(path + "-wal");
+            TryDelete(path + "-shm");
+        }
+        catch
+        {
+        }
+    }
+
+    static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
+    }
 
     static string BuildInClause(string prefix, IReadOnlyList<long> ids, SqliteCommand command)
     {
@@ -751,43 +1027,106 @@ public sealed class HistoryStore
         return prefix + "(" + string.Join(", ", placeholders) + ");";
     }
 
-    public async Task<(int SampleCount, DateTimeOffset? Oldest, DateTimeOffset? Newest)> GetStatsAsync()
+    IEnumerable<string> EnumeratePathsForQuery(HistoryQuery query)
     {
-        await _gate.WaitAsync().ConfigureAwait(false);
-        try
+        foreach (var day in InclusiveDays(query.From, query.To))
         {
-            await using var connection = OpenConnection();
-            await using var command = connection.CreateCommand();
-            command.CommandText =
-                """
-                SELECT COUNT(*), MIN(recorded_at), MAX(recorded_at)
-                FROM telemetry_samples;
-                """;
-            await using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            if (!await reader.ReadAsync().ConfigureAwait(false))
+            var path = ShardPath(day);
+            if (File.Exists(path))
             {
-                return (0, null, null);
+                yield return path;
             }
-
-            var count = reader.GetInt32(0);
-            DateTimeOffset? oldest = reader.IsDBNull(1) ? null : ParseDbDateTime(reader.GetString(1));
-            DateTimeOffset? newest = reader.IsDBNull(2) ? null : ParseDbDateTime(reader.GetString(2));
-            return (count, oldest, newest);
         }
-        finally
+
+        if (File.Exists(_legacyPath))
         {
-            _gate.Release();
+            yield return _legacyPath;
         }
     }
 
-    SqliteConnection OpenConnection()
+    IEnumerable<string> EnumerateExistingDatabasePaths()
     {
-        var connection = new SqliteConnection($"Data Source={_databasePath};Cache=Shared;Default Timeout=5");
+        if (Directory.Exists(_shardDirectory))
+        {
+            foreach (var path in Directory.GetFiles(_shardDirectory, "*.db").OrderBy(path => path, StringComparer.Ordinal))
+            {
+                yield return path;
+            }
+        }
+
+        if (File.Exists(_legacyPath))
+        {
+            yield return _legacyPath;
+        }
+    }
+
+    static IEnumerable<DateOnly> InclusiveDays(DateTimeOffset from, DateTimeOffset to)
+    {
+        var start = ShardDay(from);
+        var end = ShardDay(to);
+        if (end < start)
+        {
+            (start, end) = (end, start);
+        }
+
+        for (var day = start; day <= end; day = day.AddDays(1))
+        {
+            yield return day;
+        }
+    }
+
+    string ShardPath(DateOnly day) => Path.Combine(_shardDirectory, $"{day:yyyy-MM-dd}.db");
+
+    static DateOnly ShardDay(DateTimeOffset timestamp) => DateOnly.FromDateTime(timestamp.ToLocalTime().Date);
+
+    static bool TryParseShardDay(string path, out DateOnly day) =>
+        DateOnly.TryParseExact(
+            Path.GetFileNameWithoutExtension(path),
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out day);
+
+    string? ResolvePath(long sampleId)
+    {
+        if (sampleId < SampleIdStride)
+        {
+            return File.Exists(_legacyPath) ? _legacyPath : null;
+        }
+
+        var day = DateOnly.FromDayNumber((int)(sampleId / SampleIdStride));
+        return ShardPath(day);
+    }
+
+    long EncodeSampleId(string path, long localId)
+    {
+        if (string.Equals(path, _legacyPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return localId;
+        }
+
+        return TryParseShardDay(path, out var day) ? EncodeSampleId(day, localId) : localId;
+    }
+
+    static long EncodeSampleId(DateOnly day, long localId) => (day.DayNumber * SampleIdStride) + localId;
+
+    static long DecodeLocalId(long sampleId) => sampleId < SampleIdStride ? sampleId : sampleId % SampleIdStride;
+
+    static SqliteConnection OpenConnection(string path)
+    {
+        var connection = new SqliteConnection($"Data Source={path};Cache=Shared;Default Timeout=5");
         connection.Open();
         using var pragma = connection.CreateCommand();
         pragma.CommandText = "PRAGMA foreign_keys = ON;";
         pragma.ExecuteNonQuery();
         return connection;
+    }
+
+    static async Task EnsureSchemaAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = SchemaSql;
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     static string ModeLabel(AppOperationMode mode) =>

@@ -13,6 +13,8 @@ public partial class HistoryViewModel : ObservableObject
     readonly SettingsStore _settings;
 
     bool _suppressFilterRefresh;
+    bool _refreshQueued;
+    int _deviceRefreshSerial;
     bool _hasActiveQuery;
     int _totalCount;
     DateTimeOffset _queryFrom;
@@ -94,59 +96,66 @@ public partial class HistoryViewModel : ObservableObject
     {
         if (IsBusy)
         {
+            _refreshQueued = true;
             return;
         }
 
-        IsBusy = true;
+        await RunOnUiAsync(() => IsBusy = true).ConfigureAwait(false);
         try
         {
-            await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
-
-            var (from, to) = ResolveQueryRange();
-            _queryFrom = from;
-            _queryTo = to;
-            _queryDeviceFilter = ResolveDeviceFilter(SelectedDevice);
-            _fixedColumns = [];
-            CurrentPage = 1;
-
-            var catalogTags = _settings.Current.Tags;
-            var mqttProfile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
-            var countQuery = BuildCountQuery();
-            _totalCount = await _store.CountMatchingAsync(countQuery).ConfigureAwait(false);
-            var devices = await _store.GetDeviceIdsAsync().ConfigureAwait(false);
-            _catalogTags = catalogTags;
-            _mqttProfile = mqttProfile;
-            _preferredTags = _settings.Current.Tags
-                .Where(tag => tag.Enabled)
-                .Select(tag => tag.Name)
-                .ToList();
-            _tagUnitHints = _settings.Current.Tags
-                .Where(tag => tag.Enabled)
-                .GroupBy(tag => tag.Name, StringComparer.Ordinal)
-                .ToDictionary(group => group.Key, group => (string?)group.First().Unit, StringComparer.Ordinal);
-
-            var table = await LoadPageAsync(0).ConfigureAwait(false);
-            _hasActiveQuery = true;
-
-            await MainThread.InvokeOnMainThreadAsync(() =>
+            do
             {
-                ApplyFilterOptions(devices, _queryDeviceFilter);
-                _fixedColumns = table.Columns.ToList();
-                TableColumns = new ObservableCollection<HistoryTableColumn>(_fixedColumns);
-                SubscribeColumnWidthChanges();
-                ApplyPageRows(table.Rows);
-                ShowEmpty = _totalCount == 0;
-                StatusMessage = string.Empty;
-                UpdatePaginationState();
-            });
+                _refreshQueued = false;
+                var selectedDevice = SelectedDevice;
+                await Task.Delay(1).ConfigureAwait(false);
+
+                await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
+
+                var (from, to) = ResolveQueryRange();
+                _queryFrom = from;
+                _queryTo = to;
+                _queryDeviceFilter = ResolveDeviceFilter(selectedDevice);
+                _fixedColumns = [];
+
+                var catalogTags = _settings.Current.Tags;
+                var mqttProfile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
+                var countQuery = BuildCountQuery();
+                _totalCount = await _store.CountMatchingAsync(countQuery).ConfigureAwait(false);
+                var devices = await _store.GetDeviceIdsAsync().ConfigureAwait(false);
+                _catalogTags = catalogTags;
+                _mqttProfile = mqttProfile;
+                _preferredTags = _settings.Current.Tags
+                    .Where(tag => tag.Enabled)
+                    .Select(tag => tag.Name)
+                    .ToList();
+                _tagUnitHints = _settings.Current.Tags
+                    .Where(tag => tag.Enabled)
+                    .GroupBy(tag => tag.Name, StringComparer.Ordinal)
+                    .ToDictionary(group => group.Key, group => (string?)group.First().Unit, StringComparer.Ordinal);
+
+                var table = await LoadPageAsync(0).ConfigureAwait(false);
+                _hasActiveQuery = true;
+
+                await RunOnUiAsync(() =>
+                {
+                    CurrentPage = 1;
+                    ApplyFilterOptions(devices, selectedDevice == "全部设备" ? null : selectedDevice);
+                    ReplaceTableColumns(table.Columns);
+                    ApplyPageRows(table.Rows);
+                    ShowEmpty = _totalCount == 0;
+                    StatusMessage = string.Empty;
+                    UpdatePaginationState();
+                }).ConfigureAwait(false);
+            }
+            while (_refreshQueued);
         }
         catch (Exception ex)
         {
-            await MainThread.InvokeOnMainThreadAsync(() => StatusMessage = ex.Message);
+            await RunOnUiAsync(() => StatusMessage = ex.Message).ConfigureAwait(false);
         }
         finally
         {
-            await MainThread.InvokeOnMainThreadAsync(() => IsBusy = false);
+            await RunOnUiAsync(() => IsBusy = false).ConfigureAwait(false);
         }
     }
 
@@ -160,7 +169,31 @@ public partial class HistoryViewModel : ObservableObject
             return;
         }
 
-        StatusMessage = "设备筛选已变更，点「刷新」加载。";
+        if (!_settings.Current.EnableHistoryRecording)
+        {
+            return;
+        }
+
+        var serial = Interlocked.Increment(ref _deviceRefreshSerial);
+        _ = RefreshAfterDeviceSelectedAsync(serial);
+    }
+
+    async Task RefreshAfterDeviceSelectedAsync(int serial)
+    {
+        try
+        {
+            await Task.Delay(200).ConfigureAwait(false);
+            if (serial != Volatile.Read(ref _deviceRefreshSerial))
+            {
+                return;
+            }
+
+            await RefreshDataAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await RunOnUiAsync(() => StatusMessage = ex.Message).ConfigureAwait(false);
+        }
     }
 
     partial void OnIsBusyChanged(bool value)
@@ -230,22 +263,22 @@ public partial class HistoryViewModel : ObservableObject
             var offset = (page - 1) * HistoryTableFormatting.PageSize;
             var table = await LoadPageAsync(offset).ConfigureAwait(false);
 
-            await MainThread.InvokeOnMainThreadAsync(() =>
+            await RunOnUiAsync(() =>
             {
                 CurrentPage = page;
                 ApplyPageRows(table.Rows);
                 ShowEmpty = _totalCount == 0;
                 StatusMessage = string.Empty;
                 UpdatePaginationState();
-            });
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await MainThread.InvokeOnMainThreadAsync(() => StatusMessage = ex.Message);
+            await RunOnUiAsync(() => StatusMessage = ex.Message).ConfigureAwait(false);
         }
         finally
         {
-            await MainThread.InvokeOnMainThreadAsync(() => IsBusy = false);
+            await RunOnUiAsync(() => IsBusy = false).ConfigureAwait(false);
         }
     }
 
@@ -259,6 +292,19 @@ public partial class HistoryViewModel : ObservableObject
         }
 
         UpdateSummary();
+    }
+
+    void ReplaceTableColumns(IReadOnlyList<HistoryTableColumn> columns)
+    {
+        UnsubscribeColumnWidthChanges();
+        TableColumns.Clear();
+        foreach (var column in columns)
+        {
+            TableColumns.Add(column);
+        }
+
+        _fixedColumns = TableColumns.ToList();
+        SubscribeColumnWidthChanges();
     }
 
     int CalculateTotalPages() =>
@@ -303,11 +349,12 @@ public partial class HistoryViewModel : ObservableObject
 
     void UpdateSummary()
     {
+        var deviceLabel = string.IsNullOrWhiteSpace(_queryDeviceFilter) ? "全部设备" : _queryDeviceFilter;
         SummaryText = _totalCount == 0
-            ? "暂无历史数据。启动采集或订阅后会自动记录。"
+            ? $"「{deviceLabel}」暂无历史数据。"
             : TotalPages <= 1
-                ? $"共 {_totalCount} 条"
-                : $"共 {_totalCount} 条 · 第 {CurrentPage}/{TotalPages} 页 · 本页 {TableRows.Count} 条";
+                ? $"「{deviceLabel}」共 {_totalCount} 条"
+                : $"「{deviceLabel}」共 {_totalCount} 条 · 第 {CurrentPage}/{TotalPages} 页 · 本页 {TableRows.Count} 条";
     }
 
     HistoryQuery BuildCountQuery() =>
@@ -323,13 +370,16 @@ public partial class HistoryViewModel : ObservableObject
         _suppressFilterRefresh = true;
         try
         {
-            DeviceOptions.Clear();
-            DeviceOptions.Add("全部设备");
-            foreach (var device in devices)
+            if (!DeviceOptionsMatch(devices))
             {
-                if (!DeviceOptions.Contains(device))
+                DeviceOptions.Clear();
+                DeviceOptions.Add("全部设备");
+                foreach (var device in devices)
                 {
-                    DeviceOptions.Add(device);
+                    if (!DeviceOptions.Contains(device))
+                    {
+                        DeviceOptions.Add(device);
+                    }
                 }
             }
 
@@ -346,6 +396,24 @@ public partial class HistoryViewModel : ObservableObject
         {
             _suppressFilterRefresh = false;
         }
+    }
+
+    bool DeviceOptionsMatch(IReadOnlyList<string> devices)
+    {
+        if (DeviceOptions.Count != devices.Count + 1 || DeviceOptions[0] != "全部设备")
+        {
+            return false;
+        }
+
+        for (var i = 0; i < devices.Count; i++)
+        {
+            if (!string.Equals(DeviceOptions[i + 1], devices[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     string? ResolveDeviceFilter(string selected) =>
@@ -378,7 +446,7 @@ public partial class HistoryViewModel : ObservableObject
                 var reloadPage = CurrentPage;
                 if (_totalCount == 0)
                 {
-                    await MainThread.InvokeOnMainThreadAsync(ClearDisplayedTable);
+                    await RunOnUiAsync(ClearDisplayedTable).ConfigureAwait(false);
                     StatusMessage = "已删除 1 条记录";
                     return;
                 }
@@ -654,5 +722,16 @@ public partial class HistoryViewModel : ObservableObject
         var startText = UseCustomStart ? from.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "最早";
         var endText = UseCustomEnd ? to.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "现在";
         return $"{startText} ~ {endText}";
+    }
+
+    static Task RunOnUiAsync(Action action)
+    {
+        if (MainThread.IsMainThread)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        return MainThread.InvokeOnMainThreadAsync(action);
     }
 }

@@ -37,6 +37,7 @@ public static class LineCatalog
         LineMqttDefaults.ApplySubscribeTopics(settings);
         settings.Mqtt.ClientId = LineMqttDefaults.ResolveClientIdForLine(line.Name);
         settings.MqttEndpoints = [MqttEndpoint.FromSettings(settings.Mqtt, "默认")];
+        MqttSubscribeAccount.ApplyBrokerFromPublish(settings.SubscribeMqtt, settings.Mqtt);
         settings.Tags = line.Tags.Select(tag => CloneAndResolve(tag, lineName)).ToList();
         MqttFieldMappingCatalog.ApplyDefaults(settings.Tags, lineName);
     }
@@ -318,6 +319,67 @@ public static class LineCatalog
         }
 
         return tag;
+    }
+
+    public static string GetShortDisplayName(string? lineName) => lineName switch
+    {
+        "华迪热熔胶复合机" => "华迪",
+        "撒粉复合机" => "撒粉",
+        "平板复合机" => "平板",
+        "C型火焰复合机" => "C型火焰",
+        S7TestLineName => "S7测试",
+        "先河热熔胶复合机" => "先河",
+        _ => string.IsNullOrWhiteSpace(lineName) ? "产线" : lineName.Trim()
+    };
+
+    public static bool TryResolveLineName(string? input, out string lineName)
+    {
+        lineName = string.Empty;
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false;
+        }
+
+        var text = input.Trim();
+        foreach (var name in LineNames)
+        {
+            if (name.Equals(text, StringComparison.OrdinalIgnoreCase))
+            {
+                lineName = name;
+                return true;
+            }
+        }
+
+        var key = text.Replace(" ", "", StringComparison.Ordinal).ToUpperInvariant();
+        lineName = key switch
+        {
+            "先河" or "XIANHE" or "XHRRJFHJ" => "先河热熔胶复合机",
+            "华迪" or "HUADI" or "HDRRJFHJ" => "华迪热熔胶复合机",
+            "撒粉" or "SAFEN" or "SFHFJ" => "撒粉复合机",
+            "平板" or "PINGBAN" or "PBHFJ" => "平板复合机",
+            "C型" or "C型火焰" or "CYHY" or "CYHYFJ" => "C型火焰复合机",
+            "S7" or "S7TEST" or "S7测试" => S7TestLineName,
+            _ => string.Empty
+        };
+        return lineName.Length > 0;
+    }
+
+    public static string ToCommandAlias(string? lineName)
+    {
+        if (!TryResolveLineName(lineName, out var resolved))
+        {
+            return string.IsNullOrWhiteSpace(lineName) ? "xianhe" : lineName.Trim();
+        }
+
+        return resolved switch
+        {
+            "华迪热熔胶复合机" => "huadi",
+            "撒粉复合机" => "safen",
+            "平板复合机" => "pingban",
+            "C型火焰复合机" => "cyhy",
+            S7TestLineName => "s7",
+            _ => "xianhe"
+        };
     }
 }
 

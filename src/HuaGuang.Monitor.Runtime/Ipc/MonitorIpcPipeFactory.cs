@@ -11,7 +11,7 @@ static class MonitorIpcPipeFactory
         if (!OperatingSystem.IsWindows())
         {
             return new NamedPipeServerStream(
-                MonitorIpcConstants.PipeName,
+                MonitorIpcConstants.CurrentPipeName,
                 PipeDirection.InOut,
                 NamedPipeServerStream.MaxAllowedServerInstances,
                 PipeTransmissionMode.Byte,
@@ -29,7 +29,7 @@ static class MonitorIpcPipeFactory
             AccessControlType.Allow));
 
         return NamedPipeServerStreamAcl.Create(
-            MonitorIpcConstants.PipeName,
+            MonitorIpcConstants.CurrentPipeName,
             PipeDirection.InOut,
             NamedPipeServerStream.MaxAllowedServerInstances,
             PipeTransmissionMode.Byte,

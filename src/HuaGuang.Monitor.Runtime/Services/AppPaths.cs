@@ -20,9 +20,18 @@ public static class AppPaths
         _paths?.UserDataDirectory
         ?? throw new InvalidOperationException("AppPaths.Configure must be called at startup.");
 
+    /// <summary>共享数据根（产线 Excel）；多开实例的历史/日志在 <see cref="UserDataDirectory"/>。</summary>
+    public static string SharedDataDirectory =>
+        _paths is WindowsAppDataPaths
+            ? WindowsSharedDataDirectory.Resolve()
+            : UserDataDirectory;
+
     public static string HistoryDatabasePath => Path.Combine(UserDataDirectory, "history.db");
 
-    public static string UserLinesDirectory => Path.Combine(UserDataDirectory, "lines");
+    /// <summary>按日拆分的 SQLite 目录（<c>history/yyyy-MM-dd.db</c>）。旧版单文件仍为 <see cref="HistoryDatabasePath"/>。</summary>
+    public static string HistoryDirectory => Path.Combine(UserDataDirectory, "history");
+
+    public static string UserLinesDirectory => Path.Combine(SharedDataDirectory, "lines");
 
     public static string LogDirectory => Path.Combine(UserDataDirectory, "logs");
 
@@ -53,7 +62,22 @@ public static class AppPaths
 
 public sealed class WindowsAppDataPaths : IAppDataPaths
 {
-    public string UserDataDirectory => WindowsSharedDataDirectory.Resolve();
+    public string UserDataDirectory
+    {
+        get
+        {
+            var shared = WindowsSharedDataDirectory.Resolve();
+            var directory = MonitorProcessInstance.ResolveUserDataDirectory(shared);
+            if (!string.Equals(directory, shared, StringComparison.OrdinalIgnoreCase))
+            {
+                Directory.CreateDirectory(directory);
+                Directory.CreateDirectory(Path.Combine(directory, "logs"));
+                EnsureInteractiveUsersCanWrite(directory);
+            }
+
+            return directory;
+        }
+    }
 
     /// <summary>启动时调用：创建 Data/logs 并写入 path-origin 标记。</summary>
     public static void WarmUp() => WindowsSharedDataDirectory.WarmUp();

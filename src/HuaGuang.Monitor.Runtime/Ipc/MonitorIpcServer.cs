@@ -31,8 +31,8 @@ public sealed class MonitorIpcServer : BackgroundService
     {
         _logger.LogInformation(
             "IPC 服务已启动 pipe={PipeName} tcp=127.0.0.1:{TcpPort}",
-            MonitorIpcConstants.PipeName,
-            MonitorIpcConstants.TcpPort);
+            MonitorIpcConstants.CurrentPipeName,
+            MonitorIpcConstants.CurrentTcpPort);
 
         var pipeTask = RunPipeServerAsync(stoppingToken);
         var tcpTask = MonitorIpcTcpTransport.RunServerAsync(DispatchAsync, _logger, stoppingToken);

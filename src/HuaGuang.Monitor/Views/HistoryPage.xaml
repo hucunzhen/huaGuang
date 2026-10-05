@@ -20,7 +20,7 @@
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=TitleFontSize}" />
             <Label Text="{Binding SummaryText}" TextColor="#8AA0B5" LineBreakMode="WordWrap"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
-            <Label Text="先点「刷新」加载数据；每页 40 条，用底部上一页/下一页或输入页码跳转。表头可拖边调整列宽，列多时可左右滑动。"
+            <Label Text="先点「刷新」加载数据。选一台设备后只显示该设备的点位列。每页 40 条，表头可拖边调整列宽，列多时可左右滑动。"
                    TextColor="#6E8499"
                    FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
         </VerticalStackLayout>
@@ -33,7 +33,10 @@
             </VerticalStackLayout>
             <VerticalStackLayout Grid.Column="1" Spacing="2">
                 <Label Text="设备" TextColor="#8AA0B5" FontSize="12" />
-                <Picker ItemsSource="{Binding DeviceOptions}" SelectedItem="{Binding SelectedDevice}"
+                <Picker x:Name="DevicePicker"
+                        ItemsSource="{Binding DeviceOptions}"
+                        SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                        SelectedIndexChanged="OnDevicePickerSelectedIndexChanged"
                         FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
             </VerticalStackLayout>
 
@@ -267,6 +270,7 @@
             <ActivityIndicator Grid.RowSpan="2"
                                IsRunning="{Binding IsBusy}"
                                IsVisible="{Binding IsBusy}"
+                               InputTransparent="True"
                                Color="#2EC4B6"
                                VerticalOptions="Center"
                                HorizontalOptions="Center" />

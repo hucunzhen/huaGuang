@@ -2,10 +2,23 @@ namespace HuaGuang.Monitor.Ipc;
 
 public static class MonitorIpcConstants
 {
-    public const string PipeName = "HuaGuang.Monitor.Runtime.v1";
-    public const int TcpPort = 18788;
-    public const string ServiceName = "HuaGuangMonitor";
+    public const string DefaultPipeName = "HuaGuang.Monitor.Runtime.v1";
+    public const int DefaultTcpPort = 18788;
+    public const string DefaultServiceName = "HuaGuangMonitor";
     public const string ServiceDisplayName = "工业监控采集服务";
+
+    /// <summary>主服务管道名（兼容旧常量引用）。</summary>
+    public const string PipeName = DefaultPipeName;
+
+    public const int TcpPort = DefaultTcpPort;
+
+    public const string ServiceName = DefaultServiceName;
+
+    public static string CurrentPipeName => Services.MonitorProcessInstance.IpcPipeName;
+
+    public static int CurrentTcpPort => Services.MonitorProcessInstance.IpcTcpPort;
+
+    public static string CurrentServiceName => Services.MonitorProcessInstance.WindowsServiceName;
 }
 
 public enum MonitorIpcCommand

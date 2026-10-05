@@ -27,6 +27,7 @@ public sealed class WindowsStartupRegistration : IStartupRegistration
         if (!enabled)
         {
             key.DeleteValue(StartupRegistration.RegistryValueName, throwOnMissingValue: false);
+            PrimaryUiAutoStartStore.Set(false);
             return;
         }
 
@@ -36,7 +37,14 @@ public sealed class WindowsStartupRegistration : IStartupRegistration
             throw new InvalidOperationException("无法确定程序路径，无法设置开机启动。");
         }
 
-        key.SetValue(StartupRegistration.RegistryValueName, Quote(exePath));
+        var command = Quote(exePath);
+        if (LineConfigPaths.TryReadConfirmedActiveLineName(out var lineName))
+        {
+            command += $" --line {LineCatalog.ToCommandAlias(lineName)}";
+        }
+
+        key.SetValue(StartupRegistration.RegistryValueName, command);
+        PrimaryUiAutoStartStore.Set(true);
     }
 
     static string Quote(string path) => path.Contains('"') ? path : $"\"{path}\"";

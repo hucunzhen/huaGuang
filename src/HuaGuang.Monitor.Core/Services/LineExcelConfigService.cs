@@ -64,6 +64,13 @@ public static class LineExcelConfigService
         ("MqttUseTls", "MQTT_TLS"),
         ("MqttQos", "MQTT_QoS"),
         ("MqttTopic", "MQTT发布主题"),
+        ("SubscribeMqttHost", "MQTT订阅_Broker"),
+        ("SubscribeMqttPort", "MQTT订阅_端口"),
+        ("SubscribeMqttClientId", "MQTT订阅_ClientId"),
+        ("SubscribeMqttUsername", "MQTT订阅_用户名"),
+        ("SubscribeMqttPassword", "MQTT订阅_密码"),
+        ("SubscribeMqttUseTls", "MQTT订阅_TLS"),
+        ("SubscribeMqttQos", "MQTT订阅_QoS"),
         ("SubscribeTopics", "订阅主题"),
         ("OperationMode", "运行模式"),
         ("StartWithWindows", "开机自动启动"),
@@ -172,8 +179,14 @@ public static class LineExcelConfigService
         ValidateWorkbookFormat(workbook);
         settings.ConfigLoadWarnings.Clear();
         ApplyConfigSheet(settings, workbook, expectedLineName);
+        var hasSubscribeAccount = ConfigSheetHasSubscribeMqtt(workbook);
         ApplyMqttEndpointsSheet(settings, workbook);
         MqttEndpointCatalog.Normalize(settings);
+        if (!hasSubscribeAccount)
+        {
+            MqttSubscribeAccount.SeedFromPublishIfMissing(settings);
+            MqttSubscribeAccount.Normalize(settings);
+        }
         ApplyMqttPayloadSheet(settings, workbook);
         settings.Tags = ReadTagsSheet(workbook, settings.Plc.Protocol, settings.ConfigLoadWarnings);
         PlcTagIdentity.AssignStableIds(settings);
@@ -924,6 +937,13 @@ public static class LineExcelConfigService
         ["MqttUseTls"] = MqttEndpointCatalog.GetPrimary(settings).UseTls ? "是" : "否",
         ["MqttQos"] = MqttEndpointCatalog.GetPrimary(settings).Qos.ToString(),
         ["MqttTopic"] = MqttEndpointCatalog.GetPrimary(settings).Topic,
+        ["SubscribeMqttHost"] = settings.SubscribeMqtt.Host,
+        ["SubscribeMqttPort"] = settings.SubscribeMqtt.Port.ToString(),
+        ["SubscribeMqttClientId"] = settings.SubscribeMqtt.ClientId,
+        ["SubscribeMqttUsername"] = settings.SubscribeMqtt.Username,
+        ["SubscribeMqttPassword"] = settings.SubscribeMqtt.Password,
+        ["SubscribeMqttUseTls"] = settings.SubscribeMqtt.UseTls ? "是" : "否",
+        ["SubscribeMqttQos"] = settings.SubscribeMqtt.Qos.ToString(),
         ["SubscribeTopics"] = string.Join(';', settings.SubscribeTopics),
         ["OperationMode"] = FormatOperationMode(settings.OperationMode),
         ["StartWithWindows"] = settings.StartWithWindows ? "是" : "否",
@@ -1064,6 +1084,7 @@ public static class LineExcelConfigService
         settings.Mqtt.UseTls = GetBool(map, "MQTT_TLS", settings.Mqtt.UseTls);
         settings.Mqtt.Qos = GetInt(map, "MQTT_QoS", settings.Mqtt.Qos);
         settings.Mqtt.Topic = GetString(map, "MQTT发布主题", settings.Mqtt.Topic);
+        ApplySubscribeMqtt(settings, map);
 
         settings.OperationMode = ParseOperationMode(GetString(map, "运行模式", FormatOperationMode(settings.OperationMode)));
         settings.StartWithWindows = GetBool(map, "开机自动启动", settings.StartWithWindows);
@@ -1073,6 +1094,37 @@ public static class LineExcelConfigService
         settings.LogExportDirectory = GetString(map, "日志打包目录", settings.LogExportDirectory);
 
         ApplySubscribeTopics(settings, map);
+    }
+
+    static bool ConfigSheetHasSubscribeMqtt(XLWorkbook workbook)
+    {
+        if (!workbook.Worksheets.TryGetWorksheet(ConfigSheetName, out var sheet))
+        {
+            return false;
+        }
+
+        var map = ReadKeyValueSheet(sheet);
+        return map.ContainsKey("MQTT订阅_Broker") || map.ContainsKey("MQTT订阅_ClientId");
+    }
+
+    static void ApplySubscribeMqtt(AppSettings settings, IReadOnlyDictionary<string, string> map)
+    {
+        if (!map.ContainsKey("MQTT订阅_Broker") && !map.ContainsKey("MQTT订阅_ClientId"))
+        {
+            return;
+        }
+
+        settings.SubscribeMqtt.Host = GetString(map, "MQTT订阅_Broker", settings.SubscribeMqtt.Host);
+        settings.SubscribeMqtt.Port = GetInt(map, "MQTT订阅_端口", settings.SubscribeMqtt.Port);
+        settings.SubscribeMqtt.ClientId = GetString(map, "MQTT订阅_ClientId", settings.SubscribeMqtt.ClientId);
+        settings.SubscribeMqtt.Username = MqttCredentialNormalizer.NormalizeUsername(
+            GetOptionalString(map, "MQTT订阅_用户名", settings.SubscribeMqtt.Username));
+        settings.SubscribeMqtt.Password = MqttCredentialNormalizer.NormalizePassword(
+            GetOptionalString(map, "MQTT订阅_密码", settings.SubscribeMqtt.Password));
+        settings.SubscribeMqtt.UseTls = GetBool(map, "MQTT订阅_TLS", settings.SubscribeMqtt.UseTls);
+        settings.SubscribeMqtt.Qos = GetInt(map, "MQTT订阅_QoS", settings.SubscribeMqtt.Qos);
+        settings.SubscribeMqtt.Topic = string.Empty;
+        MqttSubscribeAccount.Normalize(settings);
     }
 
     static AppSettings ReadConfigDefaults(string lineName, string? templateFilePath)
@@ -1111,6 +1163,16 @@ public static class LineExcelConfigService
                 UseTls = GetBool(map, "MQTT_TLS", false),
                 Qos = GetInt(map, "MQTT_QoS", 0),
                 Topic = GetString(map, "MQTT发布主题", LineMqttDefaults.ResolvePublishTopic(lineName))
+            },
+            SubscribeMqtt = new MqttSettings
+            {
+                Host = GetString(map, "MQTT订阅_Broker", GetString(map, "MQTT_Broker", LineMqttDefaults.Host)),
+                Port = GetInt(map, "MQTT订阅_端口", GetInt(map, "MQTT端口", LineMqttDefaults.Port)),
+                ClientId = GetString(map, "MQTT订阅_ClientId", MqttSubscribeAccount.DefaultClientId),
+                Username = GetString(map, "MQTT订阅_用户名", string.Empty),
+                Password = GetString(map, "MQTT订阅_密码", string.Empty),
+                UseTls = GetBool(map, "MQTT订阅_TLS", false),
+                Qos = GetInt(map, "MQTT订阅_QoS", 0)
             }
         };
     }
@@ -1145,6 +1207,7 @@ public static class LineExcelConfigService
         settings.OperationMode = preserveFrom.OperationMode;
         settings.SubscribeTopics = preserveFrom.SubscribeTopics.ToList();
         settings.SubscribeTopic = preserveFrom.SubscribeTopic;
+        settings.SubscribeMqtt = MqttSubscribeAccount.Clone(preserveFrom.SubscribeMqtt);
         settings.StartWithWindows = preserveFrom.StartWithWindows;
         settings.AutoStartAcquisition = preserveFrom.AutoStartAcquisition;
         settings.EnableHistoryRecording = preserveFrom.EnableHistoryRecording;

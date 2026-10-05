@@ -58,15 +58,25 @@ public static class MauiProgram
 	{
 		CrashExitLogger.RegisterEarly("ui");
 #if WINDOWS
+		MonitorProcessInstance.Initialize();
 		AppPaths.Configure(new WindowsAppDataPaths());
-		AppPaths.ConfigureRuntimeLogging("runtime-ui");
+		MonitorProcessInstance.ApplyPersistedHostProfile();
+		AppPaths.ConfigureRuntimeLogging(
+			MonitorProcessInstance.IsIsolated
+				? $"runtime-ui-{MonitorProcessInstance.Id}"
+				: "runtime-ui");
 		WindowsAppDataPaths.WarmUp();
 		Directory.CreateDirectory(AppPaths.LogDirectory);
 		Platforms.Windows.WindowsInstallerExitHelper.ClearFlagIfPresent();
-		CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory}");
-		WatchdogHeartbeat.Start(WatchdogConstants.UiRole);
+		CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory} instance={MonitorProcessInstance.Id ?? "primary"}");
+		if (!MonitorProcessInstance.IsIsolated)
+		{
+			WatchdogHeartbeat.Start(WatchdogConstants.UiRole);
+		}
 #else
 		AppPaths.Configure(new MauiAppDataPaths());
+		Directory.CreateDirectory(AppPaths.LogDirectory);
+		CrashExitLogger.WriteBootstrap($"dataDir={AppPaths.UserDataDirectory} logDir={AppPaths.LogDirectory}");
 #endif
 
 #if ANDROID
@@ -106,14 +116,17 @@ public static class MauiProgram
 #if WINDOWS
 		builder.Services.AddSingleton<Services.LogExport.ILogExportLocationService, Platforms.Windows.WindowsLogExportLocationService>();
 		builder.Services.AddSingleton<IStartupRegistration, Platforms.Windows.WindowsStartupRegistration>();
+		builder.Services.AddSingleton<IDesktopShortcutService, Platforms.Windows.WindowsDesktopShortcutService>();
 		builder.Services.AddSingleton<IPlatformFullScreenPresenter, Platforms.Windows.WindowsFullScreenPresenter>();
 		builder.Services.AddSingleton<IScannerInputMethodGuard, Platforms.Windows.WindowsScannerInputMethodGuard>();
 #elif ANDROID
 		builder.Services.AddSingleton<IStartupRegistration, NoOpStartupRegistration>();
+		builder.Services.AddSingleton<IDesktopShortcutService, NoOpDesktopShortcutService>();
 		builder.Services.AddSingleton<IPlatformFullScreenPresenter, Platforms.Android.AndroidFullScreenPresenter>();
 		builder.Services.AddSingleton<IScannerInputMethodGuard, Platforms.Android.AndroidScannerInputMethodGuard>();
 #else
 		builder.Services.AddSingleton<IStartupRegistration, NoOpStartupRegistration>();
+		builder.Services.AddSingleton<IDesktopShortcutService, NoOpDesktopShortcutService>();
 		builder.Services.AddSingleton<IPlatformFullScreenPresenter, NoOpFullScreenPresenter>();
 		builder.Services.AddSingleton<IScannerInputMethodGuard, NoOpScannerInputMethodGuard>();
 #endif
@@ -144,11 +157,17 @@ public static class MauiProgram
 #endif
 		var startupLogger = Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 		startupLogger.LogInformation(
-			"应用启动 version={Version} dataDir={DataDir} logFile={LogFile} windowsService={UsesService}",
+			"应用启动 version={Version} dataDir={DataDir} logFile={LogFile} windowsService={UsesService} instance={Instance}",
 			AppVersionInfo.Display,
 			AppPaths.UserDataDirectory,
 			AppPaths.CurrentRuntimeLogFile,
-			UsesWindowsBackgroundService);
+			UsesWindowsBackgroundService,
+			MonitorProcessInstance.Id ?? "primary");
+		if (MonitorProcessInstance.StartupLineName is { } startupLine)
+		{
+			startupLogger.LogInformation("启动参数指定产线 line={LineName}", startupLine);
+		}
+
 		var store = Services.GetRequiredService<SettingsStore>();
 		if (!store.TryLoad())
 		{
@@ -172,8 +191,43 @@ public static class MauiProgram
 				store.Current.OperationMode,
 				store.Current.DeviceId,
 				store.Current.UseSimulator);
+			if (LineConfigPaths.HasConfirmedActiveLine() &&
+			    !MonitorProcessInstance.IsIsolated &&
+			    !LineAcquisitionOccupancy.TrySync(
+				    store.Current.LineName,
+				    store.Current.OperationMode,
+				    out var occupancyError))
+			{
+				startupLogger.LogWarning("{Error}", occupancyError);
+			}
 		}
-		Services.GetRequiredService<IStartupRegistration>().Apply(store.Current.StartWithWindows);
+#if WINDOWS
+		if (MonitorProcessInstance.IsIsolated)
+		{
+			if (IsolatedWantsBackgroundAutoStart())
+			{
+				_ = Task.Run(() =>
+				{
+					try
+					{
+						Platforms.Windows.WindowsInstanceBackgroundHost.EnsureRunning(TimeSpan.FromSeconds(45));
+					}
+					catch (Exception ex)
+					{
+						startupLogger.LogWarning(ex, "独立实例后台启动未完成（界面已继续）");
+					}
+				});
+			}
+		}
+		else
+		{
+			if (!PrimaryUiAutoStartStore.IsEnabled())
+			{
+				Services.GetRequiredService<IStartupRegistration>().Apply(false);
+				startupLogger.LogInformation("已清除主窗口开机启动项（未在设置中明确开启）");
+			}
+		}
+#endif
 #if WINDOWS
 		_ = Task.Run(async () =>
 		{
@@ -189,11 +243,47 @@ public static class MauiProgram
 		});
 		Platforms.Windows.StartupBootstrapLog.Write("CreateMauiApp: complete");
 #else
-		Services.GetRequiredService<HistoryRecorder>().InitializeAsync().GetAwaiter().GetResult();
+		_ = Task.Run(async () =>
+		{
+			try
+			{
+				await Services.GetRequiredService<HistoryRecorder>().InitializeAsync().ConfigureAwait(false);
+				startupLogger.LogInformation("历史库已在后台就绪");
+			}
+			catch (Exception ex)
+			{
+				startupLogger.LogError(ex, "历史库后台初始化失败（界面继续运行）");
+			}
+		});
 #endif
 
 		return app;
 	}
+
+#if WINDOWS
+	static bool IsolatedWantsBackgroundAutoStart()
+	{
+		if (MonitorInstanceOverlay.TryLoad(out _, out var overlayStart, out _))
+		{
+			if (overlayStart == true)
+			{
+				return true;
+			}
+
+			if (overlayStart == false)
+			{
+				return false;
+			}
+		}
+
+		if (MonitorProcessInstance.Id is { } id && InstanceHostProfileStore.TryLoad(id, out var profile))
+		{
+			return profile.AutoStart == true;
+		}
+
+		return false;
+	}
+#endif
 
 	static void RegisterMonitorRuntime(IServiceCollection services)
 	{
