@@ -59,6 +59,13 @@
                        LineBreakMode="WordWrap" />
             </HorizontalStackLayout>
 
+            <Label Text="所属 PLC" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Picker ItemsSource="{Binding PlcNameOptions}" SelectedItem="{Binding SelectedPlcName}"
+                    IsVisible="{Binding IsPlcSource}" />
+            <Label Text="先在「设置」添加 PLC。不同点位可以来自不同协议的 PLC。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding IsPlcSource}" />
+
             <Label Text="{Binding PlcAddressLabel}" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Entry Text="{Binding XinjeAddress}" Placeholder="{Binding PlcAddressPlaceholder}" IsVisible="{Binding IsPlcSource}" />
             <Label Text="{Binding ResolvedHint}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="WordWrap"

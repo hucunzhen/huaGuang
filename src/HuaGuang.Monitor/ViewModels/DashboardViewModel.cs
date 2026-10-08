@@ -158,7 +158,8 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!MonitorProcessInstance.IsIsolated && InstanceHostProfileStore.HasAutoStartInstance())
+        if (!MonitorProcessInstance.IsIsolated
+            && InstanceHostProfileStore.HasAutoStartFor(_settings.Current.LineName, _settings.Current.OperationMode))
         {
             return;
         }

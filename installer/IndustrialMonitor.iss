@@ -26,7 +26,7 @@
 #define WatchdogServiceName "HuaGuangMonitorWatchdog"
 #define WatchdogExeName "HuaGuang.Monitor.Watchdog.Service.exe"
 #define WatchdogDisplayName "工业监控守护服务"
-#define WatchdogDescription "监控采集服务与界面进程，异常退出时自动重启"
+#define WatchdogDescription "监控主采集服务、独立自启动实例与界面进程，异常退出时自动重启"
 
 [Setup]
 AppId={#MyAppId}
@@ -43,6 +43,9 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+; WinUI 3 / Windows App Runtime 需要 kernel32!IsWow64Process2（Win10 1709 起才有）。
+; MAUI 官方最低是 1809（17763）。1607 LTSB / Server 2016 会弹「无法定位 IsWow64Process2」。
+MinVersion=10.0.17763
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=appicon.ico
@@ -53,6 +56,9 @@ CloseApplications=no
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
+
+[Messages]
+WindowsVersionNotSupported=工业监控需要 64 位 Windows 10 版本 1809（内部版本 17763）或更高。%n%n当前系统过旧，无法加载 Windows App Runtime（常见报错：找不到入口点 IsWow64Process2）。%n%n可用：Win10 LTSC 2019/2021、Win10 21H2/22H2、Windows 11、Server 2019/2022。%n不可用：Win7/Win8、Win10 1507/1607（LTSB 2016）、Win10 1703、32 位 Windows。
 
 [Tasks]
 Name: "installservice"; Description: "安装并启动后台采集服务（推荐）"; GroupDescription: "附加选项:"; Flags: checkedonce
@@ -96,6 +102,33 @@ var
 
 const
   ForceUiExitFlagRel = 'com.industrial.monitor\Data\installer-force-ui-exit.flag';
+
+function WindowsBuildTooOldMessage(): String;
+var
+  Version: TWindowsVersion;
+begin
+  GetWindowsVersionEx(Version);
+  Result :=
+    '工业监控需要 64 位 Windows 10 版本 1809（内部版本 17763）或更高。' + #13#10 + #13#10 +
+    '当前系统：Windows ' + IntToStr(Version.Major) + '.' + IntToStr(Version.Minor) +
+    '，内部版本 ' + IntToStr(Version.Build) + '。' + #13#10 + #13#10 +
+    '过旧系统无法加载 Windows App Runtime（常见报错：找不到入口点 IsWow64Process2）。' + #13#10 +
+    '请升级到 Win10 LTSC 2019/2021、Win10 21H2/22H2 或 Windows 11 后再安装。';
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Version: TWindowsVersion;
+begin
+  GetWindowsVersionEx(Version);
+  if (Version.Major < 10) or ((Version.Major = 10) and (Version.Build < 17763)) then
+  begin
+    MsgBox(WindowsBuildTooOldMessage(), mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+  Result := True;
+end;
 
 function ForceUiExitFlagPath(): String;
 begin

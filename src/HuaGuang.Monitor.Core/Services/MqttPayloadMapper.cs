@@ -74,7 +74,7 @@ public static class MqttPayloadMapper
         SetOptionalByPath(root, profile.TimestampPath,
             FormatTimestamp(DateTimeOffset.UtcNow, profile.TimestampFormat));
         SetOptionalByPath(root, profile.SimulatorPath, settings.UseSimulator);
-        SetOptionalByPath(root, profile.PlcHostPath, settings.Plc.Host);
+        SetOptionalByPath(root, profile.PlcHostPath, PlcEndpointCatalog.DescribeHosts(settings));
         SetOptionalByPath(root, profile.QualityPath, allGood ? "Good" : "Uncertain");
 
         var tagsObject = BuildTagsObject(

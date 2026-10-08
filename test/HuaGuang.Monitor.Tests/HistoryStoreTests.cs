@@ -57,6 +57,30 @@ public sealed class HistoryStoreTests
     }
 
     [Fact]
+    public void Relocate_writes_to_new_directory()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"huaguang-history-old-{Guid.NewGuid():N}.db");
+        var custom = Path.Combine(Path.GetTempPath(), $"huaguang-history-custom-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new HistoryStore(dbPath);
+            store.Relocate(custom, Path.Combine(custom, "history.db"));
+            store.InitializeAsync().GetAwaiter().GetResult();
+            store.AppendAsync(Sample("自定义目录", DateTimeOffset.Now)).GetAwaiter().GetResult();
+            Assert.True(Directory.GetFiles(custom, "*.db").Length >= 1);
+            Assert.False(File.Exists(dbPath));
+        }
+        finally
+        {
+            Cleanup(dbPath);
+            if (Directory.Exists(custom))
+            {
+                Directory.Delete(custom, true);
+            }
+        }
+    }
+
+    [Fact]
     public void QueryTable_for_one_device_omits_other_device_tags()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"huaguang-history-device-{Guid.NewGuid():N}.db");
@@ -137,4 +161,17 @@ public sealed class HistoryStoreTests
             }
         ]
     };
+}
+
+public sealed class HistoryDirectoryPathTests
+{
+    [Fact]
+    public void Rejects_android_document_tree_uri()
+    {
+        Assert.False(AppPaths.IsUsableHistoryDirectory(null));
+        Assert.False(AppPaths.IsUsableHistoryDirectory(""));
+        Assert.False(AppPaths.IsUsableHistoryDirectory(
+            "content://com.android.externalstorage.documents/tree/primary%3AData"));
+        Assert.True(AppPaths.IsUsableHistoryDirectory(@"F:\Data\history"));
+    }
 }

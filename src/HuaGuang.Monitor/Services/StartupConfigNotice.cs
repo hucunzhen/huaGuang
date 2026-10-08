@@ -27,6 +27,14 @@ public static class StartupConfigNotice
             return;
         }
 
+        if (needLine
+            && string.IsNullOrWhiteSpace(error)
+            && warnings.Count == 0
+            && MonitorProcessInstance.IsIsolated)
+        {
+            return;
+        }
+
         if (!await WaitForPageAlertHostAsync(host).ConfigureAwait(true))
         {
             CrashExitLogger.Record(
@@ -110,16 +118,37 @@ public static class StartupConfigNotice
 
     static async Task<bool> WaitForPageAlertHostAsync(Page host)
     {
-        for (var i = 0; i < 120; i++)
+        for (var i = 0; i < 200; i++)
         {
-            if (host.Handler is not null && Shell.Current is not null)
+            if (CanShowWinUiAlert(host))
             {
-                return true;
+                await Task.Delay(100).ConfigureAwait(true);
+                return CanShowWinUiAlert(host);
             }
 
             await Task.Delay(50).ConfigureAwait(true);
         }
 
-        return host.Handler is not null && Shell.Current is not null;
+        return CanShowWinUiAlert(host);
+    }
+
+    static bool CanShowWinUiAlert(Page host)
+    {
+        if (host.Handler is null || Shell.Current is null)
+        {
+            return false;
+        }
+
+#if WINDOWS
+        var window = host.Window ?? Application.Current?.Windows.FirstOrDefault();
+        if (window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window native)
+        {
+            return native.Content?.XamlRoot is not null;
+        }
+
+        return false;
+#else
+        return true;
+#endif
     }
 }

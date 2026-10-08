@@ -36,7 +36,12 @@ public partial class App : MauiWinUIApplication
 
 	static void OnWinUiUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
 	{
-		CrashExitLogger.Record("WinUI.UnhandledException", e.Exception, fatal: true);
+		var xamlRootMissing = e.Exception?.Message?.Contains("XamlRoot", StringComparison.OrdinalIgnoreCase) == true;
+		CrashExitLogger.Record("WinUI.UnhandledException", e.Exception, fatal: !xamlRootMissing);
+		if (xamlRootMissing)
+		{
+			e.Handled = true;
+		}
 	}
 
 	protected override MauiApp CreateMauiApp()

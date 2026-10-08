@@ -32,6 +32,8 @@ public sealed class AppSettings
     /// <summary>兼容旧配置。</summary>
     public string SubscribeTopic { get; set; } = LineMqttDefaults.XianhePublishTopic;
     public PlcSettings Plc { get; set; } = new();
+    /// <summary>同一产线可配置多台 PLC（协议可不同）；点位用 <see cref="PlcTag.PlcId"/> 指定来源。</summary>
+    public List<PlcEndpoint> PlcEndpoints { get; set; } = [];
     public MqttSettings Mqtt { get; set; } = new();
     /// <summary>订阅模式专用 MQTT 账号（权限与采集发布账号分开）。</summary>
     public MqttSettings SubscribeMqtt { get; set; } = MqttSubscribeAccount.CreateDefault();
@@ -43,6 +45,8 @@ public sealed class AppSettings
     public bool EnableHistoryRecording { get; set; } = true;
     /// <summary>历史数据保留天数；超出后自动清理。</summary>
     public int HistoryRetentionDays { get; set; } = 1;
+    /// <summary>历史 SQLite 按日文件目录；为空时使用程序数据目录下 history。</summary>
+    public string HistoryDirectory { get; set; } = string.Empty;
     /// <summary>诊断页「打包日志」输出目录；为空时使用数据目录下 log-export。</summary>
     public string LogExportDirectory { get; set; } = string.Empty;
     /// <summary>一次性迁移标记；避免每次启动重复覆盖用户配置。</summary>

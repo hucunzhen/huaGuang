@@ -8,6 +8,8 @@ public sealed class PlcTag
     public string XinjeAddress { get; set; } = "D0";
     public bool Enabled { get; set; } = true;
     public TagSource Source { get; set; } = TagSource.Plc;
+    /// <summary>所属 PLC（<see cref="PlcEndpoint.Id"/> 或名称）；空则使用产线默认第一台。</summary>
+    public string PlcId { get; set; } = string.Empty;
     public string ManualValue { get; set; } = string.Empty;
     public ModbusTable Table { get; set; } = ModbusTable.HoldingRegister;
     public ushort Address { get; set; }

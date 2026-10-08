@@ -79,6 +79,17 @@ public static class Program
                 store.LastLoadError);
         }
 
+        try
+        {
+            var (historyShard, historyLegacy) = AppPaths.ResolveHistoryLocation(store.Current.HistoryDirectory);
+            host.Services.GetRequiredService<HistoryStore>().Relocate(historyShard, historyLegacy);
+            logger.LogInformation("历史保存目录 {Shard}", historyShard);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "应用历史保存目录失败，将使用默认目录");
+        }
+
         var history = host.Services.GetRequiredService<HistoryRecorder>();
         _ = Task.Run(async () =>
         {

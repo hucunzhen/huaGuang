@@ -10,7 +10,7 @@ namespace HuaGuang.Monitor.Services;
 public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 {
     readonly SettingsStore _settingsStore;
-    readonly IPlcClient _plc;
+    readonly PlcClientHub _plc;
     readonly MqttOutboundService _mqttOutbound;
     readonly IAcquisitionBackgroundGuard _backgroundGuard;
     readonly ILogger<AcquisitionService> _logger;
@@ -24,11 +24,10 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
     DateTimeOffset? _lastPublishScheduleTime;
     int _forcePublishSignal;
     string _plcError = string.Empty;
-    DateTimeOffset _plcConnectRetryAfter = DateTimeOffset.MinValue;
 
     public AcquisitionService(
         SettingsStore settingsStore,
-        IPlcClient plc,
+        PlcClientHub plc,
         MqttOutboundService mqttOutbound,
         IAcquisitionBackgroundGuard backgroundGuard,
         ILogger<AcquisitionService> logger)
@@ -42,7 +41,9 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
     }
 
     public bool IsRunning { get; private set; }
-    public bool PlcConnected => !CurrentSettings.UseSimulator && _plc.IsConnected;
+    public bool PlcConnected =>
+        !CurrentSettings.UseSimulator &&
+        _plc.AreUsedConnected(CurrentSettings, CurrentSettings.Tags.Where(tag => tag.Enabled && tag.IsPlc).ToList());
     public bool MqttConnected => _mqttOutbound.AllEnabledTargetsConnected(CurrentSettings);
 
     public string MqttTargetsStatus => _mqttOutbound.BuildTargetsStatus(CurrentSettings);
@@ -97,7 +98,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 settings.UseSimulator,
                 settings.ScanIntervalMs,
                 settings.PublishIntervalMs,
-                LogFormatting.DescribePlc(settings.Plc),
+                DescribePlcs(settings),
                 LogFormatting.DescribeMqtt(settings.Mqtt, settings.LineName),
                 settings.MqttEndpoints.Count);
             foreach (var endpoint in settings.MqttEndpoints.Where(endpoint => endpoint.Enabled))
@@ -118,7 +119,6 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             _cts = new CancellationTokenSource();
             IsRunning = true;
             _plcError = string.Empty;
-            _plcConnectRetryAfter = DateTimeOffset.MinValue;
             LastPublishNote = string.Empty;
             ResetPublishBaseline();
             _mqttOutbound.Start();
@@ -157,7 +157,6 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             _backgroundLease?.Dispose();
             _backgroundLease = null;
             ResetPublishBaseline();
-            _plcConnectRetryAfter = DateTimeOffset.MinValue;
             await _mqttOutbound.StopAsync().ConfigureAwait(false);
             MonitorRuntimeOperatorControl.SetPausedByOperator(true);
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
@@ -256,7 +255,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                     await _plc.DisconnectAsync().ConfigureAwait(false);
                 }
             }
-            else if (!await TryEnsurePlcAsync(settings, cancellationToken).ConfigureAwait(false))
+            else if (!await TryEnsurePlcAsync(settings, plcTags, cancellationToken).ConfigureAwait(false))
             {
                 if (plcTags.Count > 0)
                 {
@@ -273,7 +272,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 
             if (plcTags.Count > 0 && !settings.UseSimulator)
             {
-                plcValues = await _plc.ReadTagsAsync(plcTags, cancellationToken).ConfigureAwait(false);
+                plcValues = await _plc.ReadTagsAsync(settings, plcTags, cancellationToken).ConfigureAwait(false);
                 if (plcValues.Count == 0 && plcTags.Count > 0)
                 {
                     allGood = false;
@@ -437,44 +436,40 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         ConnectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    async Task<bool> TryEnsurePlcAsync(AppSettings settings, CancellationToken cancellationToken)
+    async Task<bool> TryEnsurePlcAsync(
+        AppSettings settings,
+        IReadOnlyList<PlcTag> plcTags,
+        CancellationToken cancellationToken)
     {
-        if (settings.UseSimulator || _plc.IsConnected)
+        if (settings.UseSimulator)
         {
             return true;
         }
 
-        if (!settings.Tags.Any(t => t.Enabled && t.IsPlc))
+        if (plcTags.Count == 0)
         {
             return true;
         }
 
-        if (DateTimeOffset.UtcNow < _plcConnectRetryAfter)
+        PlcEndpointCatalog.Normalize(settings);
+        var ok = await _plc.EnsureConnectedAsync(settings, plcTags, cancellationToken).ConfigureAwait(false);
+        if (ok)
         {
-            return false;
-        }
-
-        try
-        {
-            PlcSettingsHelper.Normalize(settings.Plc);
-            await _plc.ConnectAsync(settings.Plc, cancellationToken).ConfigureAwait(false);
-            _plcConnectRetryAfter = DateTimeOffset.MinValue;
-            _plcError = string.Empty;
-            _logger.LogInformation("PLC 已连接 {Plc}", LogFormatting.DescribePlc(settings.Plc));
+            _plcError = _plc.LastError;
             return true;
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _plcError = $"PLC: {ex.Message}";
-            _plcConnectRetryAfter = DateTimeOffset.UtcNow.AddSeconds(5);
-            _logger.LogWarning(ex, "PLC 连接失败 {Plc}", LogFormatting.DescribePlc(settings.Plc));
-            await _plc.DisconnectAsync().ConfigureAwait(false);
-            return false;
-        }
+
+        _plcError = string.IsNullOrWhiteSpace(_plc.LastError) ? "PLC: 连接失败" : $"PLC: {_plc.LastError}";
+        return false;
+    }
+
+    static string DescribePlcs(AppSettings settings)
+    {
+        PlcEndpointCatalog.Normalize(settings);
+        return string.Join(
+            " | ",
+            settings.PlcEndpoints.Select(endpoint =>
+                $"{endpoint.Name}:{LogFormatting.DescribePlc(endpoint.ToSettings())}"));
     }
 
     void PublishPlcTagFailures(IReadOnlyList<PlcTag> plcTags, string error, long? plcStarted = null)

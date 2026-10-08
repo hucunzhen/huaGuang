@@ -228,10 +228,13 @@ public static class MonitorProcessInstance
         {
             EnsureInitialized();
             return IsIsolated
-                ? $"{MonitorIpcConstants.DefaultServiceName}-{Id}"
+                ? WindowsServiceNameFor(Id!)
                 : MonitorIpcConstants.DefaultServiceName;
         }
     }
+
+    public static string WindowsServiceNameFor(string instanceId) =>
+        $"{MonitorIpcConstants.DefaultServiceName}-{RequireSanitizedId(instanceId)}";
 
     public static string WindowsServiceDisplayName
     {
@@ -255,29 +258,35 @@ public static class MonitorProcessInstance
         {
             EnsureInitialized();
             return IsIsolated
-                ? $"{MonitorIpcConstants.DefaultPipeName}.{Id}"
+                ? IpcPipeNameFor(Id!)
                 : MonitorIpcConstants.DefaultPipeName;
         }
     }
+
+    public static string IpcPipeNameFor(string instanceId) =>
+        $"{MonitorIpcConstants.DefaultPipeName}.{RequireSanitizedId(instanceId)}";
 
     public static int IpcTcpPort
     {
         get
         {
             EnsureInitialized();
-            if (!IsIsolated)
-            {
-                return MonitorIpcConstants.DefaultTcpPort;
-            }
-
-            var hash = 0;
-            foreach (var ch in Id!)
-            {
-                hash = unchecked(hash * 33 + ch);
-            }
-
-            return MonitorIpcConstants.DefaultTcpPort + 1 + (Math.Abs(hash) % 800);
+            return IsIsolated
+                ? IpcTcpPortFor(Id!)
+                : MonitorIpcConstants.DefaultTcpPort;
         }
+    }
+
+    public static int IpcTcpPortFor(string instanceId)
+    {
+        var id = RequireSanitizedId(instanceId);
+        var hash = 0;
+        foreach (var ch in id)
+        {
+            hash = unchecked(hash * 33 + ch);
+        }
+
+        return MonitorIpcConstants.DefaultTcpPort + 1 + (Math.Abs(hash) % 800);
     }
 
     public static string StartupRegistryValueName
@@ -320,13 +329,19 @@ public static class MonitorProcessInstance
             mode = AppOperationMode.Subscribe;
         }
 
-        var modeArg = mode == AppOperationMode.Subscribe ? "subscribe" : "acquisition";
-        if (string.IsNullOrWhiteSpace(line))
+        return FormatHostArgumentsFor(Id!, mode ?? AppOperationMode.Acquisition, line);
+    }
+
+    public static string FormatHostArgumentsFor(string instanceId, AppOperationMode operationMode, string? lineName)
+    {
+        var id = RequireSanitizedId(instanceId);
+        var modeArg = operationMode == AppOperationMode.Subscribe ? "subscribe" : "acquisition";
+        if (string.IsNullOrWhiteSpace(lineName) || !LineCatalog.TryResolveLineName(lineName, out var resolvedLine))
         {
-            return $"--instance {Id} --mode {modeArg}";
+            return $"--instance {id} --mode {modeArg}";
         }
 
-        return $"--instance {Id} --line {LineCatalog.ToCommandAlias(line)} --mode {modeArg}";
+        return $"--instance {id} --line {LineCatalog.ToCommandAlias(resolvedLine)} --mode {modeArg}";
     }
 
     public static string ResolveUserDataDirectory(string sharedDataDirectory) =>
@@ -374,6 +389,16 @@ public static class MonitorProcessInstance
         if (!TrySanitize(raw, out var id, out var error))
         {
             throw new ArgumentException(error, nameof(raw));
+        }
+
+        return id;
+    }
+
+    static string RequireSanitizedId(string instanceId)
+    {
+        if (!TrySanitize(instanceId, out var id, out var error))
+        {
+            throw new ArgumentException(error, nameof(instanceId));
         }
 
         return id;

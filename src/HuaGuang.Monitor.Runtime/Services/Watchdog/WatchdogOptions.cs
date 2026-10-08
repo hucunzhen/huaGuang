@@ -8,6 +8,8 @@ public sealed class WatchdogOptions
     public int PollIntervalSeconds { get; set; } = 20;
     public bool ProtectUi { get; set; } = true;
     public bool ProtectAcquisitionService { get; set; } = true;
+    /// <summary>巡检并拉起已勾选开机的独立实例（HuaGuangMonitor-{id}）。</summary>
+    public bool ProtectIsolatedInstances { get; set; } = true;
     public bool EnsureAcquisitionRunning { get; set; } = true;
     public int RestartCooldownSeconds { get; set; } = 60;
     public int GracefulShutdownWindowSeconds { get; set; } = 180;

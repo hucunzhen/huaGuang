@@ -49,11 +49,38 @@ public sealed class HistoryStore
         CREATE INDEX IF NOT EXISTS idx_tag_values_sample ON tag_values(sample_id);
         """;
 
-    readonly string _legacyPath;
-    readonly string _shardDirectory;
+    string _legacyPath = "";
+    string _shardDirectory = "";
     readonly SemaphoreSlim _gate = new(1, 1);
 
     public HistoryStore(string databasePath)
+    {
+        ApplyDatabasePath(databasePath);
+    }
+
+    public string ShardDirectory => _shardDirectory;
+
+    public string LegacyDatabasePath => _legacyPath;
+
+    public void Relocate(string shardDirectory, string legacyDatabasePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shardDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(legacyDatabasePath);
+        var shard = Path.GetFullPath(shardDirectory);
+        var legacy = Path.GetFullPath(legacyDatabasePath);
+        _gate.Wait();
+        try
+        {
+            _shardDirectory = shard;
+            _legacyPath = legacy;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    void ApplyDatabasePath(string databasePath)
     {
         _legacyPath = Path.GetFullPath(databasePath);
         var directory = Path.GetDirectoryName(_legacyPath)

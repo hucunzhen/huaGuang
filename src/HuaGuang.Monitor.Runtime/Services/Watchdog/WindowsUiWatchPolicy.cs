@@ -13,11 +13,6 @@ public static class WindowsUiWatchPolicy
             return false;
         }
 
-        if (InstanceHostProfileStore.HasAutoStartInstance())
-        {
-            return false;
-        }
-
         if (PrimaryUiAutoStartStore.IsEnabled())
         {
             return true;

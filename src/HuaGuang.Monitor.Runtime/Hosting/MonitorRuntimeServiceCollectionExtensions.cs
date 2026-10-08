@@ -22,6 +22,7 @@ public static class MonitorRuntimeServiceCollectionExtensions
         services.AddSingleton<ModbusTcpPlcClient>();
         services.AddSingleton<S7PlcClient>();
         services.AddSingleton<IPlcClient, PlcClientRouter>();
+        services.AddSingleton<PlcClientHub>();
         services.AddSingleton<IMqttPublisher, MqttPublisher>();
         services.AddSingleton<MqttOutboundService>();
         services.AddSingleton<AcquisitionService>();
@@ -70,6 +71,7 @@ public sealed class MonitorConfigWatcher : BackgroundService
     readonly SettingsStore _settings;
     readonly AcquisitionService _acquisition;
     readonly SubscriptionService _subscription;
+    readonly HistoryRecorder _history;
     readonly ILogger<MonitorConfigWatcher> _logger;
     FileSystemWatcher? _watcher;
 
@@ -77,11 +79,13 @@ public sealed class MonitorConfigWatcher : BackgroundService
         SettingsStore settings,
         AcquisitionService acquisition,
         SubscriptionService subscription,
+        HistoryRecorder history,
         ILogger<MonitorConfigWatcher> logger)
     {
         _settings = settings;
         _acquisition = acquisition;
         _subscription = subscription;
+        _history = history;
         _logger = logger;
     }
 
@@ -170,9 +174,12 @@ public sealed class MonitorAutoStartWorker : BackgroundService
             return;
         }
 
-        if (!MonitorProcessInstance.IsIsolated && InstanceHostProfileStore.HasAutoStartInstance())
+        if (!MonitorProcessInstance.IsIsolated
+            && InstanceHostProfileStore.HasAutoStartFor(_settings.Current.LineName, _settings.Current.OperationMode))
         {
-            _logger.LogInformation("独立实例已负责开机启动，跳过主服务按默认产线自动采集");
+            _logger.LogInformation(
+                "独立实例已负责 {Line} 开机，跳过主服务对该产线自动采集/订阅",
+                _settings.Current.LineName);
             return;
         }
 

@@ -72,6 +72,15 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     [ObservableProperty] string selectedDisplayCategoryOption = "自动推断";
     [ObservableProperty] string statusMessage = string.Empty;
     [ObservableProperty] bool useScannerInput;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PlcAddressLabel))]
+    [NotifyPropertyChangedFor(nameof(PlcAddressPlaceholder))]
+    [NotifyPropertyChangedFor(nameof(PlcAddressHelp))]
+    [NotifyPropertyChangedFor(nameof(ResolvedHint))]
+    string selectedPlcName = string.Empty;
+
+    public IReadOnlyList<string> PlcNameOptions =>
+        PlcEndpointCatalog.NormalizeAndNames(_store.Current);
 
     public bool IsPlcSource => SelectedSourceType == "PLC 采集";
     public bool IsManualSource => SelectedSourceType == "手动输入";
@@ -106,11 +115,14 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
     }
 
-    public string PlcAddressLabel => PlcAddressMapper.AddressLabel(_store.Current.Plc.Protocol);
+    public string PlcAddressLabel => PlcAddressMapper.AddressLabel(SelectedPlcProtocol);
 
-    public string PlcAddressPlaceholder => PlcAddressMapper.AddressPlaceholder(_store.Current.Plc.Protocol);
+    public string PlcAddressPlaceholder => PlcAddressMapper.AddressPlaceholder(SelectedPlcProtocol);
 
-    public string PlcAddressHelp => PlcAddressMapper.AddressHelp(_store.Current.Plc.Protocol);
+    public string PlcAddressHelp => PlcAddressMapper.AddressHelp(SelectedPlcProtocol);
+
+    PlcProtocol SelectedPlcProtocol =>
+        PlcEndpointCatalog.Resolve(_store.Current, SelectedPlcName).Protocol;
 
     public string ResolvedHint
     {
@@ -121,7 +133,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 dataType = TagDataType.Float32;
             }
 
-            return PlcAddressMapper.TryResolve(_store.Current.Plc.Protocol, XinjeAddress, dataType, out var hint, out var error)
+            return PlcAddressMapper.TryResolve(SelectedPlcProtocol, XinjeAddress, dataType, out var hint, out var error)
                 ? hint
                 : error;
         }
@@ -153,6 +165,8 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                     ? TagDisplayCategoryHelper.ToLabel(category)
                     : "自动推断";
                 UseScannerInput = tag.UseScannerInput;
+                SelectedPlcName = PlcEndpointCatalog.Resolve(_store.Current, tag.PlcId).Name;
+                OnPropertyChanged(nameof(PlcNameOptions));
                 return;
             }
         }
@@ -266,7 +280,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
         else
         {
-            if (!PlcAddressMapper.TryResolve(_store.Current.Plc.Protocol, XinjeAddress, dataType, out _, out var addressError))
+            if (!PlcAddressMapper.TryResolve(SelectedPlcProtocol, XinjeAddress, dataType, out _, out var addressError))
             {
                 StatusMessage = addressError;
                 return;
@@ -288,7 +302,9 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
             tag.XinjeAddress = XinjeAddress.Trim();
             tag.Scale = scale;
             tag.Offset = offset;
-            PlcAddressMapper.ApplyTo(tag, _store.Current.Plc.Protocol);
+            var endpoint = PlcEndpointCatalog.Resolve(_store.Current, SelectedPlcName);
+            tag.PlcId = endpoint.Id;
+            PlcAddressMapper.ApplyTo(tag, endpoint.Protocol);
         }
 
         if (_store.Current.Tags.All(t => t.Id != tag.Id))
@@ -328,6 +344,9 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         SelectedDisplayCategoryOption = "自动推断";
         UseScannerInput = false;
         StatusMessage = string.Empty;
+        PlcEndpointCatalog.Normalize(_store.Current);
+        SelectedPlcName = PlcEndpointCatalog.GetPrimary(_store.Current).Name;
+        OnPropertyChanged(nameof(PlcNameOptions));
     }
 
     static bool TryParseOptionalPrecision(string text, out int? precision, out string error)

@@ -31,6 +31,29 @@ public static class AppPaths
     /// <summary>按日拆分的 SQLite 目录（<c>history/yyyy-MM-dd.db</c>）。旧版单文件仍为 <see cref="HistoryDatabasePath"/>。</summary>
     public static string HistoryDirectory => Path.Combine(UserDataDirectory, "history");
 
+    public static bool IsUsableHistoryDirectory(string? configured)
+    {
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return false;
+        }
+
+        var trimmed = configured.Trim();
+        return !trimmed.StartsWith("content:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>解析历史保存位置。留空或不可用路径（如 Android 文档树 URI）时使用默认目录。</summary>
+    public static (string ShardDirectory, string LegacyDatabasePath) ResolveHistoryLocation(string? configured)
+    {
+        if (!IsUsableHistoryDirectory(configured))
+        {
+            return (HistoryDirectory, HistoryDatabasePath);
+        }
+
+        var root = Path.GetFullPath(configured!.Trim());
+        return (root, Path.Combine(root, "history.db"));
+    }
+
     public static string UserLinesDirectory => Path.Combine(SharedDataDirectory, "lines");
 
     public static string LogDirectory => Path.Combine(UserDataDirectory, "logs");

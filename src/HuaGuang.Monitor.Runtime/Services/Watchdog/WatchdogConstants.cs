@@ -7,7 +7,7 @@ public static class WatchdogConstants
 
     public const string WatchdogWindowsServiceName = "HuaGuangMonitorWatchdog";
     public const string WatchdogDisplayName = "工业监控守护服务";
-    public const string WatchdogDescription = "监控采集服务与界面进程，异常退出时自动重启";
+    public const string WatchdogDescription = "监控主采集服务、独立自启动实例与界面进程，异常退出时自动重启";
 
     public const string UiProcessName = "HuaGuang.Monitor";
     public const string AcquisitionProcessName = "HuaGuang.Monitor.Service";

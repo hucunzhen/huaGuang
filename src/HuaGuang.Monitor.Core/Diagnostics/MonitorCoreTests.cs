@@ -30,6 +30,7 @@ public static class MonitorCoreTests
         Run("Excel 配置读写", TestLineExcelRoundTrip),
         Run("Excel 缺发布周期", TestLegacyExcelMissingPublishInterval),
         Run("Excel 多 MQTT 目标", TestMqttEndpointsExcelRoundTrip),
+        Run("Excel 多 PLC 目标", TestPlcEndpointsExcelRoundTrip),
         Run("Excel 导出保留 MQTT 凭证", TestExportPreservesMqttEndpointCredentials),
         Run("Excel 维护保留点表", TestLineFileMaintenancePreservesCustomTags),
         Run("Excel 字段映射补全", TestPatchEmptyMqttFieldMappings),
@@ -661,6 +662,7 @@ public static class MonitorCoreTests
             original.Tags.First(tag => tag.Name == "运行状态").DisplayCategory = TagDisplayCategory.Switch;
             original.Tags.First(tag => tag.Name == "车速").DisplayCategory = TagDisplayCategory.Process;
             original.SubscribeTopics = ["monitor/+/telemetry", "monitor/test/#"];
+            original.HistoryDirectory = @"F:\Data\history";
             LineExcelConfigService.Export(original, tempPath);
 
             var loaded = new AppSettings();
@@ -679,6 +681,7 @@ public static class MonitorCoreTests
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
             AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
             AssertTrue(loaded.SubscribeTopics.Count == 2);
+            AssertTrue(loaded.HistoryDirectory == @"F:\Data\history");
         }
         finally
         {
@@ -767,6 +770,49 @@ public static class MonitorCoreTests
             AssertTrue(loaded.SubscribeMqtt.ClientId == "SUBSCREEN");
             AssertTrue(loaded.SubscribeMqtt.Username == "sub-user");
             AssertTrue(loaded.SubscribeMqtt.Password == "sub-pass");
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    static void TestPlcEndpointsExcelRoundTrip()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-plc-endpoints-{Guid.NewGuid():N}.xlsx");
+        try
+        {
+            var original = LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name);
+            original.PlcEndpoints =
+            [
+                PlcEndpoint.FromSettings(original.Plc, "信捷"),
+                new PlcEndpoint
+                {
+                    Name = "西门子",
+                    Protocol = PlcProtocol.S7,
+                    Model = "S7-1200",
+                    Host = "192.168.1.21",
+                    Port = 102,
+                    CpuType = "S71200",
+                    Rack = 0,
+                    Slot = 0,
+                    TimeoutMs = 3000
+                }
+            ];
+            PlcEndpointCatalog.Normalize(original);
+            LineExcelConfigService.Export(original, tempPath);
+
+            var loaded = new AppSettings();
+            LineExcelConfigService.Apply(loaded, tempPath);
+            AssertTrue(loaded.PlcEndpoints.Count == 2);
+            AssertTrue(loaded.PlcEndpoints[0].Name == "信捷");
+            AssertTrue(loaded.PlcEndpoints[1].Host == "192.168.1.21");
+            AssertTrue(loaded.PlcEndpoints[1].Protocol == PlcProtocol.S7);
+            PlcEndpointCatalog.Normalize(loaded);
+            AssertTrue(loaded.Plc.Host == loaded.PlcEndpoints[0].Host);
         }
         finally
         {
@@ -950,6 +996,7 @@ public static class MonitorCoreTests
             legacy.Mqtt.Port = 1883;
             legacy.Mqtt.Username = "local-user";
             legacy.Mqtt.Password = "local-pass";
+            SyncPrimaryMqttEndpoint(legacy);
             LineExcelConfigService.Export(legacy, tempPath);
 
             using (var workbook = new XLWorkbook(tempPath))
@@ -969,13 +1016,15 @@ public static class MonitorCoreTests
 
             var loaded = new AppSettings();
             LineExcelConfigService.Apply(loaded, tempPath);
-            AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version - 1);
-            AssertTrue(loaded.AddressCatalogVersion == LineCatalog.Version - 1);
-            AssertFalse(loaded.Tags.Any(tag => tag.Name == "产品货号"));
-            AssertTrue(loaded.Mqtt.Host == "127.0.0.1");
-            AssertTrue(loaded.Mqtt.Port == 1883);
-            AssertTrue(loaded.Mqtt.Username == "local-user");
-            AssertTrue(loaded.Mqtt.Password == "local-pass");
+            AssertTrue(LineExcelConfigService.ReadLineConfigRevision(tempPath) == LineCatalog.Version - 1,
+                $"文件版本={LineExcelConfigService.ReadLineConfigRevision(tempPath)} 期望={LineCatalog.Version - 1}");
+            AssertTrue(loaded.AddressCatalogVersion == LineCatalog.Version - 1,
+                $"内存版本={loaded.AddressCatalogVersion} 期望={LineCatalog.Version - 1}");
+            AssertFalse(loaded.Tags.Any(tag => tag.Name == "产品货号"), "不应补回产品货号");
+            AssertTrue(loaded.Mqtt.Host == "127.0.0.1", $"MqttHost={loaded.Mqtt.Host}");
+            AssertTrue(loaded.Mqtt.Port == 1883, $"MqttPort={loaded.Mqtt.Port}");
+            AssertTrue(loaded.Mqtt.Username == "local-user", $"MqttUser={loaded.Mqtt.Username}");
+            AssertTrue(loaded.Mqtt.Password == "local-pass", $"MqttPass={loaded.Mqtt.Password}");
         }
         finally
         {
@@ -1312,10 +1361,12 @@ public static class MonitorCoreTests
             saved.AutoStartAcquisition = false;
             saved.EnableHistoryRecording = false;
             saved.HistoryRetentionDays = 30;
+            saved.HistoryDirectory = @"F:\Data\history";
             saved.Plc.Host = "10.0.0.88";
             saved.Mqtt.Host = "10.0.0.99";
             saved.Mqtt.Port = 1888;
             saved.Mqtt.Topic = "/custom/topic";
+            SyncPrimaryMqttEndpoint(saved);
             saved.Tags.Add(new PlcTag { Name = "测试点", Source = TagSource.Manual, ManualValue = "1" });
             MqttFieldMappingCatalog.ApplyDefaults(saved.Tags, saved.LineName);
             PlcTagIdentity.AssignStableIds(saved);
@@ -1325,11 +1376,12 @@ public static class MonitorCoreTests
                 saved.LineName,
                 configPath,
                 templateFilePath: configPath);
-            AssertTrue(loaded.DeviceId == "USER-DEVICE-99");
-            AssertTrue(loaded.Plc.Host == "10.0.0.88");
-            AssertTrue(loaded.Mqtt.Host == "10.0.0.99");
-            AssertTrue(loaded.AutoStartAcquisition == false);
-            AssertTrue(loaded.HistoryRetentionDays == 30);
+            AssertTrue(loaded.DeviceId == "USER-DEVICE-99", $"DeviceId={loaded.DeviceId}");
+            AssertTrue(loaded.Plc.Host == "10.0.0.88", $"PlcHost={loaded.Plc.Host}");
+            AssertTrue(loaded.Mqtt.Host == "10.0.0.99", $"MqttHost={loaded.Mqtt.Host}");
+            AssertTrue(loaded.AutoStartAcquisition == false, "AutoStartAcquisition");
+            AssertTrue(loaded.HistoryRetentionDays == 30, $"HistoryRetentionDays={loaded.HistoryRetentionDays}");
+            AssertTrue(loaded.HistoryDirectory == @"F:\Data\history", $"HistoryDirectory={loaded.HistoryDirectory}");
         }
         finally
         {
@@ -1374,13 +1426,27 @@ public static class MonitorCoreTests
         }
     }
 
-    static void AssertTrue(bool condition)
+    static void SyncPrimaryMqttEndpoint(AppSettings settings)
+    {
+        MqttEndpointCatalog.PrepareForExport(settings);
+        var primary = MqttEndpointCatalog.GetPrimary(settings);
+        primary.Host = settings.Mqtt.Host;
+        primary.Port = settings.Mqtt.Port;
+        primary.Username = settings.Mqtt.Username;
+        primary.Password = settings.Mqtt.Password;
+        primary.Topic = settings.Mqtt.Topic;
+        primary.ClientId = settings.Mqtt.ClientId;
+        primary.UseTls = settings.Mqtt.UseTls;
+        primary.Qos = settings.Mqtt.Qos;
+    }
+
+    static void AssertTrue(bool condition, string? detail = null)
     {
         if (!condition)
         {
-            throw new InvalidOperationException("断言失败");
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail) ? "断言失败" : $"断言失败：{detail}");
         }
     }
 
-    static void AssertFalse(bool condition) => AssertTrue(!condition);
+    static void AssertFalse(bool condition, string? detail = null) => AssertTrue(!condition, detail);
 }

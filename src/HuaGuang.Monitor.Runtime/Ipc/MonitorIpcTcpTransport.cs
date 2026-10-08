@@ -108,12 +108,19 @@ static class MonitorIpcTcpTransport
         }
     }
 
-    internal static async Task<MonitorIpcResponse> SendAsync(MonitorIpcRequest request, TimeSpan timeout, CancellationToken cancellationToken)
+    internal static Task<MonitorIpcResponse> SendAsync(MonitorIpcRequest request, TimeSpan timeout, CancellationToken cancellationToken) =>
+        SendAsync(request, timeout, MonitorIpcConstants.CurrentTcpPort, cancellationToken);
+
+    internal static async Task<MonitorIpcResponse> SendAsync(
+        MonitorIpcRequest request,
+        TimeSpan timeout,
+        int tcpPort,
+        CancellationToken cancellationToken)
     {
         using var client = new TcpClient();
         using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         connectCts.CancelAfter(timeout);
-        await client.ConnectAsync(IPAddress.Loopback, MonitorIpcConstants.CurrentTcpPort, connectCts.Token).ConfigureAwait(false);
+        await ConnectLoopbackAsync(client, tcpPort, connectCts.Token).ConfigureAwait(false);
 
         await using var stream = client.GetStream();
         var requestLine = JsonSerializer.Serialize(request, MonitorIpcJson.Options) + "\n";
@@ -129,5 +136,32 @@ static class MonitorIpcTcpTransport
 
         return JsonSerializer.Deserialize<MonitorIpcResponse>(responseLine, MonitorIpcJson.Options)
             ?? new MonitorIpcResponse { Success = false, Error = "响应解析失败" };
+    }
+
+    /// <summary>
+    /// ConnectAsync 在 Windows 上对未监听端口可能忽略取消令牌，一直等到系统 TCP 超时（约 20 秒），
+    /// 订阅大屏等独立实例会把 UI 线程卡住。超时时 Dispose 以立刻断开。
+    /// </summary>
+    static async Task ConnectLoopbackAsync(TcpClient client, int tcpPort, CancellationToken cancellationToken)
+    {
+        var connect = client.ConnectAsync(IPAddress.Loopback, tcpPort);
+        var abort = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var registration = cancellationToken.Register(() => abort.TrySetResult());
+        var finished = await Task.WhenAny(connect, abort.Task).ConfigureAwait(false);
+        if (finished != connect)
+        {
+            try
+            {
+                client.Close();
+            }
+            catch
+            {
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new TimeoutException($"IPC TCP 连接超时 127.0.0.1:{tcpPort}");
+        }
+
+        await connect.ConfigureAwait(false);
     }
 }

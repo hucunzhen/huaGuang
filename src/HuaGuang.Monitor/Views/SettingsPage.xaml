@@ -143,6 +143,10 @@
             <Label Text="保留天数（1–365）" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding HistoryRetentionDays}" Keyboard="Numeric" Placeholder="1" />
             <Label Text="超出保留期的历史记录会在启动时自动清理。" TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            <Label Text="历史数据保存目录" TextColor="#8AA0B5" FontSize="12" />
+            <Entry Text="{Binding HistoryDirectory}" Placeholder="留空则使用程序数据目录" />
+            <Label Text="{Binding HistoryDirectoryHint}" TextColor="#6E8499" FontSize="11" LineBreakMode="WordWrap" />
+            <Button Text="选择历史保存目录…" Command="{Binding PickHistoryDirectoryCommand}" BackgroundColor="#1F3A52" />
 
             <Label Text="诊断与日志" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
             <Label Text="日志打包输出目录" TextColor="#8AA0B5" FontSize="12" />
@@ -153,28 +157,56 @@
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
 
             <Label Text="{Binding PlcSectionTitle}" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="PLC 协议" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Picker ItemsSource="{Binding PlcProtocolOptions}" SelectedItem="{Binding SelectedPlcProtocol}" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="Modbus：XDPpro 开启 Modbus TCP Server，端口 502。S7：允许 PUT/GET，端口 102；1200/1500 常见 rack 0 slot 0，300/400 常见 rack 0 slot 2。"
+            <Label Text="同一产线可连多台 PLC，协议可以不同（例如一台信捷 Modbus、一台西门子 S7）。点位编辑时选择所属 PLC。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="PLC 型号（备注）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Entry Text="{Binding PlcModel}" Placeholder="XD5E-60T10 / S7-1200" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="IP 地址" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Entry Text="{Binding PlcHost}" Placeholder="192.168.6.10" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="端口（Modbus 502 / S7 102）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Entry Text="{Binding PlcPort}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="站号（Modbus）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsModbusPlc}" />
-            <Entry Text="{Binding Station}" Keyboard="Numeric" IsVisible="{Binding IsModbusPlc}" />
-            <Label Text="机架号（S7 Rack）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsS7Plc}" />
-            <Entry Text="{Binding PlcRack}" Keyboard="Numeric" IsVisible="{Binding IsS7Plc}" />
-            <Label Text="槽位（S7 Slot）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsS7Plc}" />
-            <Entry Text="{Binding PlcSlot}" Keyboard="Numeric" IsVisible="{Binding IsS7Plc}" />
-            <Label Text="CPU 类型" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsS7Plc}" />
-            <Picker ItemsSource="{Binding S7CpuTypeOptions}" SelectedItem="{Binding PlcCpuType}" IsVisible="{Binding IsS7Plc}" />
-            <Label Text="超时（毫秒）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Entry Text="{Binding PlcTimeoutMs}" Keyboard="Numeric" IsVisible="{Binding IsAcquisitionSettings}" />
-            <Label Text="单次 PLC 请求超时；无响应时过大会拖慢整轮采集（建议 2000–5000）。"
-                   TextColor="#8AA0B5" FontSize="11" LineBreakMode="WordWrap" IsVisible="{Binding IsAcquisitionSettings}" />
+            <Button Text="添加 PLC"
+                    Command="{Binding AddPlcEndpointCommand}"
+                    BackgroundColor="#1A2940"
+                    TextColor="#2EC4B6"
+                    Padding="12,8"
+                    IsVisible="{Binding IsAcquisitionSettings}" />
+            <CollectionView ItemsSource="{Binding PlcEndpoints}" IsVisible="{Binding IsAcquisitionSettings}">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PlcEndpointViewModel">
+                        <Border Stroke="#243447" StrokeThickness="1" BackgroundColor="#111C2B" Padding="12" Margin="0,0,0,10">
+                            <VerticalStackLayout Spacing="8">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <Entry Text="{Binding Name}" Placeholder="PLC 名称" TextColor="White" />
+                                    <Button Grid.Column="1"
+                                            Text="删除"
+                                            Command="{Binding Source={RelativeSource AncestorType={x:Type vm:SettingsViewModel}}, Path=RemovePlcEndpointCommand}"
+                                            CommandParameter="{Binding .}"
+                                            BackgroundColor="#3A1F1F"
+                                            TextColor="#FF6B6B"
+                                            Padding="12,6" />
+                                </Grid>
+                                <HorizontalStackLayout Spacing="10">
+                                    <CheckBox IsChecked="{Binding Enabled}" Color="#2EC4B6" VerticalOptions="Center" />
+                                    <Label Text="启用" TextColor="White" VerticalOptions="Center" />
+                                </HorizontalStackLayout>
+                                <Label Text="协议" TextColor="#8AA0B5" FontSize="12" />
+                                <Picker ItemsSource="{Binding ProtocolOptions}" SelectedItem="{Binding SelectedProtocol}" />
+                                <Label Text="型号（备注）" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Model}" Placeholder="XD5E-60T10 / S7-1200" />
+                                <Label Text="IP 地址" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Host}" Placeholder="192.168.6.10" />
+                                <Label Text="端口（Modbus 502 / S7 102）" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding Port}" Keyboard="Numeric" />
+                                <Label Text="站号（Modbus）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsModbusPlc}" />
+                                <Entry Text="{Binding Station}" Keyboard="Numeric" IsVisible="{Binding IsModbusPlc}" />
+                                <Label Text="机架号（S7 Rack）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsS7Plc}" />
+                                <Entry Text="{Binding Rack}" Keyboard="Numeric" IsVisible="{Binding IsS7Plc}" />
+                                <Label Text="槽位（S7 Slot）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsS7Plc}" />
+                                <Entry Text="{Binding Slot}" Keyboard="Numeric" IsVisible="{Binding IsS7Plc}" />
+                                <Label Text="CPU 类型" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsS7Plc}" />
+                                <Picker ItemsSource="{Binding S7CpuTypeOptions}" SelectedItem="{Binding CpuType}" IsVisible="{Binding IsS7Plc}" />
+                                <Label Text="超时（毫秒）" TextColor="#8AA0B5" FontSize="12" />
+                                <Entry Text="{Binding TimeoutMs}" Keyboard="Numeric" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
 
             <Label Text="MQTT 采集发布" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" />
             <Label Text="采集模式向所有已启用目标发布。账号与下方「订阅账号」分开，权限不同。"

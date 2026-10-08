@@ -41,8 +41,16 @@ public sealed class HistoryRecorder : IAsyncDisposable
 
     public async Task InitializeAsync()
     {
-        await _store.InitializeAsync().ConfigureAwait(false);
+        await ApplyStorageLocationAsync().ConfigureAwait(false);
         await PruneIfNeededAsync().ConfigureAwait(false);
+    }
+
+    public async Task ApplyStorageLocationAsync()
+    {
+        var (shard, legacy) = AppPaths.ResolveHistoryLocation(_settings.Current.HistoryDirectory);
+        _store.Relocate(shard, legacy);
+        await _store.InitializeAsync().ConfigureAwait(false);
+        _logger.LogInformation("历史数据目录 shard={Shard} legacy={Legacy}", shard, legacy);
     }
 
     void OnAcquisitionTagsUpdated(object? sender, IReadOnlyList<TagSnapshot> snapshots)
@@ -59,7 +67,7 @@ public sealed class HistoryRecorder : IAsyncDisposable
             DeviceId = settings.DeviceId,
             OperationMode = AppOperationMode.Acquisition,
             Quality = snapshots.All(snapshot => snapshot.Quality == "Good") ? "Good" : "Bad",
-            PlcHost = settings.Plc.Host,
+            PlcHost = PlcEndpointCatalog.DescribeHosts(settings),
             Simulator = settings.UseSimulator,
             PayloadJson = TruncatePayload(_acquisition.LastPayload),
             Tags = snapshots

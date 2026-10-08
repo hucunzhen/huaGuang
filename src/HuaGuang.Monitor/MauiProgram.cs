@@ -131,7 +131,6 @@ public static class MauiProgram
 		builder.Services.AddSingleton<IScannerInputMethodGuard, NoOpScannerInputMethodGuard>();
 #endif
 		builder.Services.AddSingleton<FullScreenService>();
-		builder.Services.AddSingleton(_ => new HistoryStore(AppPaths.HistoryDatabasePath));
 		builder.Services.AddSingleton<DashboardViewModel>();
 		builder.Services.AddTransient<DiagnosticsViewModel>();
 		builder.Services.AddSingleton<SettingsViewModel>();
@@ -200,6 +199,17 @@ public static class MauiProgram
 			{
 				startupLogger.LogWarning("{Error}", occupancyError);
 			}
+		}
+
+		try
+		{
+			var (historyShard, historyLegacy) = AppPaths.ResolveHistoryLocation(store.Current.HistoryDirectory);
+			Services.GetRequiredService<HistoryStore>().Relocate(historyShard, historyLegacy);
+			startupLogger.LogInformation("历史保存目录 {Shard}", historyShard);
+		}
+		catch (Exception ex)
+		{
+			startupLogger.LogWarning(ex, "应用历史保存目录失败，将使用默认目录");
 		}
 #if WINDOWS
 		if (MonitorProcessInstance.IsIsolated)

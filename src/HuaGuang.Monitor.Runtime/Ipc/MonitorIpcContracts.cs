@@ -21,6 +21,17 @@ public static class MonitorIpcConstants
     public static string CurrentServiceName => Services.MonitorProcessInstance.WindowsServiceName;
 }
 
+public readonly record struct MonitorIpcEndpoint(string PipeName, int TcpPort)
+{
+    public static MonitorIpcEndpoint Current =>
+        new(MonitorIpcConstants.CurrentPipeName, MonitorIpcConstants.CurrentTcpPort);
+
+    public static MonitorIpcEndpoint ForInstance(string instanceId) =>
+        new(
+            Services.MonitorProcessInstance.IpcPipeNameFor(instanceId),
+            Services.MonitorProcessInstance.IpcTcpPortFor(instanceId));
+}
+
 public enum MonitorIpcCommand
 {
     Ping,

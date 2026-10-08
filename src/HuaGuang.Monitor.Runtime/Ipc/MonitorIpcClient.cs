@@ -20,22 +20,41 @@ public sealed class MonitorIpcClient
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 
-    readonly TimeSpan _timeout;
+    static readonly Lock AvailabilityGate = new();
+    static DateTime _availabilityCheckedUtc;
+    static bool _availability;
 
-    public MonitorIpcClient(TimeSpan? timeout = null) =>
+    readonly TimeSpan _timeout;
+    readonly MonitorIpcEndpoint _endpoint;
+
+    public MonitorIpcClient(TimeSpan? timeout = null)
+        : this(MonitorIpcEndpoint.Current, timeout)
+    {
+    }
+
+    public MonitorIpcClient(MonitorIpcEndpoint endpoint, TimeSpan? timeout = null)
+    {
+        _endpoint = endpoint;
         _timeout = timeout ?? DefaultTimeout;
+    }
 
     public static bool WaitForServiceAvailable(TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
         {
-            if (IsServiceAvailable())
+            if (ProbeServiceAvailable())
             {
+                lock (AvailabilityGate)
+                {
+                    _availability = true;
+                    _availabilityCheckedUtc = DateTime.UtcNow;
+                }
+
                 return true;
             }
 
-            Thread.Sleep(500);
+            Thread.Sleep(200);
         }
 
         return IsServiceAvailable();
@@ -43,9 +62,28 @@ public sealed class MonitorIpcClient
 
     public static bool IsServiceAvailable()
     {
+        lock (AvailabilityGate)
+        {
+            if ((DateTime.UtcNow - _availabilityCheckedUtc).TotalMilliseconds < 750)
+            {
+                return _availability;
+            }
+        }
+
+        var available = ProbeServiceAvailable();
+        lock (AvailabilityGate)
+        {
+            _availability = available;
+            _availabilityCheckedUtc = DateTime.UtcNow;
+            return available;
+        }
+    }
+
+    static bool ProbeServiceAvailable()
+    {
         try
         {
-            var client = new MonitorIpcClient(TimeSpan.FromSeconds(2));
+            var client = new MonitorIpcClient(TimeSpan.FromMilliseconds(400));
             var response = client.SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Ping })
                 .GetAwaiter()
                 .GetResult();
@@ -145,7 +183,7 @@ public sealed class MonitorIpcClient
     {
         await using var pipe = new NamedPipeClientStream(
             ".",
-            MonitorIpcConstants.CurrentPipeName,
+            _endpoint.PipeName,
             PipeDirection.InOut,
             PipeOptions.Asynchronous);
 

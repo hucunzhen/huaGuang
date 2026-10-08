@@ -52,9 +52,11 @@ public sealed class MonitorProcessInstanceTests
         try
         {
             Assert.Equal("HuaGuangMonitor-acq-xianhe", MonitorProcessInstance.WindowsServiceName);
-            Assert.Equal("HuaGuang.Monitor.Runtime.v1.acq-xianhe", MonitorProcessInstance.IpcPipeName);
+            Assert.Equal("HuaGuangMonitor-acq-xianhe", MonitorProcessInstance.WindowsServiceNameFor("acq-xianhe"));
+            Assert.Equal("HuaGuang.Monitor.Runtime.v1.acq-xianhe", MonitorProcessInstance.IpcPipeNameFor("acq-xianhe"));
+            Assert.Equal(MonitorProcessInstance.IpcTcpPort, MonitorProcessInstance.IpcTcpPortFor("acq-xianhe"));
             Assert.NotEqual(18788, MonitorProcessInstance.IpcTcpPort);
-        Assert.Contains("--instance acq-xianhe", MonitorProcessInstance.FormatHostArguments(), StringComparison.Ordinal);
+            Assert.Contains("--instance acq-xianhe", MonitorProcessInstance.FormatHostArguments(), StringComparison.Ordinal);
             Assert.Contains("--mode acquisition", MonitorProcessInstance.FormatHostArguments(), StringComparison.Ordinal);
         }
         finally
@@ -96,5 +98,61 @@ public sealed class MonitorProcessInstanceTests
         {
             MonitorProcessInstance.ResetForTests(null);
         }
+    }
+
+    [Fact]
+    public void FormatHostArgumentsFor_does_not_need_process_identity()
+    {
+        var args = MonitorProcessInstance.FormatHostArgumentsFor(
+            "acq-huadi",
+            AppOperationMode.Acquisition,
+            "华迪热熔胶复合机");
+        Assert.Contains("--instance acq-huadi", args, StringComparison.Ordinal);
+        Assert.Contains("--line huadi", args, StringComparison.Ordinal);
+        Assert.Contains("--mode acquisition", args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Discovers_pingban_acquisition_host_from_line_settings()
+    {
+        var settings = new AppSettings
+        {
+            LineName = "平板复合机",
+            OperationMode = AppOperationMode.Acquisition,
+            StartWithWindows = true,
+            AutoStartAcquisition = true
+        };
+        Assert.True(InstanceHostProfileStore.TryCreateDiscoveredProfile(settings, out var profile));
+        Assert.Equal("acq-pingban", profile.InstanceId);
+        Assert.Equal("平板复合机", profile.LineName);
+        Assert.Equal(nameof(AppOperationMode.Acquisition), profile.OperationMode);
+        Assert.True(profile.AutoStart);
+    }
+
+    [Fact]
+    public void Discovers_subscribe_dashboard_host()
+    {
+        var settings = new AppSettings
+        {
+            LineName = "平板复合机",
+            OperationMode = AppOperationMode.Subscribe,
+            StartWithWindows = true,
+            AutoStartAcquisition = true
+        };
+        Assert.True(InstanceHostProfileStore.TryCreateDiscoveredProfile(settings, out var profile));
+        Assert.Equal("sub", profile.InstanceId);
+        Assert.Equal(nameof(AppOperationMode.Subscribe), profile.OperationMode);
+    }
+
+    [Fact]
+    public void Does_not_discover_when_boot_flags_off()
+    {
+        var settings = new AppSettings
+        {
+            LineName = "平板复合机",
+            StartWithWindows = false,
+            AutoStartAcquisition = true
+        };
+        Assert.False(InstanceHostProfileStore.TryCreateDiscoveredProfile(settings, out _));
     }
 }

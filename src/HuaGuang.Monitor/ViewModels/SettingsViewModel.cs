@@ -22,6 +22,7 @@ public partial class SettingsViewModel : ObservableObject
     readonly DashboardViewModel _dashboard;
     readonly ILogger<SettingsViewModel> _logger;
     readonly ILogExportLocationService _logExport;
+    readonly HistoryRecorder _history;
     bool _isApplyingLine;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanChangeLinePicker))]
@@ -37,6 +38,7 @@ public partial class SettingsViewModel : ObservableObject
         IDesktopShortcutService shortcuts,
         DashboardViewModel dashboard,
         ILogExportLocationService logExport,
+        HistoryRecorder history,
         ILogger<SettingsViewModel> logger)
     {
         _store = store;
@@ -46,8 +48,10 @@ public partial class SettingsViewModel : ObservableObject
         _shortcuts = shortcuts;
         _dashboard = dashboard;
         _logExport = logExport;
+        _history = history;
         _logger = logger;
         MqttEndpoints.CollectionChanged += OnMqttEndpointsCollectionChanged;
+        PlcEndpoints.CollectionChanged += OnPlcEndpointsCollectionChanged;
         _isApplyingLine = true;
         LoadFrom(_store.Current);
         SelectedLineName = string.IsNullOrWhiteSpace(_store.Current.LineName)
@@ -65,6 +69,7 @@ public partial class SettingsViewModel : ObservableObject
     public string[] OperationModes { get; } = ["采集模式", "订阅模式"];
     public ObservableCollection<string> SubscribeTopics { get; } = [];
     public ObservableCollection<MqttEndpointViewModel> MqttEndpoints { get; } = [];
+    public ObservableCollection<PlcEndpointViewModel> PlcEndpoints { get; } = [];
     public MqttEndpointViewModel SubscribeMqtt { get; } = new()
     {
         Name = "订阅账号",
@@ -123,10 +128,17 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] string historyRetentionDays = "1";
     [ObservableProperty] string logExportDirectory = string.Empty;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HistoryDirectoryHint))]
+    string historyDirectory = string.Empty;
+
     public string LogExportDirectoryHint =>
         "留空时打包会弹出系统目录选择；Android 请在侧栏选 USB 存储或 SD 卡。";
 
-    public bool StartupSupported => _startup.IsSupported;
+    public string HistoryDirectoryHint =>
+        string.IsNullOrWhiteSpace(HistoryDirectory)
+            ? $"留空则保存到：{AppPaths.HistoryDirectory}（按日 yyyy-MM-dd.db）。更改目录不会自动搬迁旧文件。"
+            : "按日写入所选目录（yyyy-MM-dd.db）。SQLite 需要本机文件夹路径；Android 请填 /storage/…，不要用文档树 URI。更改后不会自动搬迁旧文件。";
     public bool ShortcutsSupported => _shortcuts.IsSupported;
     public ObservableCollection<DesktopShortcutItemViewModel> ShortcutItems { get; } = [];
     public bool IsSubscribeSettings => SelectedOperationMode == "订阅模式";
@@ -165,36 +177,7 @@ public partial class SettingsViewModel : ObservableObject
         OccupancyWarning = string.Empty;
     }
 
-    [ObservableProperty] string selectedPlcProtocol = "Modbus TCP";
-    [ObservableProperty] string plcModel = "XD5E-60T10";
-    [ObservableProperty] string plcHost = "192.168.6.10";
-    [ObservableProperty] string plcPort = "502";
-    [ObservableProperty] string station = "1";
-    [ObservableProperty] string plcRack = "0";
-    [ObservableProperty] string plcSlot = "1";
-    [ObservableProperty] string plcCpuType = "S71200";
-    [ObservableProperty] string plcTimeoutMs = "2000";
-
-    public string[] PlcProtocolOptions { get; } = ["Modbus TCP", "西门子 S7"];
-    public string[] S7CpuTypeOptions { get; } = ["S71200", "S71500", "S7300", "S7400", "S7200Smart"];
-    public bool IsS7Plc => SelectedPlcProtocol == "西门子 S7";
-    public bool IsModbusPlc => !IsS7Plc;
-    public string PlcSectionTitle => PlcSettingsHelper.PlcSectionTitle(new PlcSettings
-    {
-        Protocol = IsS7Plc ? PlcProtocol.S7 : PlcProtocol.ModbusTcp,
-        Model = PlcModel,
-        CpuType = PlcCpuType
-    });
-
-    partial void OnSelectedPlcProtocolChanged(string value)
-    {
-        OnPropertyChanged(nameof(IsS7Plc));
-        OnPropertyChanged(nameof(IsModbusPlc));
-        OnPropertyChanged(nameof(PlcSectionTitle));
-    }
-
-    partial void OnPlcModelChanged(string value) => OnPropertyChanged(nameof(PlcSectionTitle));
-    partial void OnPlcCpuTypeChanged(string value) => OnPropertyChanged(nameof(PlcSectionTitle));
+    public string PlcSectionTitle => "PLC 连接（可添加多台，协议可不同）";
 
     [ObservableProperty] string statusMessage = string.Empty;
 
@@ -439,6 +422,33 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
+    async Task PickHistoryDirectoryAsync()
+    {
+        try
+        {
+            var pick = await _logExport.PickDirectoryAsync(HistoryDirectory).ConfigureAwait(false);
+            if (pick is null)
+            {
+                StatusMessage = "未选择目录。";
+                return;
+            }
+
+            if (!AppPaths.IsUsableHistoryDirectory(pick.SettingsStorageValue))
+            {
+                StatusMessage = "历史库需要本机文件夹路径。Android 请手填例如 /storage/XXXX-XXXX/Data，不要使用系统文档树。";
+                return;
+            }
+
+            HistoryDirectory = pick.SettingsStorageValue;
+            StatusMessage = $"已选择历史目录：{pick.DisplayPath}。点「保存设置」后新数据写入该目录。";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"选择目录失败：{ex.Message}";
+        }
+    }
+
+    [RelayCommand]
     async Task ImportLineExcelFromFileAsync()
     {
         if (IsServiceRunning())
@@ -504,7 +514,7 @@ public partial class SettingsViewModel : ObservableObject
         settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
         settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
         settings.UseSimulator = UseSimulator;
-        ApplyPlcSettingsTo(settings);
+        ApplyPlcEndpointsToSettings(settings);
         ApplyMqttEndpointsToSettings(settings);
         ApplySubscribeMqttToSettings(settings);
         return settings;
@@ -641,28 +651,108 @@ public partial class SettingsViewModel : ObservableObject
         ApplyMqttEndpointsToSettings(_store.Current);
     }
 
-    void ApplyPlcSettingsTo(AppSettings settings)
+    [RelayCommand]
+    void AddPlcEndpoint()
     {
-        settings.Plc.Protocol = SelectedPlcProtocol == "西门子 S7" ? PlcProtocol.S7 : PlcProtocol.ModbusTcp;
-        settings.Plc.Model = string.IsNullOrWhiteSpace(PlcModel)
-            ? settings.Plc.Protocol == PlcProtocol.S7 ? "S7-1200" : "XD5E-60T10"
-            : PlcModel.Trim();
-        settings.Plc.Host = PlcHost.Trim();
-        settings.Plc.Port = ParseInt(
-            PlcPort,
-            settings.Plc.Protocol == PlcProtocol.S7 ? 102 : 502,
-            1,
-            65535);
-        settings.Plc.Station = (byte)ParseInt(Station, 1, 1, 247);
-        settings.Plc.CpuType = string.IsNullOrWhiteSpace(PlcCpuType) ? "S71200" : PlcCpuType.Trim();
-        settings.Plc.Rack = ParseInt(PlcRack, 0, 0, 7);
-        settings.Plc.Slot = ParseInt(
-            PlcSlot,
-            PlcSettingsHelper.RecommendedDefaultSlot(settings.Plc.CpuType),
-            0,
-            31);
-        settings.Plc.TimeoutMs = ParseInt(PlcTimeoutMs, 2000, 200, 10_000);
-        PlcSettingsHelper.Normalize(settings.Plc);
+        PlcEndpoints.Add(new PlcEndpointViewModel
+        {
+            Name = $"PLC {PlcEndpoints.Count + 1}"
+        });
+    }
+
+    [RelayCommand]
+    void RemovePlcEndpoint(PlcEndpointViewModel? endpoint)
+    {
+        if (endpoint is null || !PlcEndpoints.Contains(endpoint))
+        {
+            return;
+        }
+
+        if (PlcEndpoints.Count <= 1)
+        {
+            StatusMessage = "至少保留一台 PLC。";
+            return;
+        }
+
+        PlcEndpoints.Remove(endpoint);
+        ReassignTagsAfterPlcRemoved(endpoint.Id);
+    }
+
+    bool TryValidatePlcSettings(out string message)
+    {
+        if (PlcEndpoints.Count == 0)
+        {
+            message = "请至少添加一台 PLC。";
+            return false;
+        }
+
+        foreach (var endpoint in PlcEndpoints.Where(item => item.Enabled))
+        {
+            if (string.IsNullOrWhiteSpace(endpoint.Host))
+            {
+                message = $"请填写 PLC「{endpoint.Name}」的 IP 地址。";
+                return false;
+            }
+        }
+
+        if (!PlcEndpoints.Any(item => item.Enabled))
+        {
+            message = "请至少启用一台 PLC。";
+            return false;
+        }
+
+        message = string.Empty;
+        return true;
+    }
+
+    void ApplyPlcEndpointsToSettings(AppSettings settings)
+    {
+        settings.PlcEndpoints = PlcEndpoints.Select(endpoint => endpoint.ToModel()).ToList();
+        PlcEndpointCatalog.Normalize(settings);
+    }
+
+    void ReassignTagsAfterPlcRemoved(string removedId)
+    {
+        ApplyPlcEndpointsToSettings(_store.Current);
+        var primary = PlcEndpointCatalog.GetPrimary(_store.Current);
+        foreach (var tag in _store.Current.Tags.Where(tag => tag.IsPlc && tag.PlcId == removedId))
+        {
+            tag.PlcId = primary.Id;
+        }
+    }
+
+    void OnPlcEndpointsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (PlcEndpointViewModel endpoint in e.OldItems)
+            {
+                endpoint.PropertyChanged -= OnPlcEndpointPropertyChanged;
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (PlcEndpointViewModel endpoint in e.NewItems)
+            {
+                endpoint.PropertyChanged += OnPlcEndpointPropertyChanged;
+            }
+        }
+
+        SyncPlcEndpointsToStore();
+    }
+
+    void OnPlcEndpointPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+        SyncPlcEndpointsToStore();
+
+    void SyncPlcEndpointsToStore()
+    {
+        if (_isApplyingLine || IsSwitchingLine || _isLoadingSettings)
+        {
+            return;
+        }
+
+        ApplyPlcEndpointsToSettings(_store.Current);
     }
 
     [RelayCommand]
@@ -704,7 +794,21 @@ public partial class SettingsViewModel : ObservableObject
             settings.EnableHistoryRecording = EnableHistoryRecording;
             settings.HistoryRetentionDays = ParseInt(HistoryRetentionDays, 1, 1, 365);
             settings.LogExportDirectory = LogExportDirectory.Trim();
-            ApplyPlcSettingsTo(settings);
+            if (!TryValidatePlcSettings(out var plcMessage))
+            {
+                StatusMessage = plcMessage;
+                return;
+            }
+
+            ApplyPlcEndpointsToSettings(settings);
+            var historyDir = HistoryDirectory.Trim();
+            if (!string.IsNullOrEmpty(historyDir) && !AppPaths.IsUsableHistoryDirectory(historyDir))
+            {
+                StatusMessage = "历史数据目录必须是本机文件夹路径，不能使用 Android 文档树 URI。";
+                return;
+            }
+
+            settings.HistoryDirectory = historyDir;
             ApplyMqttEndpointsToSettings(settings);
             ApplySubscribeMqttToSettings(settings);
 
@@ -739,6 +843,18 @@ public partial class SettingsViewModel : ObservableObject
             await _store.SaveAsync(settings);
             await NotifyRuntimeReloadAsync();
             await MainThread.InvokeOnMainThreadAsync(() => _dashboard.Reload());
+            try
+            {
+                var (shard, _) = AppPaths.ResolveHistoryLocation(settings.HistoryDirectory);
+                Directory.CreateDirectory(shard);
+                await _history.ApplyStorageLocationAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"设置已保存，但历史目录不可用：{ex.Message}";
+                return;
+            }
+
             StatusMessage = running
                 ? "设置已保存。部分项需停止采集/订阅后重新启动才会生效。"
                 : MonitorProcessInstance.IsIsolated
@@ -791,16 +907,18 @@ public partial class SettingsViewModel : ObservableObject
         EnableHistoryRecording = settings.EnableHistoryRecording;
         HistoryRetentionDays = settings.HistoryRetentionDays.ToString();
         LogExportDirectory = settings.LogExportDirectory ?? string.Empty;
-        PlcSettingsHelper.Normalize(settings.Plc);
-        SelectedPlcProtocol = PlcSettingsHelper.FormatProtocol(settings.Plc.Protocol);
-        PlcModel = settings.Plc.Model;
-        PlcHost = settings.Plc.Host;
-        PlcPort = settings.Plc.Port.ToString();
-        Station = settings.Plc.Station.ToString();
-        PlcRack = settings.Plc.Rack.ToString();
-        PlcSlot = settings.Plc.Slot.ToString();
-        PlcCpuType = settings.Plc.CpuType;
-        PlcTimeoutMs = settings.Plc.TimeoutMs.ToString();
+        HistoryDirectory = settings.HistoryDirectory ?? string.Empty;
+        PlcEndpointCatalog.Normalize(settings);
+        PlcEndpoints.Clear();
+        foreach (var endpoint in settings.PlcEndpoints)
+        {
+            PlcEndpoints.Add(PlcEndpointViewModel.FromModel(endpoint));
+        }
+
+        if (PlcEndpoints.Count == 0)
+        {
+            PlcEndpoints.Add(PlcEndpointViewModel.FromModel(PlcEndpoint.FromSettings(settings.Plc, "PLC 1")));
+        }
         MqttEndpointCatalog.Normalize(settings);
         MqttEndpoints.Clear();
         foreach (var endpoint in settings.MqttEndpoints)

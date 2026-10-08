@@ -14,13 +14,14 @@ public static class LineExcelConfigService
     public const string ConfigSheetName = "配置";
     public const string MqttSheetName = "MQTT报文";
     public const string MqttEndpointsSheetName = "MQTT目标";
+    public const string PlcEndpointsSheetName = "PLC目标";
     public const string FieldMappingSheetName = MqttFieldMappingImporter.FieldMappingSheetName;
     public const string TagsSheetName = "点表";
     public const string DisplayCategorySheetName = "显示分组说明";
 
     static readonly string[] TagHeaders =
     [
-        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "显示分组", "扫码输入", "表达式"
+        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "显示分组", "扫码输入", "表达式", "所属PLC"
     ];
 
     static readonly (string Key, string Label, string Hint)[] MqttPayloadRows =
@@ -77,6 +78,7 @@ public static class LineExcelConfigService
         ("AutoStartAcquisition", "启动后自动运行"),
         ("EnableHistoryRecording", "记录历史数据"),
         ("HistoryRetentionDays", "历史保留天数"),
+        ("HistoryDirectory", "历史数据目录"),
         ("LogExportDirectory", "日志打包目录"),
     ];
 
@@ -89,11 +91,13 @@ public static class LineExcelConfigService
         using var workbook = new XLWorkbook();
         MqttEndpointCatalog.PrepareForExport(settings);
         MqttEndpointCatalog.Normalize(settings);
+        PlcEndpointCatalog.PrepareForExport(settings);
         WriteConfigSheet(workbook, settings);
+        WritePlcEndpointsSheet(workbook, settings);
         WriteMqttEndpointsSheet(workbook, settings);
         WriteMqttPayloadSheet(workbook, settings.MqttPayload);
         WriteFieldMappingSheet(workbook, settings.Tags);
-        WriteTagsSheet(workbook, settings.Tags);
+        WriteTagsSheet(workbook, settings);
         WriteDisplayCategorySheet(workbook);
         workbook.SaveAs(filePath);
     }
@@ -179,6 +183,8 @@ public static class LineExcelConfigService
         ValidateWorkbookFormat(workbook);
         settings.ConfigLoadWarnings.Clear();
         ApplyConfigSheet(settings, workbook, expectedLineName);
+        ApplyPlcEndpointsSheet(settings, workbook);
+        PlcEndpointCatalog.Normalize(settings);
         var hasSubscribeAccount = ConfigSheetHasSubscribeMqtt(workbook);
         ApplyMqttEndpointsSheet(settings, workbook);
         MqttEndpointCatalog.Normalize(settings);
@@ -188,7 +194,7 @@ public static class LineExcelConfigService
             MqttSubscribeAccount.Normalize(settings);
         }
         ApplyMqttPayloadSheet(settings, workbook);
-        settings.Tags = ReadTagsSheet(workbook, settings.Plc.Protocol, settings.ConfigLoadWarnings);
+        settings.Tags = ReadTagsSheet(workbook, settings, settings.ConfigLoadWarnings);
         PlcTagIdentity.AssignStableIds(settings);
         ApplyFieldMappings(settings, workbook);
     }
@@ -521,7 +527,9 @@ public static class LineExcelConfigService
         if (workbook.Worksheets.TryGetWorksheet(TagsSheetName, out _))
         {
             var protocol = PlcSettingsHelper.ParseProtocol(GetString(map, "PLC协议", string.Empty), GetString(map, "PLC型号", string.Empty));
-            settings.Tags = ReadTagsSheet(workbook, protocol, settings.ConfigLoadWarnings);
+            settings.Plc.Protocol = protocol;
+            PlcEndpointCatalog.Normalize(settings);
+            settings.Tags = ReadTagsSheet(workbook, settings, settings.ConfigLoadWarnings);
         }
 
         ApplyFieldMappings(settings, workbook);
@@ -767,12 +775,18 @@ public static class LineExcelConfigService
         sheet.Cell(1, 3).Value = "说明";
         sheet.Row(1).Style.Font.Bold = true;
 
-        var values = BuildConfigMap(settings);
+            var values = BuildConfigMap(settings);
         var row = 2;
         foreach (var (key, label) in ConfigRows)
         {
             sheet.Cell(row, 1).Value = label;
-            sheet.Cell(row, 2).Value = values[key];
+            var valueCell = sheet.Cell(row, 2);
+            if (key is "HistoryDirectory" or "LogExportDirectory")
+            {
+                valueCell.Style.NumberFormat.Format = "@";
+            }
+
+            valueCell.Value = values[key];
             sheet.Cell(row, 3).Value = key;
             row++;
         }
@@ -848,6 +862,84 @@ public static class LineExcelConfigService
         }
 
         sheet.Columns(1, 11).AdjustToContents();
+    }
+
+    static void WritePlcEndpointsSheet(XLWorkbook workbook, AppSettings settings)
+    {
+        var sheet = workbook.Worksheets.Add(PlcEndpointsSheetName);
+        sheet.Cell(1, 1).Value = "名称";
+        sheet.Cell(1, 2).Value = "启用";
+        sheet.Cell(1, 3).Value = "协议";
+        sheet.Cell(1, 4).Value = "型号";
+        sheet.Cell(1, 5).Value = "IP";
+        sheet.Cell(1, 6).Value = "端口";
+        sheet.Cell(1, 7).Value = "站号";
+        sheet.Cell(1, 8).Value = "机架号";
+        sheet.Cell(1, 9).Value = "槽位";
+        sheet.Cell(1, 10).Value = "CPU类型";
+        sheet.Cell(1, 11).Value = "超时毫秒";
+        sheet.Cell(1, 12).Value = "ID";
+        sheet.Row(1).Style.Font.Bold = true;
+
+        var row = 2;
+        foreach (var endpoint in settings.PlcEndpoints)
+        {
+            sheet.Cell(row, 1).Value = endpoint.Name;
+            sheet.Cell(row, 2).Value = endpoint.Enabled ? "是" : "否";
+            sheet.Cell(row, 3).Value = PlcSettingsHelper.FormatProtocol(endpoint.Protocol);
+            sheet.Cell(row, 4).Value = endpoint.Model;
+            sheet.Cell(row, 5).Value = endpoint.Host;
+            sheet.Cell(row, 6).Value = endpoint.Port;
+            sheet.Cell(row, 7).Value = endpoint.Station;
+            sheet.Cell(row, 8).Value = endpoint.Rack;
+            sheet.Cell(row, 9).Value = endpoint.Slot;
+            sheet.Cell(row, 10).Value = endpoint.CpuType;
+            sheet.Cell(row, 11).Value = endpoint.TimeoutMs;
+            sheet.Cell(row, 12).Value = endpoint.Id;
+            row++;
+        }
+
+        sheet.Columns(1, 12).AdjustToContents();
+    }
+
+    static void ApplyPlcEndpointsSheet(AppSettings settings, XLWorkbook workbook)
+    {
+        if (!workbook.Worksheets.TryGetWorksheet(PlcEndpointsSheetName, out var sheet))
+        {
+            return;
+        }
+
+        var endpoints = new List<PlcEndpoint>();
+        foreach (var row in sheet.RowsUsed().Skip(1))
+        {
+            var host = row.Cell(5).GetString().Trim();
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                continue;
+            }
+
+            var model = row.Cell(4).GetString().Trim();
+            endpoints.Add(new PlcEndpoint
+            {
+                Id = row.Cell(12).GetString().Trim(),
+                Name = row.Cell(1).GetString().Trim(),
+                Enabled = ParseBoolText(row.Cell(2).GetString(), true),
+                Protocol = PlcSettingsHelper.ParseProtocol(row.Cell(3).GetString(), model),
+                Model = model,
+                Host = host,
+                Port = int.TryParse(ReadCellText(row.Cell(6)), out var port) ? port : 502,
+                Station = byte.TryParse(ReadCellText(row.Cell(7)), out var station) ? station : (byte)1,
+                Rack = int.TryParse(ReadCellText(row.Cell(8)), out var rack) ? rack : 0,
+                Slot = int.TryParse(ReadCellText(row.Cell(9)), out var slot) ? slot : 0,
+                CpuType = row.Cell(10).GetString().Trim(),
+                TimeoutMs = int.TryParse(ReadCellText(row.Cell(11)), out var timeout) ? timeout : 2000
+            });
+        }
+
+        if (endpoints.Count > 0)
+        {
+            settings.PlcEndpoints = endpoints;
+        }
     }
 
     static void ApplyMqttEndpointsSheet(AppSettings settings, XLWorkbook workbook)
@@ -950,10 +1042,11 @@ public static class LineExcelConfigService
         ["AutoStartAcquisition"] = settings.AutoStartAcquisition ? "是" : "否",
         ["EnableHistoryRecording"] = settings.EnableHistoryRecording ? "是" : "否",
         ["HistoryRetentionDays"] = settings.HistoryRetentionDays.ToString(),
+        ["HistoryDirectory"] = settings.HistoryDirectory ?? string.Empty,
         ["LogExportDirectory"] = settings.LogExportDirectory ?? string.Empty,
     };
 
-    static void WriteTagsSheet(XLWorkbook workbook, IReadOnlyList<PlcTag> tags)
+    static void WriteTagsSheet(XLWorkbook workbook, AppSettings settings)
     {
         var sheet = workbook.Worksheets.Add(TagsSheetName);
         for (var i = 0; i < TagHeaders.Length; i++)
@@ -964,7 +1057,7 @@ public static class LineExcelConfigService
         sheet.Row(1).Style.Font.Bold = true;
 
         var row = 2;
-        foreach (var tag in tags)
+        foreach (var tag in settings.Tags)
         {
             sheet.Cell(row, 1).Value = tag.Name;
             sheet.Cell(row, 2).Value = FormatTagSource(tag.Source);
@@ -981,6 +1074,9 @@ public static class LineExcelConfigService
                 tag.DisplayCategory ?? TagDisplayCategoryHelper.InferCategory(tag));
             sheet.Cell(row, 13).Value = tag.UseScannerInput ? "是" : "否";
             sheet.Cell(row, 14).Value = tag.IsComputed ? tag.Expression : string.Empty;
+            sheet.Cell(row, 15).Value = tag.IsPlc
+                ? PlcEndpointCatalog.Resolve(settings, tag.PlcId).Name
+                : string.Empty;
             row++;
         }
 
@@ -1091,6 +1187,7 @@ public static class LineExcelConfigService
         settings.AutoStartAcquisition = GetBool(map, "启动后自动运行", settings.AutoStartAcquisition);
         settings.EnableHistoryRecording = GetBool(map, "记录历史数据", settings.EnableHistoryRecording);
         settings.HistoryRetentionDays = GetInt(map, "历史保留天数", settings.HistoryRetentionDays);
+        settings.HistoryDirectory = GetString(map, "历史数据目录", settings.HistoryDirectory);
         settings.LogExportDirectory = GetString(map, "日志打包目录", settings.LogExportDirectory);
 
         ApplySubscribeTopics(settings, map);
@@ -1212,6 +1309,7 @@ public static class LineExcelConfigService
         settings.AutoStartAcquisition = preserveFrom.AutoStartAcquisition;
         settings.EnableHistoryRecording = preserveFrom.EnableHistoryRecording;
         settings.HistoryRetentionDays = preserveFrom.HistoryRetentionDays;
+        settings.HistoryDirectory = preserveFrom.HistoryDirectory;
         settings.LogExportDirectory = preserveFrom.LogExportDirectory;
     }
 
@@ -1243,7 +1341,7 @@ public static class LineExcelConfigService
         settings.SubscribeTopic = topics[0];
     }
 
-    static List<PlcTag> ReadTagsSheet(XLWorkbook workbook, PlcProtocol protocol, List<string> loadWarnings)
+    static List<PlcTag> ReadTagsSheet(XLWorkbook workbook, AppSettings settings, List<string> loadWarnings)
     {
         if (!workbook.Worksheets.TryGetWorksheet(TagsSheetName, out var sheet))
         {
@@ -1284,6 +1382,8 @@ public static class LineExcelConfigService
                 ? sheet.Cell(row, expressionColumn).GetString().Trim()
                 : string.Empty;
 
+            var plcColumn = FindTagColumn(sheet, "所属PLC");
+            var plcRef = plcColumn > 0 ? sheet.Cell(row, plcColumn).GetString().Trim() : string.Empty;
             var tag = new PlcTag
             {
                 Name = name,
@@ -1297,7 +1397,8 @@ public static class LineExcelConfigService
                 DisplayPrecision = precision,
                 Scale = scale,
                 Offset = offset,
-                Expression = source == TagSource.Computed ? expression : string.Empty
+                Expression = source == TagSource.Computed ? expression : string.Empty,
+                PlcId = plcRef
             };
 
             if (displayCategoryColumn > 0)
@@ -1321,7 +1422,14 @@ public static class LineExcelConfigService
 
             if (tag.IsPlc)
             {
-                if (!PlcAddressMapper.TryApplyTo(tag, protocol, out var addressError))
+                var endpoint = PlcEndpointCatalog.Resolve(settings, tag.PlcId);
+                tag.PlcId = endpoint.Id;
+                if (!endpoint.Enabled)
+                {
+                    tag.Enabled = false;
+                    loadWarnings.Add($"点位「{tag.Name}」所属 PLC「{endpoint.Name}」已禁用，点位已禁用。");
+                }
+                else if (!PlcAddressMapper.TryApplyTo(tag, endpoint.Protocol, out var addressError))
                 {
                     tag.Enabled = false;
                     loadWarnings.Add($"点位「{tag.Name}」地址「{tag.XinjeAddress}」已禁用：{addressError}");

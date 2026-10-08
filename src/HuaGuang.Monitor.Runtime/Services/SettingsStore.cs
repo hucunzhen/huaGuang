@@ -101,9 +101,11 @@ public sealed class SettingsStore
             templateFilePath: null);
 
         MqttEndpointCatalog.Normalize(Current);
+        PlcEndpointCatalog.Normalize(Current);
         _excelOperationMode = Current.OperationMode;
         _excelStartWithWindows = Current.StartWithWindows;
         ApplyInstanceOverlay();
+        ConfirmIsolatedSubscribeLine();
         LastLoadError = null;
         _logger.LogInformation(
             "配置已加载 line={LineName} mode={Mode} excel={ExcelPath} plc={Plc} mqtt={Mqtt} mqttTargets={TargetCount}",
@@ -158,6 +160,23 @@ public sealed class SettingsStore
         {
             Current.OperationMode = commandMode;
         }
+    }
+
+    /// <summary>
+    /// 订阅大屏快捷方式没有 --line，也没有「当前产线.txt」。
+    /// 若仍视为未选产线，首屏会 DisplayAlert 并在 WinUI XamlRoot 未就绪时把进程打崩。
+    /// </summary>
+    void ConfirmIsolatedSubscribeLine()
+    {
+        if (!MonitorProcessInstance.IsIsolated
+            || Current.OperationMode != AppOperationMode.Subscribe
+            || LineConfigPaths.HasConfirmedActiveLine()
+            || string.IsNullOrWhiteSpace(Current.LineName))
+        {
+            return;
+        }
+
+        LineConfigPaths.WriteActiveLineName(Current.LineName);
     }
 
     public Task SaveAsync(AppSettings settings) =>

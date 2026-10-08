@@ -14,6 +14,7 @@ public sealed class WatchdogSupervisor
     readonly Func<bool>? _shouldWatchUi;
     DateTimeOffset _lastUiRestartUtc = DateTimeOffset.MinValue;
     DateTimeOffset _lastAcquisitionServiceRestartUtc = DateTimeOffset.MinValue;
+    readonly Dictionary<string, DateTimeOffset> _lastInstanceRestartUtc = new(StringComparer.OrdinalIgnoreCase);
 
     public WatchdogSupervisor(
         SettingsStore settings,
@@ -35,15 +36,23 @@ public sealed class WatchdogSupervisor
             return;
         }
 
-        if (options.ProtectAcquisitionService
-            && !InstanceHostProfileStore.HasAutoStartInstance())
+        if (options.ProtectAcquisitionService)
         {
             await EnsureAcquisitionWindowsServiceAsync(options, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (options.ProtectIsolatedInstances)
+        {
+            await EnsureIsolatedAutoStartHostsAsync(options, cancellationToken).ConfigureAwait(false);
         }
 
         if (options.EnsureAcquisitionRunning)
         {
             await EnsureAcquisitionOrSubscribeRunningAsync(cancellationToken).ConfigureAwait(false);
+            if (options.ProtectIsolatedInstances)
+            {
+                await EnsureIsolatedAcquisitionRunningAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
 
         if (options.ProtectUi)
@@ -106,7 +115,8 @@ public sealed class WatchdogSupervisor
             return;
         }
 
-        if (!MonitorProcessInstance.IsIsolated && InstanceHostProfileStore.HasAutoStartInstance())
+        if (!MonitorProcessInstance.IsIsolated
+            && InstanceHostProfileStore.HasAutoStartFor(_settings.Current.LineName, _settings.Current.OperationMode))
         {
             return;
         }
@@ -164,6 +174,203 @@ public sealed class WatchdogSupervisor
         {
             _logger.LogWarning(ex, "IPC Start 异常");
         }
+    }
+
+    async Task EnsureIsolatedAutoStartHostsAsync(WatchdogOptions options, CancellationToken cancellationToken)
+    {
+        foreach (var profile in InstanceHostProfileStore.ListAutoStart())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!MonitorProcessInstance.TrySanitize(profile.InstanceId, out var instanceId, out _))
+            {
+                continue;
+            }
+
+            var serviceName = MonitorProcessInstance.WindowsServiceNameFor(instanceId);
+            if (IsWindowsServiceRunning(serviceName))
+            {
+                continue;
+            }
+
+            if (await IsInstanceIpcAvailableAsync(instanceId, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            if (!IsCooldownElapsed(GetLastInstanceRestart(instanceId), options.RestartCooldownSeconds))
+            {
+                continue;
+            }
+
+            var started = false;
+            if (IsWindowsServiceInstalled(serviceName))
+            {
+                _logger.LogWarning("独立实例服务未运行，尝试启动 {ServiceName}", serviceName);
+                WatchdogDiagLog.Write($"独立实例服务未运行，尝试启动 {serviceName}");
+                started = TryStartWindowsService(serviceName);
+            }
+            else
+            {
+                var args = FormatIsolatedHostArguments(profile, instanceId);
+                _logger.LogWarning("独立实例无 Windows 服务，尝试拉起进程 instance={Instance} args={Args}", instanceId, args);
+                WatchdogDiagLog.Write($"独立实例无服务，拉起进程 {instanceId} {args}");
+                started = TryStartIsolatedHostProcess(args);
+            }
+
+            if (started)
+            {
+                _lastInstanceRestartUtc[instanceId] = DateTimeOffset.UtcNow;
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    async Task EnsureIsolatedAcquisitionRunningAsync(CancellationToken cancellationToken)
+    {
+        foreach (var profile in InstanceHostProfileStore.ListAutoStart())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!MonitorProcessInstance.TrySanitize(profile.InstanceId, out var instanceId, out _))
+            {
+                continue;
+            }
+
+            var endpoint = MonitorIpcEndpoint.ForInstance(instanceId);
+            var client = new MonitorIpcClient(endpoint, MonitorIpcClient.DefaultTimeout);
+            MonitorIpcResponse statusResponse;
+            try
+            {
+                statusResponse = await client.SendAsync(
+                    new MonitorIpcRequest { Command = MonitorIpcCommand.GetStatus },
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "独立实例 GetStatus 失败 instance={Instance}", instanceId);
+                continue;
+            }
+
+            if (!statusResponse.Success || statusResponse.State?.IsRunning == true)
+            {
+                continue;
+            }
+
+            if (statusResponse.State?.OperatorStopRequested == true)
+            {
+                continue;
+            }
+
+            var mode = ResolveIsolatedMode(profile, instanceId);
+            _logger.LogWarning(
+                "独立实例采集/订阅未运行，尝试 IPC Start instance={Instance} mode={Mode}",
+                instanceId,
+                mode);
+            try
+            {
+                var startResponse = await client.SendAsync(
+                    new MonitorIpcRequest
+                    {
+                        Command = MonitorIpcCommand.Start,
+                        OperationMode = mode.ToString()
+                    },
+                    MonitorIpcClient.CommandTimeout,
+                    cancellationToken).ConfigureAwait(false);
+                if (!startResponse.Success)
+                {
+                    _logger.LogWarning(
+                        "独立实例 IPC Start 失败 instance={Instance} error={Error}",
+                        instanceId,
+                        startResponse.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "独立实例 IPC Start 异常 instance={Instance}", instanceId);
+            }
+        }
+    }
+
+    static async Task<bool> IsInstanceIpcAvailableAsync(string instanceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var client = new MonitorIpcClient(MonitorIpcEndpoint.ForInstance(instanceId), TimeSpan.FromSeconds(2));
+            var response = await client.SendAsync(
+                new MonitorIpcRequest { Command = MonitorIpcCommand.Ping },
+                cancellationToken).ConfigureAwait(false);
+            return response.Success;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    DateTimeOffset GetLastInstanceRestart(string instanceId) =>
+        _lastInstanceRestartUtc.TryGetValue(instanceId, out var utc) ? utc : DateTimeOffset.MinValue;
+
+    static string FormatIsolatedHostArguments(InstanceHostProfile profile, string instanceId) =>
+        MonitorProcessInstance.FormatHostArgumentsFor(
+            instanceId,
+            ResolveIsolatedMode(profile, instanceId),
+            profile.LineName);
+
+    static AppOperationMode ResolveIsolatedMode(InstanceHostProfile profile, string instanceId)
+    {
+        if (Enum.TryParse(profile.OperationMode, ignoreCase: true, out AppOperationMode mode))
+        {
+            return mode;
+        }
+
+        return string.Equals(instanceId, "sub", StringComparison.OrdinalIgnoreCase)
+            ? AppOperationMode.Subscribe
+            : AppOperationMode.Acquisition;
+    }
+
+    bool TryStartIsolatedHostProcess(string arguments)
+    {
+        var exe = ResolveAcquisitionServiceExe();
+        if (exe is null)
+        {
+            _logger.LogWarning("未找到独立实例后台程序");
+            return false;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = arguments,
+                WorkingDirectory = Path.GetDirectoryName(exe) ?? _installRoot,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "拉起独立实例进程失败 exe={Exe} args={Args}", exe, arguments);
+            return false;
+        }
+    }
+
+    string? ResolveAcquisitionServiceExe()
+    {
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(_installRoot, "service", $"{WatchdogConstants.AcquisitionProcessName}.exe"),
+                     Path.Combine(_installRoot, $"{WatchdogConstants.AcquisitionProcessName}.exe")
+                 })
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     void EnsureUiProcess(WatchdogOptions options)
@@ -378,6 +585,42 @@ public sealed class WatchdogSupervisor
             });
             process?.WaitForExit(15_000);
             return process?.ExitCode == 0 || IsWindowsServiceRunning(serviceName);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static bool IsWindowsServiceInstalled(string serviceName)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "sc.exe"),
+                Arguments = $"query \"{serviceName}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
+            if (process is null)
+            {
+                return false;
+            }
+
+            var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+            process.WaitForExit(10_000);
+            if (output.Contains("1060", StringComparison.Ordinal)
+                || output.Contains("未安装", StringComparison.Ordinal)
+                || output.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return output.Contains("STATE", StringComparison.OrdinalIgnoreCase)
+                   || output.Contains("SERVICE_NAME", StringComparison.OrdinalIgnoreCase);
         }
         catch
         {

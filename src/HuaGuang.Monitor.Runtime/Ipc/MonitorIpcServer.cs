@@ -14,17 +14,20 @@ public sealed class MonitorIpcServer : BackgroundService
     readonly SettingsStore _settings;
     readonly AcquisitionService _acquisition;
     readonly SubscriptionService _subscription;
+    readonly HistoryRecorder _history;
 
     public MonitorIpcServer(
         ILogger<MonitorIpcServer> logger,
         SettingsStore settings,
         AcquisitionService acquisition,
-        SubscriptionService subscription)
+        SubscriptionService subscription,
+        HistoryRecorder history)
     {
         _logger = logger;
         _settings = settings;
         _acquisition = acquisition;
         _subscription = subscription;
+        _history = history;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -149,6 +152,7 @@ public sealed class MonitorIpcServer : BackgroundService
                     };
                 }
 
+                await _history.ApplyStorageLocationAsync().ConfigureAwait(false);
                 return Ok(BuildState(_settings, _acquisition, _subscription, request.TopicFilter));
 
             case MonitorIpcCommand.RequestPublish:
