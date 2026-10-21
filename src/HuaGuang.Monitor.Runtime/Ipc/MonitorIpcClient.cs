@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HuaGuang.Monitor.Services;
 
 namespace HuaGuang.Monitor.Ipc;
 
@@ -87,12 +88,19 @@ public sealed class MonitorIpcClient
             var response = client.SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.Ping })
                 .GetAwaiter()
                 .GetResult();
-            return response.Success;
+            return response.Success && MatchesCurrentInstance(response.State);
         }
         catch
         {
             return false;
         }
+    }
+
+    static bool MatchesCurrentInstance(MonitorRuntimeState? state)
+    {
+        var expected = MonitorProcessInstance.Id ?? "primary";
+        var actual = string.IsNullOrWhiteSpace(state?.InstanceId) ? "primary" : state.InstanceId.Trim();
+        return string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string DescribeConnectionFailure()
@@ -130,7 +138,11 @@ public sealed class MonitorIpcClient
             Exception? tcpError = null;
             try
             {
-                return await MonitorIpcTcpTransport.SendAsync(request, effectiveTimeout, cancellationToken)
+                return await MonitorIpcTcpTransport.SendAsync(
+                        request,
+                        effectiveTimeout,
+                        _endpoint.TcpPort,
+                        cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)

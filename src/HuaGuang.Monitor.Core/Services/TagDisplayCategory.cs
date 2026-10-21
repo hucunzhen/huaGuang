@@ -34,7 +34,7 @@ public static class TagDisplayCategoryHelper
         if (CurrentInjectionFormatting.IsRelatedTag(tag))
             return TagDisplayCategory.Temperature;
 
-        if (tag.IsManual)
+        if (tag.IsManual || LooksLikeSettingName(tag.Name))
             return TagDisplayCategory.Setting;
 
         if (tag.IsTemperature)
@@ -64,6 +64,28 @@ public static class TagDisplayCategoryHelper
         TagDisplayCategory.Setting => "#7B9FD4",
         _ => "#8AA0B5"
     };
+
+    /// <summary>
+    /// 点表未写显示分组时的名称兜底。订阅应按发送产线点表解析；
+    /// 仍对不上时，撒粉型号/撒粉量等不能因默认 Float32 被归到工艺参数。
+    /// </summary>
+    public static bool LooksLikeSettingName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        var text = name.Trim();
+        if (text.Contains("型号", StringComparison.Ordinal) ||
+            text.Contains("货号", StringComparison.Ordinal) ||
+            text.Contains("卡号", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return text is "门幅" or "厚度" or "撒粉量" or "注胶量" or "切刀间距";
+    }
 
     public static int GetSortOrder(TagDisplayCategory category) => (int)category;
 

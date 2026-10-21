@@ -202,25 +202,23 @@ public sealed class WatchdogSupervisor
                 continue;
             }
 
-            var started = false;
-            if (IsWindowsServiceInstalled(serviceName))
+            // 独立实例只走 Windows 服务，禁止 Process.Start 拉起控制台进程（会弹黑窗并抢 PLC）。
+            if (!IsWindowsServiceInstalled(serviceName))
             {
-                _logger.LogWarning("独立实例服务未运行，尝试启动 {ServiceName}", serviceName);
-                WatchdogDiagLog.Write($"独立实例服务未运行，尝试启动 {serviceName}");
-                started = TryStartWindowsService(serviceName);
-            }
-            else
-            {
-                var args = FormatIsolatedHostArguments(profile, instanceId);
-                _logger.LogWarning("独立实例无 Windows 服务，尝试拉起进程 instance={Instance} args={Args}", instanceId, args);
-                WatchdogDiagLog.Write($"独立实例无服务，拉起进程 {instanceId} {args}");
-                started = TryStartIsolatedHostProcess(args);
+                _logger.LogWarning(
+                    "独立实例未注册 Windows 服务，跳过进程回退 instance={Instance} service={ServiceName}",
+                    instanceId,
+                    serviceName);
+                WatchdogDiagLog.Write($"独立实例无服务，跳过进程回退 {instanceId} {serviceName}");
+                continue;
             }
 
-            if (started)
+            _logger.LogWarning("独立实例服务未运行，尝试启动 {ServiceName}", serviceName);
+            WatchdogDiagLog.Write($"独立实例服务未运行，尝试启动 {serviceName}");
+            if (TryStartWindowsService(serviceName))
             {
                 _lastInstanceRestartUtc[instanceId] = DateTimeOffset.UtcNow;
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -246,7 +244,8 @@ public sealed class WatchdogSupervisor
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "独立实例 GetStatus 失败 instance={Instance}", instanceId);
+                _logger.LogWarning(ex, "独立实例 GetStatus 失败 instance={Instance}", instanceId);
+                WatchdogDiagLog.Write($"独立实例 GetStatus 失败 {instanceId}: {ex.Message}");
                 continue;
             }
 
@@ -309,12 +308,6 @@ public sealed class WatchdogSupervisor
     DateTimeOffset GetLastInstanceRestart(string instanceId) =>
         _lastInstanceRestartUtc.TryGetValue(instanceId, out var utc) ? utc : DateTimeOffset.MinValue;
 
-    static string FormatIsolatedHostArguments(InstanceHostProfile profile, string instanceId) =>
-        MonitorProcessInstance.FormatHostArgumentsFor(
-            instanceId,
-            ResolveIsolatedMode(profile, instanceId),
-            profile.LineName);
-
     static AppOperationMode ResolveIsolatedMode(InstanceHostProfile profile, string instanceId)
     {
         if (Enum.TryParse(profile.OperationMode, ignoreCase: true, out AppOperationMode mode))
@@ -325,52 +318,6 @@ public sealed class WatchdogSupervisor
         return string.Equals(instanceId, "sub", StringComparison.OrdinalIgnoreCase)
             ? AppOperationMode.Subscribe
             : AppOperationMode.Acquisition;
-    }
-
-    bool TryStartIsolatedHostProcess(string arguments)
-    {
-        var exe = ResolveAcquisitionServiceExe();
-        if (exe is null)
-        {
-            _logger.LogWarning("未找到独立实例后台程序");
-            return false;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = exe,
-                Arguments = arguments,
-                WorkingDirectory = Path.GetDirectoryName(exe) ?? _installRoot,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            });
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "拉起独立实例进程失败 exe={Exe} args={Args}", exe, arguments);
-            return false;
-        }
-    }
-
-    string? ResolveAcquisitionServiceExe()
-    {
-        foreach (var candidate in new[]
-                 {
-                     Path.Combine(_installRoot, "service", $"{WatchdogConstants.AcquisitionProcessName}.exe"),
-                     Path.Combine(_installRoot, $"{WatchdogConstants.AcquisitionProcessName}.exe")
-                 })
-        {
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
     }
 
     void EnsureUiProcess(WatchdogOptions options)

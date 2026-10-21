@@ -117,12 +117,46 @@ public static class MonitorProcessInstance
                         _startupLineName = lineName;
                     }
                 }
+
+                // 服务命令行丢掉 --line、又无档案时，不能落到默认「先河」。
+                // acq-safen / acq-xianhe 等实例 id 本身就能还原产线。
+                if (string.IsNullOrWhiteSpace(_startupLineName)
+                    && TryResolveLineFromInstanceId(_id, out var impliedLine))
+                {
+                    _startupLineName = impliedLine;
+                }
+
+                if (_startupMode is null
+                    && _id is not null
+                    && _id.StartsWith("acq-", StringComparison.OrdinalIgnoreCase))
+                {
+                    _startupMode = AppOperationMode.Acquisition;
+                }
             }
 
             ApplyDefaultSubscribeId();
         }
 
         PersistStartupLineIfSpecified();
+    }
+
+    /// <summary>由独立实例 id 还原产线，如 <c>acq-safen</c> → 撒粉复合机。</summary>
+    public static bool TryResolveLineFromInstanceId(string? instanceId, out string lineName)
+    {
+        lineName = string.Empty;
+        if (string.IsNullOrWhiteSpace(instanceId)
+            || !TrySanitize(instanceId, out var id, out _))
+        {
+            return false;
+        }
+
+        if (!id.StartsWith("acq-", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var alias = id["acq-".Length..];
+        return LineCatalog.TryResolveLineName(alias, out lineName);
     }
 
     public static void PersistStartupLineIfSpecified()
@@ -192,6 +226,36 @@ public static class MonitorProcessInstance
         }
     }
 
+    /// <summary>界面/服务显示名：订阅大屏、撒粉采集；不要把 acq-safen 这种内部 id 展示给现场。</summary>
+    public static string FormatFriendlyName(string? instanceId)
+    {
+        if (string.IsNullOrWhiteSpace(instanceId))
+        {
+            return "主实例";
+        }
+
+        if (string.Equals(instanceId, "sub", StringComparison.OrdinalIgnoreCase))
+        {
+            return "订阅大屏";
+        }
+
+        if (TryResolveLineFromInstanceId(instanceId, out var lineName))
+        {
+            return $"{LineCatalog.GetShortDisplayName(lineName)}采集";
+        }
+
+        return instanceId;
+    }
+
+    public static string FriendlyName
+    {
+        get
+        {
+            EnsureInitialized();
+            return IsIsolated ? FormatFriendlyName(Id) : "主实例";
+        }
+    }
+
     public static string WindowTitle
     {
         get
@@ -208,16 +272,14 @@ public static class MonitorProcessInstance
                     ?? (MonitorInstanceOverlay.TryLoad(out var overlay) ? overlay : (AppOperationMode?)null);
                 if (mode == AppOperationMode.Subscribe)
                 {
-                    return $"工业监控 · 订阅大屏 · {Id}";
+                    return "工业监控 · 订阅大屏";
                 }
 
-                var line = LineConfigPaths.ReadActiveLineName();
-                var shortName = LineCatalog.GetShortDisplayName(line);
-                return $"工业监控 · {shortName}采集 · {Id}";
+                return $"工业监控 · {FriendlyName}";
             }
             catch
             {
-                return $"工业监控 · {Id}";
+                return $"工业监控 · {FriendlyName}";
             }
         }
     }
@@ -246,9 +308,7 @@ public static class MonitorProcessInstance
                 return MonitorIpcConstants.ServiceDisplayName;
             }
 
-            var mode = StartupMode ?? AppOperationMode.Acquisition;
-            var role = mode == AppOperationMode.Subscribe ? "订阅" : "采集";
-            return $"{MonitorIpcConstants.ServiceDisplayName} · {role} {Id}";
+            return $"{MonitorIpcConstants.ServiceDisplayName} · {FriendlyName}";
         }
     }
 
@@ -277,16 +337,79 @@ public static class MonitorProcessInstance
         }
     }
 
-    public static int IpcTcpPortFor(string instanceId)
+    /// <summary>已知独立实例占用连续端口，避免 hash 碰撞（acq-pingban 与 acq-cyhy 曾同为 19300）。</summary>
+    static readonly string[] WellKnownInstanceIds =
+    [
+        "sub",
+        "acq-xianhe",
+        "acq-huadi",
+        "acq-safen",
+        "acq-pingban",
+        "acq-cyhy",
+        "acq-zhidahy",
+        "acq-shanghaihy",
+        "acq-meshy",
+        "acq-s7"
+    ];
+
+    /// <summary>仅系统刚开机时短暂错峰；平时启动不再空等。</summary>
+    public static TimeSpan ResolveBootStagger(string? instanceId, TimeSpan? bootAge = null)
     {
-        var id = RequireSanitizedId(instanceId);
+        var age = bootAge ?? TimeSpan.FromMilliseconds(Environment.TickCount64);
+        if (age > TimeSpan.FromMinutes(3))
+        {
+            return TimeSpan.Zero;
+        }
+
+        if (string.IsNullOrWhiteSpace(instanceId)
+            || string.Equals(instanceId, "primary", StringComparison.OrdinalIgnoreCase))
+        {
+            return TimeSpan.Zero;
+        }
+
+        if (!TrySanitize(instanceId, out var id, out _))
+        {
+            return TimeSpan.Zero;
+        }
+
+        var known = Array.FindIndex(
+            WellKnownInstanceIds,
+            item => string.Equals(item, id, StringComparison.OrdinalIgnoreCase));
+        var index = known >= 0
+            ? known
+            : StableIndex(id, WellKnownInstanceIds.Length);
+        return TimeSpan.FromMilliseconds(index * 400);
+    }
+
+    static int StableIndex(string id, int modulus)
+    {
         var hash = 0;
         foreach (var ch in id)
         {
             hash = unchecked(hash * 33 + ch);
         }
 
-        return MonitorIpcConstants.DefaultTcpPort + 1 + (Math.Abs(hash) % 800);
+        return Math.Abs(hash) % Math.Max(1, modulus);
+    }
+
+    public static int IpcTcpPortFor(string instanceId)
+    {
+        var id = RequireSanitizedId(instanceId);
+        var known = Array.FindIndex(
+            WellKnownInstanceIds,
+            item => string.Equals(item, id, StringComparison.OrdinalIgnoreCase));
+        if (known >= 0)
+        {
+            return MonitorIpcConstants.DefaultTcpPort + 1 + known;
+        }
+
+        var hash = 0;
+        foreach (var ch in id)
+        {
+            hash = unchecked(hash * 33 + ch);
+        }
+
+        return MonitorIpcConstants.DefaultTcpPort + 1 + WellKnownInstanceIds.Length + (Math.Abs(hash) % 700);
     }
 
     public static string StartupRegistryValueName
@@ -295,6 +418,29 @@ public static class MonitorProcessInstance
         {
             EnsureInitialized();
             return IsIsolated ? $"IndustrialMonitor.{Id}" : "IndustrialMonitor";
+        }
+    }
+
+    /// <summary>
+    /// 独立实例开机只走 Windows 服务。清掉当前用户 Run 里的
+    /// <c>IndustrialMonitor.{id}</c>，避免登录时再拉起一个控制台进程去连同一台 PLC。
+    /// </summary>
+    public static void RemoveIsolatedLoginStartup()
+    {
+        if (!OperatingSystem.IsWindows() || !IsIsolated)
+        {
+            return;
+        }
+
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Run",
+                writable: true);
+            key?.DeleteValue(StartupRegistryValueName, throwOnMissingValue: false);
+        }
+        catch
+        {
         }
     }
 
@@ -322,6 +468,12 @@ public static class MonitorProcessInstance
             }
         }
 
+        if (string.IsNullOrWhiteSpace(line)
+            && TryResolveLineFromInstanceId(Id, out var impliedLine))
+        {
+            line = impliedLine;
+        }
+
         var mode = operationMode ?? StartupMode;
         if (mode is null
             && string.Equals(Id, "sub", StringComparison.OrdinalIgnoreCase))
@@ -338,6 +490,11 @@ public static class MonitorProcessInstance
         var modeArg = operationMode == AppOperationMode.Subscribe ? "subscribe" : "acquisition";
         if (string.IsNullOrWhiteSpace(lineName) || !LineCatalog.TryResolveLineName(lineName, out var resolvedLine))
         {
+            if (TryResolveLineFromInstanceId(id, out resolvedLine))
+            {
+                return $"--instance {id} --line {LineCatalog.ToCommandAlias(resolvedLine)} --mode {modeArg}";
+            }
+
             return $"--instance {id} --mode {modeArg}";
         }
 

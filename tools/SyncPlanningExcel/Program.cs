@@ -20,6 +20,31 @@ var linesDir = positionalArgs.Length > 1
     : Path.Combine(root, "config", "lines");
 var templatePath = Path.Combine(linesDir, "先河热熔胶复合机.xlsx");
 
+if (args.Contains("--list-sheets", StringComparer.OrdinalIgnoreCase))
+{
+    using var workbook = new XLWorkbook(planningPath);
+    foreach (var sheet in workbook.Worksheets)
+    {
+        Console.WriteLine($"=== {sheet.Name} ===");
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
+        var lastCol = sheet.LastColumnUsed()?.ColumnNumber() ?? 0;
+        for (var row = 1; row <= lastRow; row++)
+        {
+            var cells = new List<string>();
+            for (var col = 1; col <= lastCol; col++)
+            {
+                cells.Add(sheet.Cell(row, col).GetString().Trim());
+            }
+
+            Console.WriteLine(string.Join("\t", cells));
+        }
+
+        Console.WriteLine();
+    }
+
+    return;
+}
+
 if (previewOnly)
 {
     Environment.ExitCode = PreviewDiff.Run(planningPath, linesDir);

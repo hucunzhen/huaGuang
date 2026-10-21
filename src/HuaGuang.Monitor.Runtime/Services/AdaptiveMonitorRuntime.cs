@@ -76,21 +76,8 @@ public sealed class AdaptiveMonitorAcquisition : IMonitorAcquisition
 
     public void RequestImmediatePublish() => Active.RequestImmediatePublish();
 
-    public async Task StartAsync()
-    {
-        if (!MonitorIpcClient.IsServiceAvailable())
-        {
-            _launcher.EnsureRunning(TimeSpan.FromSeconds(2));
-        }
-
-        if (MonitorIpcClient.IsServiceAvailable())
-        {
-            await _remote.StartAsync().ConfigureAwait(false);
-            return;
-        }
-
-        await _local.StartAsync().ConfigureAwait(false);
-    }
+    public Task StartAsync() =>
+        AdaptiveRuntimeHandoff.StartAsync(_launcher, _remote.StartAsync, _local.StartAsync);
 
     public Task StopAsync() => Active.StopAsync();
 }
@@ -168,21 +155,8 @@ public sealed class AdaptiveMonitorSubscription : IMonitorSubscription
     public IEnumerable<RemoteDeviceState> GetDevices(string? topicFilter) =>
         Active.GetDevices(topicFilter);
 
-    public async Task StartAsync()
-    {
-        if (!MonitorIpcClient.IsServiceAvailable())
-        {
-            _launcher.EnsureRunning(TimeSpan.FromSeconds(2));
-        }
-
-        if (MonitorIpcClient.IsServiceAvailable())
-        {
-            await _remote.StartAsync().ConfigureAwait(false);
-            return;
-        }
-
-        await _local.StartAsync().ConfigureAwait(false);
-    }
+    public Task StartAsync() =>
+        AdaptiveRuntimeHandoff.StartAsync(_launcher, _remote.StartAsync, _local.StartAsync);
 
     public Task StopAsync() => Active.StopAsync();
 
@@ -192,4 +166,42 @@ public sealed class AdaptiveMonitorSubscription : IMonitorSubscription
         Active.InjectTelemetry(topic, payload);
 
     public ValueTask DisposeAsync() => Active.DisposeAsync();
+}
+
+static class AdaptiveRuntimeHandoff
+{
+    public static async Task StartAsync(
+        IBackgroundRuntimeLauncher launcher,
+        Func<Task> startRemote,
+        Func<Task> startLocal)
+    {
+        var wait = MonitorProcessInstance.IsIsolated
+            ? TimeSpan.FromSeconds(8)
+            : TimeSpan.FromSeconds(12);
+
+        if (!MonitorIpcClient.IsServiceAvailable())
+        {
+            launcher.EnsureRunning(wait);
+        }
+
+        if (MonitorIpcClient.IsServiceAvailable())
+        {
+            await startRemote().ConfigureAwait(false);
+            return;
+        }
+
+        if (launcher.IsBackgroundPresent())
+        {
+            if (MonitorIpcClient.WaitForServiceAvailable(TimeSpan.FromSeconds(15)))
+            {
+                await startRemote().ConfigureAwait(false);
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "本实例后台服务已在运行，界面不再连接 MQTT/PLC，避免与服务抢同一 ClientId。请检查服务 IPC。");
+        }
+
+        await startLocal().ConfigureAwait(false);
+    }
 }

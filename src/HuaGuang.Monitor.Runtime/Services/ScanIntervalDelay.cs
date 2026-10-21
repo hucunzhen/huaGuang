@@ -15,17 +15,13 @@ internal static class ScanIntervalDelay
                 break;
             }
 
-            if (remainingMs > 100)
+            if (remainingMs > 2)
             {
-                Thread.Sleep(Math.Min((int)remainingMs, 250));
-            }
-            else if (remainingMs > 2)
-            {
-                Thread.Sleep(1);
+                Thread.Sleep(Math.Min((int)Math.Ceiling(remainingMs), 250));
             }
             else
             {
-                Thread.SpinWait(50);
+                Thread.Sleep(1);
             }
         }
 

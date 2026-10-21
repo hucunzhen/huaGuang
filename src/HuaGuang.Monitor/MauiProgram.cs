@@ -38,7 +38,21 @@ public static class MauiProgram
 		{
 			try
 			{
-				UsesWindowsBackgroundService = MonitorIpcClient.IsServiceAvailable();
+				if (MonitorProcessInstance.IsIsolated
+				    && !Platforms.Windows.WindowsServiceHelper.IsMonitorServiceInstalled()
+				    && !MonitorIpcClient.IsServiceAvailable())
+				{
+					UsesWindowsBackgroundService = false;
+				}
+				else
+				{
+					UsesWindowsBackgroundService =
+						MonitorIpcClient.WaitForServiceAvailable(
+							MonitorProcessInstance.IsIsolated
+								? TimeSpan.FromSeconds(3)
+								: TimeSpan.FromSeconds(2))
+						|| Platforms.Windows.WindowsServiceHelper.IsMonitorServiceRunning();
+				}
 			}
 			catch
 			{
@@ -214,13 +228,14 @@ public static class MauiProgram
 #if WINDOWS
 		if (MonitorProcessInstance.IsIsolated)
 		{
+			MonitorProcessInstance.RemoveIsolatedLoginStartup();
 			if (IsolatedWantsBackgroundAutoStart())
 			{
 				_ = Task.Run(() =>
 				{
 					try
 					{
-						Platforms.Windows.WindowsInstanceBackgroundHost.EnsureRunning(TimeSpan.FromSeconds(45));
+						Platforms.Windows.WindowsInstanceBackgroundHost.EnsureRunning(TimeSpan.FromSeconds(8));
 					}
 					catch (Exception ex)
 					{

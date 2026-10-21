@@ -8,11 +8,9 @@ namespace HuaGuang.Monitor.Platforms.Windows;
 /// <summary>任务栏 / 系统标题栏图标（SetIcon + WM_SETICON；不替换 WinUI Content）。</summary>
 static class WindowsAppIcon
 {
-    const string WindowTitle = "工业监控";
-
     public static void Apply(Microsoft.Maui.Controls.Window window)
     {
-        window.Title = WindowTitle;
+        // 不要改 Title：多开窗口标题是「工业监控 · 撒粉采集」，写死成「工业监控」后现场无法区分实例。
         window.HandlerChanged += OnHandlerChanged;
         window.Activated += OnActivated;
 
@@ -37,7 +35,6 @@ static class WindowsAppIcon
             return;
         }
 
-        nativeWindow.Title = WindowTitle;
         var appWindow = nativeWindow.AppWindow;
 
         var iconPath = ResolveIconPath();

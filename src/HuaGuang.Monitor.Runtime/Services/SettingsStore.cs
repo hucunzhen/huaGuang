@@ -17,6 +17,9 @@ public sealed class SettingsStore
         Current = CreateDefault();
     }
 
+    readonly object _loadGate = new();
+    static int _ensuredAllLineExcels;
+
     public AppSettings Current { get; private set; }
 
     /// <summary>最近一次加载失败时的摘要；成功加载后清空。</summary>
@@ -50,20 +53,23 @@ public sealed class SettingsStore
     /// <summary>加载产线 Excel；失败时不抛异常，保留当前内存配置并写入 <see cref="LastLoadError"/>。</summary>
     public bool TryLoad()
     {
-        try
+        lock (_loadGate)
         {
-            LoadCore();
-            LastLoadError = null;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LastLoadError = ex.Message;
-            _logger.LogCritical(
-                ex,
-                "产线配置加载失败 excel={ExcelPath}",
-                LineConfigPaths.GetLineExcelPath(LineConfigPaths.ReadActiveLineName()));
-            return false;
+            try
+            {
+                LoadCore();
+                LastLoadError = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LastLoadError = ex.Message;
+                _logger.LogCritical(
+                    ex,
+                    "产线配置加载失败 excel={ExcelPath}",
+                    LineConfigPaths.GetLineExcelPath(LineConfigPaths.ReadActiveLineName()));
+                return false;
+            }
         }
     }
 
@@ -83,17 +89,45 @@ public sealed class SettingsStore
 
     void LoadCore()
     {
-        LineConfigPaths.EnsureAllLineExcels();
+        if (Interlocked.Exchange(ref _ensuredAllLineExcels, 1) == 0)
+        {
+            LineConfigPaths.EnsureAllLineExcels();
+        }
 
         var lineName = MonitorProcessInstance.StartupLineName;
         if (string.IsNullOrWhiteSpace(lineName) || !LineCatalog.LineNames.Contains(lineName))
         {
-            lineName = LineConfigPaths.ReadActiveLineName();
+            if (MonitorProcessInstance.IsIsolated
+                && MonitorProcessInstance.TryResolveLineFromInstanceId(MonitorProcessInstance.Id, out var fromInstance))
+            {
+                lineName = fromInstance;
+                _logger.LogWarning(
+                    "独立实例未指定产线，已按实例 id 还原 line={Line} instance={Instance}",
+                    lineName,
+                    MonitorProcessInstance.Id);
+            }
+            else
+            {
+                lineName = LineConfigPaths.ReadActiveLineName();
+                if (MonitorProcessInstance.IsIsolated
+                    && string.Equals(lineName, LineCatalog.LineNames[0], StringComparison.Ordinal)
+                    && !LineConfigPaths.HasConfirmedActiveLine())
+                {
+                    _logger.LogWarning(
+                        "独立实例产线回退到默认「{Line}」，请检查服务启动参数是否包含 --line，或 instance-hosts 档案 instance={Instance}",
+                        lineName,
+                        MonitorProcessInstance.Id);
+                }
+            }
+
+            LineConfigPaths.WriteActiveLineName(lineName);
         }
         else
         {
             LineConfigPaths.WriteActiveLineName(lineName);
         }
+
+        LineConfigPaths.EnsureLineExcel(lineName);
 
         Current = LineExcelConfigService.LoadLineExcel(
             lineName,
@@ -117,7 +151,7 @@ public sealed class SettingsStore
             Current.MqttEndpoints.Count);
         foreach (var endpoint in Current.MqttEndpoints)
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "MQTT 目标配置 name={TargetName} enabled={Enabled} {Mqtt}",
                 endpoint.Name,
                 endpoint.Enabled,
@@ -151,6 +185,10 @@ public sealed class SettingsStore
             if (startWithWindows is { } enabled)
             {
                 Current.StartWithWindows = enabled;
+                if (enabled)
+                {
+                    Current.AutoStartAcquisition = true;
+                }
             }
 
             return;

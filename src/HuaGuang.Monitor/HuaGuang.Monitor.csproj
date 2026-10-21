@@ -33,7 +33,7 @@
 		<ApplicationId>com.industrial.monitor</ApplicationId>
 
 		<!-- Versions: DisplayVersion=版本号, ApplicationVersion=修订号(Android versionCode) -->
-		<ApplicationDisplayVersion>1.1.13</ApplicationDisplayVersion>
+		<ApplicationDisplayVersion>1.1.14</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
@@ -180,6 +180,15 @@
 		<MauiAsset Include="..\..\config\lines\C型火焰复合机.xlsx"
 		           Link="Resources\Raw\lines\cyhy.xlsx"
 		           LogicalName="lines/cyhy.xlsx" />
+		<MauiAsset Include="..\..\config\lines\智达火焰复合机.xlsx"
+		           Link="Resources\Raw\lines\zhidahy.xlsx"
+		           LogicalName="lines/zhidahy.xlsx" />
+		<MauiAsset Include="..\..\config\lines\上海火焰复合机.xlsx"
+		           Link="Resources\Raw\lines\shanghaihy.xlsx"
+		           LogicalName="lines/shanghaihy.xlsx" />
+		<MauiAsset Include="..\..\config\lines\MES火焰复合机.xlsx"
+		           Link="Resources\Raw\lines\meshy.xlsx"
+		           LogicalName="lines/meshy.xlsx" />
 		<MauiAsset Include="..\..\config\lines\S7测试产线.xlsx"
 		           Link="Resources\Raw\lines\s7test.xlsx"
 		           LogicalName="lines/s7test.xlsx" />

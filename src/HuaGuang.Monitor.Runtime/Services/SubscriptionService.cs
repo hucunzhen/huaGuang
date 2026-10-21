@@ -104,12 +104,17 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            var wasRunning = IsRunning;
             IsRunning = false;
             ActiveSubscribeTopics = [];
             _devices.Clear();
             _devicesUpdatedCoalescer.Flush();
             await DisconnectAsync().ConfigureAwait(false);
-            MonitorRuntimeOperatorControl.SetPausedByOperator(true);
+            if (wasRunning)
+            {
+                MonitorRuntimeOperatorControl.SetPausedByOperator(true);
+            }
+
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation("订阅已停止");
         }

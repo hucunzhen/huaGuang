@@ -109,6 +109,30 @@
                     </VerticalStackLayout>
                 </Border>
 
+                <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="10,8">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="8" />
+                    </Border.StrokeShape>
+                    <VerticalStackLayout Spacing="6">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Label Text="服务与进程"
+                                   TextColor="#2EC4B6"
+                                   FontAttributes="Bold"
+                                   VerticalOptions="Center"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                            <Button Grid.Column="1"
+                                    Text="刷新"
+                                    Command="{Binding RefreshHostInventoryCommand}"
+                                    Padding="10,4"
+                                    FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
+                        </Grid>
+                        <Label Text="{Binding HostInventoryText}"
+                               TextColor="#C9D6E2"
+                               LineBreakMode="WordWrap"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
+                    </VerticalStackLayout>
+                </Border>
+
                 <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#0F1A26" Padding="10,8">
                     <Border.StrokeShape>
                         <RoundRectangle CornerRadius="8" />

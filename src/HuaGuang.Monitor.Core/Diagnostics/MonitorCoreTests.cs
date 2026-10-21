@@ -46,6 +46,7 @@ public static class MonitorCoreTests
         Run("点位显示分类", TestTagDisplayCategory),
         Run("历史数据存储", TestHistoryStoreRoundTrip),
         Run("订阅历史点位名称", TestSubscribeHistoryTagNames),
+        Run("订阅按发送产线点表", TestSubscribeUsesSenderLineCatalog),
         Run("设置启动不覆盖", TestSettingsSurviveStartupLoad),
         Run("点位稳定 Id", TestStableTagIdentity),
     ];
@@ -620,6 +621,26 @@ public static class MonitorCoreTests
         AssertTrue(productSku!.IsManual);
         AssertTrue(productSku.DataType == TagDataType.String);
         AssertTrue(productSku.MqttField == "cphh");
+
+        var zhidahy = new AppSettings();
+        LineCatalog.Apply(zhidahy, LineCatalog.ZhidahyLineName);
+        AssertTrue(zhidahy.Plc.Host == "172.14.1.210");
+        AssertTrue(zhidahy.Mqtt.ClientId == LineMqttDefaults.ZhidahyClientId);
+        AssertTrue(zhidahy.Tags.Any(tag => tag.Name == "设备状态" && tag.XinjeAddress == "D1"));
+        AssertTrue(zhidahy.Tags.Any(tag => tag.Name == "成品速度" && tag.XinjeAddress == "D67"));
+        AssertTrue(zhidahy.Tags.All(tag => tag.Name != "下火口火力"));
+
+        var shanghaihy = new AppSettings();
+        LineCatalog.Apply(shanghaihy, LineCatalog.ShanghaihyLineName);
+        AssertTrue(shanghaihy.Plc.Host == "172.14.1.211");
+        AssertTrue(shanghaihy.Tags.Any(tag => tag.Name == "成品1速度" && tag.XinjeAddress == "D67"));
+        AssertTrue(shanghaihy.Tags.Any(tag => tag.Name == "下火口火力" && tag.XinjeAddress == "D37"));
+
+        var meshy = new AppSettings();
+        LineCatalog.Apply(meshy, LineCatalog.MeshyLineName);
+        AssertTrue(meshy.Plc.Host == "172.14.1.212");
+        AssertTrue(meshy.Tags.Any(tag => tag.Name == "下火口送料" && tag.XinjeAddress == "D59"));
+        AssertTrue(meshy.Tags.Any(tag => tag.Name == "流转卡号" && tag.IsManual));
     }
 
     static void TestSettingsRoundTrip()
@@ -1046,6 +1067,11 @@ public static class MonitorCoreTests
         AssertTrue(TagDisplayCategoryHelper.InferCategory(temperature) == TagDisplayCategory.Temperature);
         AssertTrue(TagDisplayCategoryHelper.InferCategory(speed) == TagDisplayCategory.Process);
         AssertTrue(TagDisplayCategoryHelper.InferCategory(manual) == TagDisplayCategory.Setting);
+        var powderModel = new PlcTag { Name = "撒粉型号", DataType = TagDataType.Float32 };
+        var powderAmount = new PlcTag { Name = "撒粉量", DataType = TagDataType.Float32 };
+        AssertTrue(TagDisplayCategoryHelper.InferCategory(powderModel) == TagDisplayCategory.Setting);
+        AssertTrue(TagDisplayCategoryHelper.InferCategory(powderAmount) == TagDisplayCategory.Setting);
+        AssertTrue(TagDisplayCategoryHelper.Resolve(powderModel) == TagDisplayCategory.Setting);
         var currentInjection = new PlcTag { Name = "当前注胶机编号", DataType = TagDataType.Int16 };
         AssertTrue(TagDisplayCategoryHelper.InferCategory(currentInjection) == TagDisplayCategory.Temperature);
         AssertTrue(TagDisplayCategoryHelper.TryParseLabel("开关状态", out var parsed) && parsed == TagDisplayCategory.Switch);
@@ -1345,6 +1371,75 @@ public static class MonitorCoreTests
         finally
         {
             DeleteHistoryFiles(dbPath);
+        }
+    }
+
+    static void TestSubscribeUsesSenderLineCatalog()
+    {
+        var previous = SubscribeLineCatalog.LoadTags;
+        try
+        {
+            AssertTrue(SubscribeLineCatalog.TryResolveLineName("撒粉复合机", null, out var fromId)
+                && fromId == "撒粉复合机");
+            AssertTrue(SubscribeLineCatalog.TryResolveLineName("SFHFJ", LineMqttDefaults.SafenPublishTopic, out var fromTopic)
+                && fromTopic == "撒粉复合机");
+
+            var xianhe = new AppSettings();
+            LineCatalog.Apply(xianhe, LineCatalog.Xianhe.Name);
+            AssertTrue(xianhe.Tags.Any(tag => tag.Name == "产品货号"));
+
+            SubscribeLineCatalog.LoadTags = line => line != "撒粉复合机"
+                ? null
+                :
+                [
+                    new PlcTag
+                    {
+                        Name = "撒粉型号",
+                        Source = TagSource.Manual,
+                        DataType = TagDataType.String,
+                        DisplayCategory = TagDisplayCategory.Setting,
+                        Enabled = true
+                    },
+                    new PlcTag
+                    {
+                        Name = "撒粉量",
+                        Source = TagSource.Manual,
+                        DataType = TagDataType.Float32,
+                        DisplayCategory = TagDisplayCategory.Setting,
+                        Enabled = true
+                    },
+                    new PlcTag
+                    {
+                        Name = "车速",
+                        DataType = TagDataType.Float32,
+                        Enabled = true
+                    }
+                ];
+
+            var lineTags = SubscribeLineCatalog.ResolveTags(
+                "撒粉复合机",
+                LineMqttDefaults.SafenPublishTopic,
+                xianhe.Tags);
+            AssertTrue(lineTags.Any(tag => tag.Name == "撒粉型号"));
+            AssertTrue(!lineTags.Any(tag => tag.Name == "产品货号"), "订阅撒粉不应套用先河点表");
+
+            var profile = xianhe.MqttPayload ?? MqttFieldMappingCatalog.CreatePropertiesPayloadProfile();
+            var remote = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["sfxh"] = "A-12",
+                ["sfl"] = 3.5,
+                ["speed"] = 40
+            };
+            var ordered = TagDisplayOrder.OrderRemoteTags(remote, lineTags, profile, includeDisabledCatalogTags: true)
+                .ToList();
+            var model = ordered.First(entry => entry.CatalogTag?.Name == "撒粉型号");
+            AssertTrue(TagDisplayCategoryHelper.Resolve(model.CatalogTag!) == TagDisplayCategory.Setting);
+            var amount = ordered.First(entry => entry.CatalogTag?.Name == "撒粉量");
+            AssertTrue(TagDisplayCategoryHelper.Resolve(amount.CatalogTag!) == TagDisplayCategory.Setting);
+        }
+        finally
+        {
+            SubscribeLineCatalog.LoadTags = previous;
         }
     }
 

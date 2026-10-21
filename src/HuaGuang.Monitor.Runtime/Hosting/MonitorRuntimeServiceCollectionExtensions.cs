@@ -14,8 +14,10 @@ public static class MonitorRuntimeServiceCollectionExtensions
     public static IServiceCollection AddMonitorRuntimeCore(
         this IServiceCollection services,
         string logDirectory,
-        bool addFileLogger = true)
+        bool addFileLogger = true,
+        bool addInMemoryLogger = true)
     {
+        SubscribeLineTagLoader.Register();
         services.AddSingleton<IAcquisitionBackgroundGuard, NoOpAcquisitionBackgroundGuard>();
         services.AddSingleton(_ => new HistoryStore(AppPaths.HistoryDatabasePath));
         services.AddSingleton<HistoryRecorder>();
@@ -31,7 +33,11 @@ public static class MonitorRuntimeServiceCollectionExtensions
         services.AddLogging(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Information);
-            builder.AddInMemoryRuntimeLogger(LogLevel.Information);
+            if (addInMemoryLogger)
+            {
+                builder.AddInMemoryRuntimeLogger(LogLevel.Information);
+            }
+
             if (addFileLogger)
             {
                 builder.AddRuntimeFileLogger(logDirectory);
@@ -73,7 +79,10 @@ public sealed class MonitorConfigWatcher : BackgroundService
     readonly SubscriptionService _subscription;
     readonly HistoryRecorder _history;
     readonly ILogger<MonitorConfigWatcher> _logger;
+    readonly object _debounceGate = new();
     FileSystemWatcher? _watcher;
+    CancellationTokenSource? _debounceCts;
+    int _reloading;
 
     public MonitorConfigWatcher(
         SettingsStore settings,
@@ -95,27 +104,62 @@ public sealed class MonitorConfigWatcher : BackgroundService
         Directory.CreateDirectory(directory);
         _watcher = new FileSystemWatcher(directory)
         {
+            Filter = "*.xlsx",
             IncludeSubdirectories = false,
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size
         };
-        _watcher.Changed += (_, _) => _ = ReloadSafeAsync();
-        _watcher.Created += (_, _) => _ = ReloadSafeAsync();
-        _watcher.Renamed += (_, _) => _ = ReloadSafeAsync();
+        _watcher.Changed += (_, _) => ScheduleReload(stoppingToken);
+        _watcher.Created += (_, _) => ScheduleReload(stoppingToken);
+        _watcher.Renamed += (_, _) => ScheduleReload(stoppingToken);
         _watcher.EnableRaisingEvents = true;
         return Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
-    async Task ReloadSafeAsync()
+    void ScheduleReload(CancellationToken stoppingToken)
+    {
+        CancellationToken token;
+        lock (_debounceGate)
+        {
+            _debounceCts?.Cancel();
+            _debounceCts?.Dispose();
+            _debounceCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            token = _debounceCts.Token;
+        }
+
+        _ = ReloadSafeAsync(token);
+    }
+
+    async Task ReloadSafeAsync(CancellationToken debounceToken)
     {
         try
         {
-            await Task.Delay(300).ConfigureAwait(false);
-            var wasRunning = _acquisition.IsRunning || _subscription.IsRunning;
-            if (!await _settings.TryLoadAsync().ConfigureAwait(false))
+            await Task.Delay(800, debounceToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _reloading, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var changed = await _settings.LoadAsyncIfChanged().ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(_settings.LastLoadError))
             {
                 _logger.LogWarning("配置文件热加载失败 error={Error}", _settings.LastLoadError);
                 return;
             }
+
+            if (!changed)
+            {
+                return;
+            }
+
+            var wasRunning = _acquisition.IsRunning || _subscription.IsRunning;
             if (!wasRunning)
             {
                 return;
@@ -132,10 +176,21 @@ public sealed class MonitorConfigWatcher : BackgroundService
         {
             _logger.LogWarning(ex, "配置文件热加载失败");
         }
+        finally
+        {
+            Interlocked.Exchange(ref _reloading, 0);
+        }
     }
 
     public override void Dispose()
     {
+        lock (_debounceGate)
+        {
+            _debounceCts?.Cancel();
+            _debounceCts?.Dispose();
+            _debounceCts = null;
+        }
+
         _watcher?.Dispose();
         base.Dispose();
     }
@@ -146,31 +201,98 @@ public sealed class MonitorAutoStartWorker : BackgroundService
     readonly SettingsStore _settings;
     readonly AcquisitionService _acquisition;
     readonly SubscriptionService _subscription;
+    readonly HistoryStore _historyStore;
+    readonly HistoryRecorder _history;
     readonly ILogger<MonitorAutoStartWorker> _logger;
 
     public MonitorAutoStartWorker(
         SettingsStore settings,
         AcquisitionService acquisition,
         SubscriptionService subscription,
+        HistoryStore historyStore,
+        HistoryRecorder history,
         ILogger<MonitorAutoStartWorker> logger)
     {
         _settings = settings;
         _acquisition = acquisition;
         _subscription = subscription;
+        _historyStore = historyStore;
+        _history = history;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(1500, stoppingToken).ConfigureAwait(false);
-        if (MonitorRuntimeOperatorControl.IsPausedByOperator)
+        await Task.Yield();
+        _logger.LogInformation(
+            "工业监控后台服务启动 dataDir={DataDir} logFile={LogFile} instance={Instance} line={Line} mode={Mode}",
+            AppPaths.UserDataDirectory,
+            AppPaths.CurrentRuntimeLogFile,
+            MonitorProcessInstance.Id ?? "primary",
+            MonitorProcessInstance.StartupLineName ?? "(unset)",
+            MonitorProcessInstance.StartupMode?.ToString() ?? "(unset)");
+
+        if (!_settings.TryLoad())
+        {
+            _logger.LogCritical(
+                "产线 Excel 加载失败，后台服务仍将启动以便在界面中修复 error={Error}",
+                _settings.LastLoadError);
+        }
+
+        try
+        {
+            var (historyShard, historyLegacy) = AppPaths.ResolveHistoryLocation(_settings.Current.HistoryDirectory);
+            _historyStore.Relocate(historyShard, historyLegacy);
+            _logger.LogInformation("历史保存目录 {Shard}", historyShard);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "应用历史保存目录失败，将使用默认目录");
+        }
+
+        try
+        {
+            await _history.InitializeAsync().ConfigureAwait(false);
+            _logger.LogInformation("历史库已在后台就绪");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "历史库后台初始化失败（采集/订阅仍继续）");
+        }
+
+        await Task.Delay(800, stoppingToken).ConfigureAwait(false);
+
+        var stagger = MonitorProcessInstance.ResolveBootStagger(MonitorProcessInstance.Id);
+        if (stagger > TimeSpan.Zero)
+        {
+            _logger.LogInformation(
+                "开机错峰 {DelayMs:0}ms 后再连 PLC instance={Instance}",
+                stagger.TotalMilliseconds,
+                MonitorProcessInstance.Id ?? "primary");
+            try
+            {
+                await Task.Delay(stagger, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+
+        var isolatedHostAutoStart = InstanceHostProfileStore.ShouldStartRuntimeOnHostBoot(_settings.Current);
+        if (!isolatedHostAutoStart && MonitorRuntimeOperatorControl.IsPausedByOperator)
         {
             _logger.LogInformation("操作员已停止采集/订阅（持久化），跳过服务自动启动");
             return;
         }
 
-        if (!_settings.Current.AutoStartAcquisition)
+        if (!isolatedHostAutoStart)
         {
+            _logger.LogInformation(
+                "未勾选自动运行，跳过服务自动启动 isolated={Isolated} startWithWindows={StartWithWindows} autoRun={AutoRun}",
+                MonitorProcessInstance.IsIsolated,
+                _settings.Current.StartWithWindows,
+                _settings.Current.AutoStartAcquisition);
             return;
         }
 
@@ -191,6 +313,11 @@ public sealed class MonitorAutoStartWorker : BackgroundService
 
         try
         {
+            _logger.LogInformation(
+                "准备自动启动采集/订阅 line={Line} mode={Mode} isolated={Isolated}",
+                _settings.Current.LineName,
+                _settings.Current.OperationMode,
+                MonitorProcessInstance.IsIsolated);
             if (_settings.Current.OperationMode == AppOperationMode.Subscribe)
             {
                 await _subscription.StartAsync().ConfigureAwait(false);

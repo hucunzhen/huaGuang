@@ -19,7 +19,7 @@ static class MqttConnectionFactory
             .WithClientId(clientId)
             .WithCleanSession()
             .WithTimeout(MqttTimeouts.Connect)
-            .WithKeepAlivePeriod(TimeSpan.FromSeconds(30))
+            .WithKeepAlivePeriod(TimeSpan.FromSeconds(60))
             .WithProtocolVersion(MQTTnet.Formatter.MqttProtocolVersion.V311);
 
         if (!string.IsNullOrWhiteSpace(username))

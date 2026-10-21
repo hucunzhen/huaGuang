@@ -63,6 +63,8 @@ public sealed class MonitorIpcResponse
 
 public sealed class MonitorRuntimeState
 {
+    /// <summary>primary 或独立实例 Id（acq-cyhy / sub 等），用于避免连到别人的 IPC。</summary>
+    public string InstanceId { get; set; } = "primary";
     public string OperationMode { get; set; } = "Acquisition";
     public bool IsRunning { get; set; }
     /// <summary>界面或 IPC 已发送 Stop，守护服务不应因 AutoStart 再次拉起。</summary>

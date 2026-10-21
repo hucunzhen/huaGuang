@@ -78,7 +78,21 @@ public static class LineConfigPaths
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(ActiveLineFilePath, lineName);
+        var text = lineName.Trim();
+        try
+        {
+            if (File.Exists(ActiveLineFilePath)
+                && string.Equals(File.ReadAllText(ActiveLineFilePath).Trim(), text, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+        catch
+        {
+            // 读失败则覆盖写入
+        }
+
+        File.WriteAllText(ActiveLineFilePath, text);
     }
 
     public static void EnsureAllLineExcels()
@@ -95,16 +109,9 @@ public static class LineConfigPaths
         Directory.CreateDirectory(LinesDirectory);
         var path = GetLineExcelPath(lineName);
         var templatePath = ResolveShippedLineExcelPath(lineName);
-        if (File.Exists(path))
+        if (File.Exists(path) && new FileInfo(path).Length > 0)
         {
-            if (LineExcelConfigService.NeedsShippedTemplateRefresh(path, lineName, templatePath) &&
-                templatePath is not null &&
-                File.Exists(templatePath))
-            {
-                TryCopyLineExcelTemplate(templatePath, path);
-            }
-
-            LineExcelConfigService.EnsureLineFile(path, lineName, templatePath);
+            // 已有用户 Excel 时不要每次用 ClosedXML 打开全部产线，否则服务热加载会把 CPU 打满。
             return;
         }
 

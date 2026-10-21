@@ -78,7 +78,10 @@ public static class TagDisplayOrder
             catalogTag = new PlcTag
             {
                 Name = tagName,
-                MqttField = remoteKey.Trim()
+                MqttField = remoteKey.Trim(),
+                DisplayCategory = TagDisplayCategoryHelper.LooksLikeSettingName(tagName)
+                    ? TagDisplayCategory.Setting
+                    : null
             };
             return true;
         }

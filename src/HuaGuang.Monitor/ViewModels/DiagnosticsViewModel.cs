@@ -51,6 +51,7 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
     public ObservableCollection<DiagnosticResult> Results { get; } = [];
 
     [ObservableProperty] string serviceStatusText = "服务状态加载中…";
+    [ObservableProperty] string hostInventoryText = "主机清单加载中…";
     [ObservableProperty] string logSummaryText = "0 条日志";
     [ObservableProperty] bool showAllLogCategories;
     [ObservableProperty] string summaryText = "尚未运行测试";
@@ -90,6 +91,7 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
         _subscription.ConnectionChanged += OnServiceStateChanged;
         RefreshLogPaths();
         RefreshServiceStatus();
+        RefreshHostInventory();
         ReloadLogs();
     }
 
@@ -101,7 +103,11 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
     }
 
     void OnServiceStateChanged(object? sender, EventArgs e) =>
-        MainThread.BeginInvokeOnMainThread(RefreshServiceStatus);
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            RefreshServiceStatus();
+            RefreshHostInventory();
+        });
 
     void OnLogEntryAdded(object? sender, EventArgs e)
     {
@@ -132,7 +138,21 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
     {
         RefreshLogPaths();
         RefreshServiceStatus();
+        RefreshHostInventory();
         ReloadLogs();
+    }
+
+    [RelayCommand]
+    void RefreshHostInventory()
+    {
+        try
+        {
+            HostInventoryText = MonitorHostInventory.FormatReport();
+        }
+        catch (Exception ex)
+        {
+            HostInventoryText = $"主机清单读取失败：{ex.Message}";
+        }
     }
 
     [RelayCommand]
@@ -265,7 +285,8 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
             builder.AppendLine($"数据目录：{dataDirectory}");
             if (MonitorProcessInstance.IsIsolated)
             {
-                builder.AppendLine($"多开实例：{MonitorProcessInstance.Id}（独立后台 {MonitorProcessInstance.WindowsServiceName}）");
+                builder.AppendLine(
+                    $"多开实例：{MonitorProcessInstance.FriendlyName}（内部 id {MonitorProcessInstance.Id}，独立后台 {MonitorProcessInstance.WindowsServiceName}）");
                 builder.AppendLine($"产线 Excel 目录（共享）：{AppPaths.UserLinesDirectory}");
             }
             builder.AppendLine($"日志目录：{logDirectory}");
@@ -399,6 +420,7 @@ public partial class DiagnosticsViewModel : ObservableObject, IDisposable
 
         ServiceStatusText = builder.ToString().TrimEnd();
     }
+
 
     [RelayCommand]
     async Task RunCoreTestsAsync()

@@ -25,8 +25,9 @@ switch ($Action) {
         & (Join-Path $root "scripts\publish-windows-service.ps1") -Configuration $Configuration
         $exe = Get-ServiceExePath
         $binPath = "`"$exe`""
-        sc.exe create $serviceName binPath= $binPath start= auto DisplayName= $displayName | Out-String | Write-Host
+        sc.exe create $serviceName binPath= $binPath start= delayed-auto depend= Tcpip/Afd DisplayName= $displayName | Out-String | Write-Host
         sc.exe description $serviceName "工业监控 PLC 采集与 MQTT 推送后台服务" | Out-Null
+        sc.exe config $serviceName start= delayed-auto depend= Tcpip/Afd | Out-Null
         sc.exe start $serviceName | Out-String | Write-Host
         Write-Host "Windows 服务已安装并启动：$serviceName" -ForegroundColor Green
     }

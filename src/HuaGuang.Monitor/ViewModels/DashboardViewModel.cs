@@ -155,6 +155,13 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             !_settings.Current.AutoStartAcquisition ||
             MauiProgram.IsWindowsBackgroundServiceAvailable())
         {
+            if (MauiProgram.IsWindowsBackgroundServiceAvailable() && !IsRunning)
+            {
+                _logger.LogInformation(
+                    "本实例后台 IPC 已连通，界面不在本进程采集/订阅 instance={Instance}",
+                    MonitorProcessInstance.Id ?? "primary");
+            }
+
             return;
         }
 
@@ -834,7 +841,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var orderedTags = OrderRemoteTags(device.Tags).ToList();
+        var orderedTags = OrderRemoteTags(device).ToList();
         var flatRows = panel.TagGroups.SelectMany(group => group.Tags).ToList();
         if (flatRows.Count == orderedTags.Count &&
             flatRows.Zip(orderedTags, (row, entry) => row.Name == entry.Name).All(match => match))
@@ -869,9 +876,9 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     {
         var precision = _settings.Current.TemperaturePrecision;
         var rows = new List<TagRowViewModel>();
-        foreach (var (name, value, catalogTag) in OrderRemoteTags(device.Tags))
+        foreach (var (name, value, catalogTag) in OrderRemoteTags(device))
         {
-            var tag = ResolveRemoteTag(name, value, catalogTag);
+            var tag = ResolveRemoteTag(name, value, catalogTag, CatalogTagsFor(device));
             var row = new TagRowViewModel(tag, precision, device.SourceTopic);
             row.Apply(new TagSnapshot
             {
@@ -931,7 +938,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        PopulateRemoteRows(device, OrderRemoteTags(device.Tags));
+        PopulateRemoteRows(device, OrderRemoteTags(device));
         ShowEmptyTagsHint = TotalTagCount == 0;
         UpdateDeviceHeader();
     }
@@ -958,7 +965,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var orderedTags = OrderRemoteTags(device.Tags).ToList();
+        var orderedTags = OrderRemoteTags(device).ToList();
         var flatRows = GetFlatRows();
         if (flatRows.Count == orderedTags.Count &&
             flatRows.Zip(orderedTags, (row, entry) => row.Name == entry.Name).All(match => match))
@@ -980,7 +987,11 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         RebuildGroupedRows(BuildRowsForDevice(device));
     }
 
-    PlcTag ResolveRemoteTag(string name, object? value, PlcTag? catalogTag)
+    PlcTag ResolveRemoteTag(
+        string name,
+        object? value,
+        PlcTag? catalogTag,
+        IReadOnlyList<PlcTag> lineTags)
     {
         if (catalogTag is not null)
         {
@@ -988,7 +999,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         }
 
         var profile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
-        if (TagDisplayOrder.TryResolveCatalogTag(name, _settings.Current.Tags, profile, out var matched))
+        if (TagDisplayOrder.TryResolveCatalogTag(name, lineTags, profile, out var matched))
         {
             return matched;
         }
@@ -1166,10 +1177,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             RemoteDevicePanels.Clear();
             _multiRowLookup.Clear();
 
-            IsRunning = _acquisition.IsRunning;
-            PlcConnected = _acquisition.PlcConnected;
-            MqttConnected = _acquisition.MqttConnected;
-            DeviceId = settings.DeviceId;
+        IsRunning = _acquisition.IsRunning;
+        PlcConnected = _acquisition.PlcConnected;
+        MqttConnected = _acquisition.MqttConnected;
+        DeviceId = settings.DeviceId;
             MqttEndpointCatalog.Normalize(settings);
             var publishTopics = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings)
                 .Select(endpoint => MqttEndpointCatalog.ResolveTopic(endpoint, settings))
@@ -1189,11 +1200,14 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         ApplyToggleText();
     }
 
+    IReadOnlyList<PlcTag> CatalogTagsFor(RemoteDeviceState device) =>
+        SubscribeLineCatalog.ResolveTags(device.DeviceId, device.SourceTopic, _settings.Current.Tags);
+
     IEnumerable<(string Name, object? Value, PlcTag? CatalogTag)> OrderRemoteTags(
-        IReadOnlyDictionary<string, object?> remoteTags) =>
+        RemoteDeviceState device) =>
         TagDisplayOrder.OrderRemoteTags(
-            remoteTags,
-            _settings.Current.Tags,
+            device.Tags,
+            CatalogTagsFor(device),
             _settings.Current.MqttPayload,
             includeDisabledCatalogTags: IsSubscribeMode);
 

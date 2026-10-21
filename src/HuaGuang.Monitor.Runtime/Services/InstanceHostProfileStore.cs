@@ -33,52 +33,11 @@ public static class InstanceHostProfileStore
     /// <summary>用户在设置里明确勾选了独立实例开机（不含「打开窗口时误登记」）。</summary>
     public static bool HasExplicitAutoStartInstance() => ListSavedAutoStart().Count > 0;
 
-    public static IReadOnlyList<InstanceHostProfile> ListAutoStart()
-    {
-        var byId = new Dictionary<string, InstanceHostProfile>(StringComparer.OrdinalIgnoreCase);
-        var optedOut = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            if (Directory.Exists(DirectoryPath))
-            {
-                foreach (var path in Directory.EnumerateFiles(DirectoryPath, "*.json"))
-                {
-                    var id = Path.GetFileNameWithoutExtension(path);
-                    if (!TryLoad(id, out var profile))
-                    {
-                        continue;
-                    }
-
-                    if (profile.AutoStart == false)
-                    {
-                        optedOut.Add(profile.InstanceId);
-                        continue;
-                    }
-
-                    if (profile.AutoStart == true)
-                    {
-                        byId[profile.InstanceId] = profile;
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // 再尝试产线 Excel 推导
-        }
-
-        foreach (var discovered in DiscoverFromLineWorkbooks())
-        {
-            if (optedOut.Contains(discovered.InstanceId) || byId.ContainsKey(discovered.InstanceId))
-            {
-                continue;
-            }
-
-            byId[discovered.InstanceId] = discovered;
-        }
-
-        return byId.Values.ToList();
-    }
+    /// <summary>
+    /// 仅返回用户在独立窗口里明确勾选并保存过的开机档案。
+    /// 不再从产线 Excel「开机自动启动」推导——Excel 默认多为「是」，否则会把所有产线都拉起来抢 PLC。
+    /// </summary>
+    public static IReadOnlyList<InstanceHostProfile> ListAutoStart() => ListSavedAutoStart();
 
     static List<InstanceHostProfile> ListSavedAutoStart()
     {
@@ -125,10 +84,33 @@ public static class InstanceHostProfileStore
         return false;
     }
 
+    /// <summary>
+    /// 独立实例勾了「开机自动启动本实例后台」后，Windows 服务进程起来就必须自动采集/订阅。
+    /// 主实例仍看「启动后自动运行」。
+    /// </summary>
+    public static bool ShouldStartRuntimeOnHostBoot(AppSettings settings)
+    {
+        if (MonitorProcessInstance.IsIsolated)
+        {
+            if (settings.StartWithWindows)
+            {
+                return true;
+            }
+
+            var id = MonitorProcessInstance.Id;
+            if (!string.IsNullOrWhiteSpace(id) && TryLoad(id, out var profile) && profile.AutoStart == true)
+            {
+                return true;
+            }
+        }
+
+        return settings.AutoStartAcquisition;
+    }
+
     public static bool TryCreateDiscoveredProfile(AppSettings settings, out InstanceHostProfile profile)
     {
         profile = new InstanceHostProfile();
-        if (settings.StartWithWindows != true || settings.AutoStartAcquisition != true)
+        if (settings.StartWithWindows != true)
         {
             return false;
         }

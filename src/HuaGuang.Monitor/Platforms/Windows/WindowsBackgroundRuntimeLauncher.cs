@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using HuaGuang.Monitor.Ipc;
 using HuaGuang.Monitor.Services;
 
@@ -27,8 +26,19 @@ public sealed class WindowsBackgroundRuntimeLauncher : IBackgroundRuntimeLaunche
             {
                 _launchAttempted = MonitorProcessInstance.IsIsolated
                     ? WindowsInstanceBackgroundHost.EnsureRunning(timeout ?? TimeSpan.FromSeconds(3))
-                    : TryLaunchProcess();
+                    : TryStartWindowsService();
             }
+        }
+
+        if (MonitorIpcClient.IsServiceAvailable())
+        {
+            return true;
+        }
+
+        // 独立实例已在 EnsureRunning 里等过 IPC，不要再空等一整轮。
+        if (MonitorProcessInstance.IsIsolated)
+        {
+            return false;
         }
 
         return MonitorIpcClient.WaitForServiceAvailable(timeout ?? TimeSpan.FromSeconds(12));
@@ -37,25 +47,17 @@ public sealed class WindowsBackgroundRuntimeLauncher : IBackgroundRuntimeLaunche
     public bool IsBackgroundPresent() =>
         MonitorIpcClient.IsServiceAvailable() || WindowsServiceHelper.IsMonitorServiceRunning();
 
-    static bool TryLaunchProcess()
+    static bool TryStartWindowsService()
     {
-        var exePath = ResolveServiceExePath();
-        if (!File.Exists(exePath))
-        {
-            return false;
-        }
-
         try
         {
-            Process.Start(new ProcessStartInfo
+            using var service = new System.ServiceProcess.ServiceController(MonitorIpcConstants.CurrentServiceName);
+            if (service.Status == System.ServiceProcess.ServiceControllerStatus.Running)
             {
-                FileName = exePath,
-                Arguments = MonitorProcessInstance.FormatHostArguments(),
-                WorkingDirectory = Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            });
+                return true;
+            }
+
+            service.Start();
             return true;
         }
         catch

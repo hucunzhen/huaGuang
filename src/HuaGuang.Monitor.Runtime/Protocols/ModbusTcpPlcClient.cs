@@ -24,28 +24,20 @@ public sealed class ModbusTcpPlcClient : IPlcClient
         await DisconnectAsync().ConfigureAwait(false);
 
         var timeoutMs = Math.Clamp(settings.TimeoutMs, 500, 10_000);
+        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        connectCts.CancelAfter(timeoutMs);
         var client = new TcpClient { NoDelay = true };
 
         try
         {
-            var connectTask = client.ConnectAsync(settings.Host, settings.Port);
-            var completed = await Task.WhenAny(connectTask, Task.Delay(timeoutMs, cancellationToken)).ConfigureAwait(false);
-            if (completed != connectTask)
+            try
             {
-                try
-                {
-                    client.Close();
-                }
-                catch
-                {
-                    // 强制关闭以中断仍在进行的 TCP 连接
-                }
-
+                await client.ConnectAsync(settings.Host, settings.Port, connectCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
                 throw new TimeoutException($"PLC 连接超时（{timeoutMs} ms）：{settings.Host}:{settings.Port}");
             }
-
-            await connectTask.ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
 
             client.ReceiveTimeout = timeoutMs;
             client.SendTimeout = timeoutMs;

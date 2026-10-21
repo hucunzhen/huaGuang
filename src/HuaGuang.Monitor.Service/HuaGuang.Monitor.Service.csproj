@@ -5,7 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>HuaGuang.Monitor.Service</RootNamespace>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe：即便被误用 Process.Start 拉起，也不弹出控制台黑窗 -->
+    <OutputType>WinExe</OutputType>
     <ApplicationIcon>..\HuaGuang.Monitor\Resources\AppIcon\appicon.ico</ApplicationIcon>
     <AssemblyName>HuaGuang.Monitor.Service</AssemblyName>
   </PropertyGroup>

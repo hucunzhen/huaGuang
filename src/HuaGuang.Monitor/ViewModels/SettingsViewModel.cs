@@ -89,13 +89,12 @@ public partial class SettingsViewModel : ObservableObject
                 return string.Empty;
             }
 
-            var line = LineCatalog.GetShortDisplayName(SelectedLineName);
             if (SelectedOperationMode == "订阅模式")
             {
                 return "独立订阅大屏。「开机自动启动」会拉起本实例后台，关窗口后订阅可继续。";
             }
 
-            return $"独立窗口 {MonitorProcessInstance.Id} · {line}采集。关闭窗口后本实例后台可继续采集；「开机自动启动」只控制本实例。";
+            return $"独立窗口 · {MonitorProcessInstance.FriendlyName}。关闭窗口后本实例后台可继续采集；「开机自动启动」只控制本实例。";
         }
     }
 
@@ -821,13 +820,21 @@ public partial class SettingsViewModel : ObservableObject
             }
 
             OccupancyWarning = string.Empty;
+            string? hostWarning = null;
 #if WINDOWS
             if (MonitorProcessInstance.IsIsolated)
             {
-                Platforms.Windows.WindowsInstanceBackgroundHost.Apply(
-                    settings.StartWithWindows,
-                    settings.OperationMode,
-                    settings.LineName);
+                try
+                {
+                    Platforms.Windows.WindowsInstanceBackgroundHost.Apply(
+                        settings.StartWithWindows,
+                        settings.OperationMode,
+                        settings.LineName);
+                }
+                catch (Exception ex)
+                {
+                    hostWarning = ex.Message;
+                }
             }
             else
             {
@@ -852,6 +859,12 @@ public partial class SettingsViewModel : ObservableObject
             catch (Exception ex)
             {
                 StatusMessage = $"设置已保存，但历史目录不可用：{ex.Message}";
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(hostWarning))
+            {
+                StatusMessage = $"设置已保存，但后台服务未就绪：{hostWarning}";
                 return;
             }
 

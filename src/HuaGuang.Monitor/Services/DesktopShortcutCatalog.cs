@@ -12,6 +12,9 @@ public static class DesktopShortcutCatalog
         new("acq-safen", "撒粉采集", "--instance acq-safen --line safen --mode acquisition"),
         new("acq-pingban", "平板采集", "--instance acq-pingban --line pingban --mode acquisition"),
         new("acq-cyhy", "C型火焰采集", "--instance acq-cyhy --line cyhy --mode acquisition"),
+        new("acq-zhidahy", "智达火焰采集", "--instance acq-zhidahy --line zhidahy --mode acquisition"),
+        new("acq-shanghaihy", "上海火焰采集", "--instance acq-shanghaihy --line shanghaihy --mode acquisition"),
+        new("acq-meshy", "MES火焰采集", "--instance acq-meshy --line meshy --mode acquisition"),
         new("acq-s7", "S7采集", "--instance acq-s7 --line s7 --mode acquisition")
     ];
 }

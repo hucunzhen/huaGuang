@@ -14,6 +14,9 @@ public static class LineMqttDefaults
     public const string SafenClientId = "SFHFJ";
     public const string PingbanClientId = "PBHFJ";
     public const string CyhyClientId = "CYHYFJ";
+    public const string ZhidahyClientId = "ZDHYFJ";
+    public const string ShanghaihyClientId = "SHHYFJ";
+    public const string MeshyClientId = "MESHYFJ";
     public const string S7TestClientId = "S7TEST";
 
     public const string XianhePublishTopic = "/RRJFHJ/XHRRJFHJ/properties/report";
@@ -21,6 +24,9 @@ public static class LineMqttDefaults
     public const string SafenPublishTopic = "/RRJFHJ/SFHFJ/properties/report";
     public const string PingbanPublishTopic = "/RRJFHJ/PBHFJ/properties/report";
     public const string CyhyPublishTopic = "/RRJFHJ/CYHYFJ/properties/report";
+    public const string ZhidahyPublishTopic = "/RRJFHJ/ZDHYFJ/properties/report";
+    public const string ShanghaihyPublishTopic = "/RRJFHJ/SHHYFJ/properties/report";
+    public const string MeshyPublishTopic = "/RRJFHJ/MESHYFJ/properties/report";
     public const string S7TestPublishTopic = "/RRJFHJ/S7TEST/properties/report";
 
     public static IReadOnlyList<string> SubscribeTopics { get; } =
@@ -30,6 +36,9 @@ public static class LineMqttDefaults
         SafenPublishTopic,
         PingbanPublishTopic,
         CyhyPublishTopic,
+        ZhidahyPublishTopic,
+        ShanghaihyPublishTopic,
+        MeshyPublishTopic,
         S7TestPublishTopic
     ];
 
@@ -39,6 +48,9 @@ public static class LineMqttDefaults
         "撒粉复合机" => SafenPublishTopic,
         "平板复合机" => PingbanPublishTopic,
         "C型火焰复合机" => CyhyPublishTopic,
+        LineCatalog.ZhidahyLineName => ZhidahyPublishTopic,
+        LineCatalog.ShanghaihyLineName => ShanghaihyPublishTopic,
+        LineCatalog.MeshyLineName => MeshyPublishTopic,
         LineCatalog.S7TestLineName => S7TestPublishTopic,
         _ => XianhePublishTopic
     };
@@ -49,6 +61,9 @@ public static class LineMqttDefaults
         "撒粉复合机" => SafenClientId,
         "平板复合机" => PingbanClientId,
         "C型火焰复合机" => CyhyClientId,
+        LineCatalog.ZhidahyLineName => ZhidahyClientId,
+        LineCatalog.ShanghaihyLineName => ShanghaihyClientId,
+        LineCatalog.MeshyLineName => MeshyClientId,
         LineCatalog.S7TestLineName => S7TestClientId,
         _ => XianheClientId
     };
@@ -99,6 +114,9 @@ public static class LineMqttDefaults
         SafenClientId => "撒粉复合机",
         PingbanClientId => "平板复合机",
         CyhyClientId => "C型火焰复合机",
+        ZhidahyClientId => LineCatalog.ZhidahyLineName,
+        ShanghaihyClientId => LineCatalog.ShanghaihyLineName,
+        MeshyClientId => LineCatalog.MeshyLineName,
         S7TestClientId => LineCatalog.S7TestLineName,
         _ => null
     };

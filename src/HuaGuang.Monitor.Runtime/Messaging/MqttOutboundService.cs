@@ -448,7 +448,7 @@ public sealed class MqttOutboundService : IDisposable
 
         try
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "MQTT 连接尝试 target={TargetName} line={LineName} {Mqtt}",
                 endpoint.Name,
                 lineName,
@@ -459,7 +459,7 @@ public sealed class MqttOutboundService : IDisposable
                 .GetResult();
             _connectRetryAfter.Remove(endpoint.Id);
             _lastConnectErrors.Remove(endpoint.Id);
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "MQTT 已连接 target={TargetName} line={LineName} {Mqtt}",
                 endpoint.Name,
                 lineName,

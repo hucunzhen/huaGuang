@@ -20,6 +20,11 @@ public static class Program
 
         var installRoot = WatchdogSupervisor.ResolveInstallRoot();
         var builder = Host.CreateApplicationBuilder(args);
+        builder.Logging.ClearProviders();
+        builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
+        builder.Logging.AddFilter("Microsoft.Extensions.Logging.EventLog", LogLevel.Error);
+        builder.Logging.AddRuntimeFileLogger(AppPaths.LogDirectory, logFilePrefix: "runtime-watchdog");
         builder.Services.AddWindowsService(options =>
         {
             options.ServiceName = WatchdogConstants.WatchdogWindowsServiceName;
@@ -40,15 +45,6 @@ public static class Program
         var host = builder.Build();
         CrashExitLogger.Register(host.Services.GetRequiredService<ILoggerFactory>());
         CrashExitLogger.SetContext(typeof(Program).Assembly.GetName().Version?.ToString(), "watchdog");
-        var store = host.Services.GetRequiredService<SettingsStore>();
-        var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("WatchdogStartup");
-        if (!store.TryLoad())
-        {
-            startupLogger.LogCritical(
-                "产线 Excel 加载失败，看门狗仍将启动 error={Error}",
-                store.LastLoadError);
-        }
-
         host.Run();
     }
 }

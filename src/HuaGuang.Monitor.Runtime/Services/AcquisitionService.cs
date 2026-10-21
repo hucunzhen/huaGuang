@@ -127,7 +127,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             {
                 IsBackground = true,
                 Name = "AcquisitionLoop",
-                Priority = ThreadPriority.AboveNormal
+                Priority = ThreadPriority.Normal
             };
             _loopThread.Start();
             MonitorRuntimeOperatorControl.SetPausedByOperator(false);
@@ -145,6 +145,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            var wasRunning = IsRunning;
             IsRunning = false;
             if (_cts is not null)
             {
@@ -158,7 +159,11 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             _backgroundLease = null;
             ResetPublishBaseline();
             await _mqttOutbound.StopAsync().ConfigureAwait(false);
-            MonitorRuntimeOperatorControl.SetPausedByOperator(true);
+            if (wasRunning)
+            {
+                MonitorRuntimeOperatorControl.SetPausedByOperator(true);
+            }
+
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation("采集已停止 cycleCount={CycleCount}", CycleCount);
         }
@@ -213,7 +218,6 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 LastCycleElapsedMs = clock.ElapsedMs - cycleStartMs;
                 LastCycleCompletedAt = DateTimeOffset.Now;
                 CycleCount++;
-                ConnectionChanged?.Invoke(this, EventArgs.Empty);
 
                 var waitStartMs = clock.ElapsedMs;
                 ScanIntervalDelay.WaitUntil(targetNextMs, clock, cancellationToken);

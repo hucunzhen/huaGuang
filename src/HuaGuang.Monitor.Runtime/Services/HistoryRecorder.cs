@@ -83,7 +83,7 @@ public sealed class HistoryRecorder : IAsyncDisposable
 
         var snapshots = HistoryTagNameResolver.CreateSubscribeSnapshots(
             e.Device.Tags,
-            _settings.Current.Tags,
+            SubscribeLineCatalog.ResolveTags(e.Device.DeviceId, e.Device.SourceTopic, _settings.Current.Tags),
             _settings.Current.MqttPayload ?? new MqttPayloadProfile(),
             e.Device.Quality,
             e.Device.Timestamp);

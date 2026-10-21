@@ -85,6 +85,7 @@ sealed class FileLogger : ILogger
 static class RuntimeLogWriter
 {
     static readonly Lock Gate = new();
+    static readonly Dictionary<string, StreamWriter> Writers = new(StringComparer.OrdinalIgnoreCase);
     static string? _currentDateKey;
     static string? _currentFilePath;
 
@@ -109,19 +110,32 @@ static class RuntimeLogWriter
             lock (Gate)
             {
                 var filePath = ResolveLogFilePath(logDirectory, logFilePrefix);
-                using var stream = new FileStream(
-                    filePath,
-                    FileMode.Append,
-                    FileAccess.Write,
-                    FileShare.ReadWrite);
-                using var writer = new StreamWriter(stream);
-                writer.WriteLine(line);
+                GetWriter(filePath).WriteLine(line);
             }
         }
         catch
         {
             // 日志写入失败（权限/锁）时不能拖垮 UI 或后台服务。
         }
+    }
+
+    static StreamWriter GetWriter(string filePath)
+    {
+        if (Writers.TryGetValue(filePath, out var existing))
+        {
+            return existing;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        var stream = new FileStream(
+            filePath,
+            FileMode.Append,
+            FileAccess.Write,
+            FileShare.ReadWrite,
+            bufferSize: 64 * 1024);
+        var writer = new StreamWriter(stream) { AutoFlush = true };
+        Writers[filePath] = writer;
+        return writer;
     }
 
     static string ResolveLogFilePath(string logDirectory, string logFilePrefix)

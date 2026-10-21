@@ -174,6 +174,9 @@ begin
   StopWindowsService('{#ServiceName}-acq-safen');
   StopWindowsService('{#ServiceName}-acq-pingban');
   StopWindowsService('{#ServiceName}-acq-cyhy');
+  StopWindowsService('{#ServiceName}-acq-zhidahy');
+  StopWindowsService('{#ServiceName}-acq-shanghaihy');
+  StopWindowsService('{#ServiceName}-acq-meshy');
   StopWindowsService('{#ServiceName}-acq-s7');
   StopWindowsService('{#ServiceName}-sub');
   KillImage('{#MyAppExeName}');

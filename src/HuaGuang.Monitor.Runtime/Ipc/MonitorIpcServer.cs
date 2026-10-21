@@ -99,6 +99,7 @@ public sealed class MonitorIpcServer : BackgroundService
             case MonitorIpcCommand.Ping:
                 return Ok(new MonitorRuntimeState
                 {
+                    InstanceId = CurrentInstanceId(),
                     OperationMode = _settings.Current.OperationMode.ToString(),
                     IsRunning = _acquisition.IsRunning || _subscription.IsRunning
                 });
@@ -172,6 +173,8 @@ public sealed class MonitorIpcServer : BackgroundService
         }
     }
 
+    static string CurrentInstanceId() => MonitorProcessInstance.Id ?? "primary";
+
     static MonitorIpcResponse Ok(MonitorRuntimeState state) =>
         new() { Success = true, State = state };
 
@@ -210,6 +213,7 @@ public sealed class MonitorIpcServer : BackgroundService
         var isSubscribe = ResolveSubscribeStatus(settings.Current, acquisition, subscription);
         var state = new MonitorRuntimeState
         {
+            InstanceId = CurrentInstanceId(),
             OperationMode = settings.Current.OperationMode.ToString(),
             IsRunning = isSubscribe ? subscription.IsRunning : acquisition.IsRunning,
             OperatorStopRequested = MonitorRuntimeOperatorControl.IsPausedByOperator,

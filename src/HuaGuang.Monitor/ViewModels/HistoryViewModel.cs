@@ -117,7 +117,9 @@ public partial class HistoryViewModel : ObservableObject
                 _queryDeviceFilter = ResolveDeviceFilter(selectedDevice);
                 _fixedColumns = [];
 
-                var catalogTags = _settings.Current.Tags;
+                var catalogTags = selectedDevice is "全部设备" or null
+                    ? _settings.Current.Tags
+                    : SubscribeLineCatalog.ResolveTags(selectedDevice, null, _settings.Current.Tags);
                 var mqttProfile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
                 var countQuery = BuildCountQuery();
                 _totalCount = await _store.CountMatchingAsync(countQuery).ConfigureAwait(false);

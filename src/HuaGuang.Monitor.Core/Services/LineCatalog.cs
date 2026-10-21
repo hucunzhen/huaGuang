@@ -10,9 +10,12 @@ namespace HuaGuang.Monitor.Services;
 public static class LineCatalog
 {
     public const string ProductSkuTagName = "产品货号";
-    public const int Version = 12;
+    public const int Version = 13;
 
     public const string S7TestLineName = "S7测试产线";
+    public const string ZhidahyLineName = "智达火焰复合机";
+    public const string ShanghaihyLineName = "上海火焰复合机";
+    public const string MeshyLineName = "MES火焰复合机";
 
     public static IReadOnlyList<string> LineNames { get; } =
     [
@@ -21,6 +24,9 @@ public static class LineCatalog
         "撒粉复合机",
         "平板复合机",
         "C型火焰复合机",
+        ZhidahyLineName,
+        ShanghaihyLineName,
+        MeshyLineName,
         S7TestLineName
     ];
 
@@ -72,6 +78,9 @@ public static class LineCatalog
         "撒粉复合机" => Safen,
         "平板复合机" => Pingban,
         "C型火焰复合机" => Cyhy,
+        ZhidahyLineName => Zhidahy,
+        ShanghaihyLineName => Shanghaihy,
+        MeshyLineName => Meshy,
         S7TestLineName => S7Test,
         _ => Xianhe
     };
@@ -83,6 +92,9 @@ public static class LineCatalog
         "撒粉复合机" => "safen",
         "平板复合机" => "pingban",
         "C型火焰复合机" => "cyhy",
+        ZhidahyLineName => "zhidahy",
+        ShanghaihyLineName => "shanghaihy",
+        MeshyLineName => "meshy",
         S7TestLineName => "s7test",
         _ => "xianhe"
     };
@@ -167,6 +179,111 @@ public static class LineCatalog
         "172.14.1.204",
         LineMqttDefaults.CyhyPublishTopic,
         []);
+
+    public static LineProfile Zhidahy { get; } = new(
+        ZhidahyLineName,
+        "172.14.1.210",
+        LineMqttDefaults.ZhidahyPublishTopic,
+        ZhidahyTags());
+
+    public static LineProfile Shanghaihy { get; } = new(
+        ShanghaihyLineName,
+        "172.14.1.211",
+        LineMqttDefaults.ShanghaihyPublishTopic,
+        ShanghaihyTags());
+
+    public static LineProfile Meshy { get; } = new(
+        MeshyLineName,
+        "172.14.1.212",
+        LineMqttDefaults.MeshyPublishTopic,
+        MeshyTags());
+
+    static List<PlcTag> FlameCommonManuals() =>
+    [
+        ManualReal("切刀间距"),
+        ManualReal("门幅", "mm"),
+        ManualReal("厚度", "mm"),
+        ManualString("流转卡号", useScannerInput: true)
+    ];
+
+    static List<PlcTag> ZhidahyTags()
+    {
+        var tags = new List<PlcTag>
+        {
+            FlameDeviceStatus(),
+            Real("海绵送料1", "D51"),
+            Real("海绵送料2", "D53"),
+            Real("成品速度", "D67"),
+            Real("主机上", "D61"),
+            Real("主机中", "D63"),
+            Real("主机下", "D65"),
+            Real("面料送料", "D55"),
+            Real("针板轨道", "D57"),
+            Real("上火口火力", "D35", "%"),
+            Real("上隔距", "D71", "mm"),
+            Real("下隔距", "D73", "mm"),
+            Real("计米", "D39")
+        };
+        tags.AddRange(FlameCommonManuals());
+        return tags;
+    }
+
+    static List<PlcTag> ShanghaihyTags()
+    {
+        var tags = new List<PlcTag>
+        {
+            FlameDeviceStatus(),
+            Real("海绵送料1", "D51"),
+            Real("海绵送料2", "D53"),
+            Real("面料送料", "D55"),
+            Real("针板轨道", "D57"),
+            Real("主机上", "D61"),
+            Real("主机中", "D63"),
+            Real("主机下", "D65"),
+            Real("成品1速度", "D67"),
+            Real("成品2速度", "D69"),
+            Real("上火口火力", "D35", "%"),
+            Real("下火口火力", "D37", "%"),
+            Real("上隔距", "D71", "mm"),
+            Real("下隔距", "D73", "mm"),
+            Real("计米", "D39")
+        };
+        tags.AddRange(FlameCommonManuals());
+        return tags;
+    }
+
+    static List<PlcTag> MeshyTags()
+    {
+        var tags = new List<PlcTag>
+        {
+            FlameDeviceStatus(),
+            Real("海绵送料1", "D51"),
+            Real("海绵送料2", "D53"),
+            Real("面料送料", "D55"),
+            Real("针板轨道", "D57"),
+            Real("下火口送料", "D59"),
+            Real("主机上", "D61"),
+            Real("主机中", "D63"),
+            Real("主机下", "D65"),
+            Real("成品1速度", "D67"),
+            Real("成品2速度", "D69"),
+            Real("上隔距", "D71", "mm"),
+            Real("下隔距", "D73", "mm"),
+            Real("上火口火力", "D35", "%"),
+            Real("下火口火力", "D37", "%"),
+            Real("计米", "D39")
+        };
+        tags.AddRange(FlameCommonManuals());
+        return tags;
+    }
+
+    static PlcTag FlameDeviceStatus() => new()
+    {
+        Name = "设备状态",
+        XinjeAddress = "D1",
+        DataType = TagDataType.Int16,
+        DisplayCategory = TagDisplayCategory.Switch
+    };
 
     static void UpsertPlc(ref List<PlcTag> tags, PlcTag tag)
     {
@@ -327,6 +444,9 @@ public static class LineCatalog
         "撒粉复合机" => "撒粉",
         "平板复合机" => "平板",
         "C型火焰复合机" => "C型火焰",
+        ZhidahyLineName => "智达",
+        ShanghaihyLineName => "上海",
+        MeshyLineName => "MES",
         S7TestLineName => "S7测试",
         "先河热熔胶复合机" => "先河",
         _ => string.IsNullOrWhiteSpace(lineName) ? "产线" : lineName.Trim()
@@ -358,6 +478,9 @@ public static class LineCatalog
             "撒粉" or "SAFEN" or "SFHFJ" => "撒粉复合机",
             "平板" or "PINGBAN" or "PBHFJ" => "平板复合机",
             "C型" or "C型火焰" or "CYHY" or "CYHYFJ" => "C型火焰复合机",
+            "智达" or "智达机" or "智达火焰" or "ZHIDAHY" or "ZDHYFJ" => ZhidahyLineName,
+            "上海" or "上海机" or "进口机" or "进口机-上海机" or "上海火焰" or "SHANGHAIHY" or "SHHYFJ" => ShanghaihyLineName,
+            "MES" or "复合机MES" or "MES火焰" or "MESHY" or "MESHYFJ" => MeshyLineName,
             "S7" or "S7TEST" or "S7测试" => S7TestLineName,
             _ => string.Empty
         };
@@ -377,6 +500,9 @@ public static class LineCatalog
             "撒粉复合机" => "safen",
             "平板复合机" => "pingban",
             "C型火焰复合机" => "cyhy",
+            ZhidahyLineName => "zhidahy",
+            ShanghaihyLineName => "shanghaihy",
+            MeshyLineName => "meshy",
             S7TestLineName => "s7",
             _ => "xianhe"
         };

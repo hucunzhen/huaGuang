@@ -67,7 +67,7 @@ public sealed class MqttPublisher : IMqttPublisher
 
         _client = client;
         _connectedProfile = CloneConnectionProfile(settings);
-        _logger.LogInformation(
+        _logger.LogDebug(
             "MQTT 客户端已连接 {Mqtt}",
             LogFormatting.DescribeMqtt(settings, lineName));
     }
@@ -96,7 +96,7 @@ public sealed class MqttPublisher : IMqttPublisher
             _client = null;
             _connectedProfile = null;
             ConnectionChanged?.Invoke(this, false);
-            _logger.LogInformation("MQTT 客户端已断开");
+            _logger.LogDebug("MQTT 客户端已断开");
         }
     }
 
