@@ -24,20 +24,23 @@ public sealed class ModbusTcpPlcClient : IPlcClient
         await DisconnectAsync().ConfigureAwait(false);
 
         var timeoutMs = Math.Clamp(settings.TimeoutMs, 500, 10_000);
-        using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        connectCts.CancelAfter(timeoutMs);
         var client = new TcpClient { NoDelay = true };
+        // 不用 CancelAfter 取消 ConnectAsync：取消后底层套接字仍会半开连着 PLC，
+        // 信捷只允许很少 TCP，泄漏几次后现场就会一直超时，界面数字停在旧值像“模拟”。
+        var connectTask = client.ConnectAsync(settings.Host, settings.Port);
 
         try
         {
-            try
+            var finished = await Task.WhenAny(connectTask, Task.Delay(timeoutMs, cancellationToken))
+                .ConfigureAwait(false);
+            if (finished != connectTask)
             {
-                await client.ConnectAsync(settings.Host, settings.Port, connectCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
+                DiscardSocket(client, connectTask);
+                cancellationToken.ThrowIfCancellationRequested();
                 throw new TimeoutException($"PLC 连接超时（{timeoutMs} ms）：{settings.Host}:{settings.Port}");
             }
+
+            await connectTask.ConfigureAwait(false);
 
             client.ReceiveTimeout = timeoutMs;
             client.SendTimeout = timeoutMs;
@@ -55,17 +58,40 @@ public sealed class ModbusTcpPlcClient : IPlcClient
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "PLC 连接失败 {Plc}", LogFormatting.DescribePlc(settings));
-            try
-            {
-                client.Close();
-            }
-            catch
-            {
-                // 忽略清理时的二次异常
-            }
-
-            client.Dispose();
+            DiscardSocket(client, connectTask);
             throw;
+        }
+    }
+
+    static void DiscardSocket(TcpClient client, Task connectTask)
+    {
+        try
+        {
+            client.Close();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            client.Dispose();
+        }
+        catch
+        {
+        }
+
+        _ = ObserveAbandonedConnect(connectTask);
+    }
+
+    static async Task ObserveAbandonedConnect(Task connectTask)
+    {
+        try
+        {
+            await connectTask.ConfigureAwait(false);
+        }
+        catch
+        {
         }
     }
 

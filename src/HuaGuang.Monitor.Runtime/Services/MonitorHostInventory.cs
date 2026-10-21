@@ -64,7 +64,7 @@ public static class MonitorHostInventory
         };
 
         names.Add(MonitorProcessInstance.WindowsServiceNameFor("sub"));
-        foreach (var line in LineCatalog.LineNames)
+        foreach (var line in LineCatalog.AcquisitionLineNames)
         {
             names.Add(MonitorProcessInstance.WindowsServiceNameFor("acq-" + LineCatalog.ToCommandAlias(line)));
         }

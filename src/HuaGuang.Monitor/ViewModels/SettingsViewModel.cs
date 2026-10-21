@@ -65,8 +65,14 @@ public partial class SettingsViewModel : ObservableObject
         }
     }
 
-    public IReadOnlyList<string> LineNames => LineCatalog.LineNames;
+    public IReadOnlyList<string> LineNames =>
+        IsSubscribeDashboardLocked || SelectedOperationMode == "订阅模式"
+            ? [LineCatalog.SubscribeDashboardLineName]
+            : LineCatalog.AcquisitionLineNames;
+
     public string[] OperationModes { get; } = ["采集模式", "订阅模式"];
+
+    public bool IsSubscribeDashboardLocked => MonitorProcessInstance.IsSubscribeDashboardHost;
     public ObservableCollection<string> SubscribeTopics { get; } = [];
     public ObservableCollection<MqttEndpointViewModel> MqttEndpoints { get; } = [];
     public ObservableCollection<PlcEndpointViewModel> PlcEndpoints { get; } = [];
@@ -148,13 +154,44 @@ public partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSubscribeSettings));
         OnPropertyChanged(nameof(IsAcquisitionSettings));
         OnPropertyChanged(nameof(InstanceBanner));
+        OnPropertyChanged(nameof(LineNames));
+        OnPropertyChanged(nameof(CanChangeLinePicker));
+        OnPropertyChanged(nameof(CanChangeOperationMode));
         if (_isLoadingSettings || _isApplyingMode)
         {
             return;
         }
 
+        if (IsSubscribeDashboardLocked && value != "订阅模式")
+        {
+            _isApplyingMode = true;
+            SelectedOperationMode = "订阅模式";
+            _isApplyingMode = false;
+            OccupancyWarning = string.Empty;
+            StatusMessage = "订阅大屏固定使用独立产线「订阅大屏」，不能切到采集。";
+            BindSubscribeDashboardLine();
+            return;
+        }
+
+        if (value == "订阅模式")
+        {
+            LineAcquisitionOccupancy.ReleaseAllForSelf();
+            OccupancyWarning = string.Empty;
+            BindSubscribeDashboardLine();
+            return;
+        }
+
         if (value == "采集模式")
         {
+            var leavingDashboard = LineCatalog.IsSubscribeDashboard(SelectedLineName);
+            if (leavingDashboard)
+            {
+                _isApplyingLine = true;
+                SelectedLineName = LineCatalog.AcquisitionLineNames[0];
+                _isApplyingLine = false;
+                OnPropertyChanged(nameof(LineNames));
+            }
+
             if (!LineAcquisitionOccupancy.TryClaim(SelectedLineName, out var occupancyError))
             {
                 _isApplyingMode = true;
@@ -165,14 +202,18 @@ public partial class SettingsViewModel : ObservableObject
                 OnPropertyChanged(nameof(IsSubscribeSettings));
                 OnPropertyChanged(nameof(IsAcquisitionSettings));
                 OnPropertyChanged(nameof(InstanceBanner));
+                BindSubscribeDashboardLine();
                 return;
             }
-        }
-        else
-        {
-            LineAcquisitionOccupancy.ReleaseAllForSelf();
-        }
 
+            OccupancyWarning = string.Empty;
+            if (leavingDashboard)
+            {
+                _ = LoadSelectedLineFromExcelSilentAsync(SelectedLineName);
+            }
+
+            return;
+        }
         OccupancyWarning = string.Empty;
     }
 
@@ -180,7 +221,10 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty] string statusMessage = string.Empty;
 
-    public bool CanChangeLinePicker => !IsSwitchingLine;
+    public bool CanChangeLinePicker =>
+        !IsSwitchingLine && !IsSubscribeDashboardLocked && SelectedOperationMode != "订阅模式";
+
+    public bool CanChangeOperationMode => !IsSubscribeDashboardLocked;
 
     public string LineExcelPath => LineConfigPaths.GetLineExcelPath(SelectedLineName);
 
@@ -239,10 +283,28 @@ public partial class SettingsViewModel : ObservableObject
             var preserve = _store.Current;
             var filePath = LineConfigPaths.GetLineExcelPath(lineName);
             var templatePath = LineConfigPaths.ResolveShippedLineExcelPath(lineName);
+            var leavingDashboard = LineCatalog.IsSubscribeDashboard(preserve.LineName)
+                && !LineCatalog.IsSubscribeDashboard(lineName);
             var settings = await Task.Run(() =>
-                    LineExcelConfigService.SwitchLine(lineName, filePath, templatePath, preserve))
-                .ConfigureAwait(false);
-            await _store.SaveAsync(settings).ConfigureAwait(false);
+            {
+                if (leavingDashboard)
+                {
+                    LineConfigPaths.EnsureLineExcel(lineName);
+                    var loaded = LineExcelConfigService.LoadLineExcel(lineName, filePath, templatePath);
+                    loaded.OperationMode = AppOperationMode.Acquisition;
+                    return loaded;
+                }
+
+                return LineExcelConfigService.SwitchLine(lineName, filePath, templatePath, preserve);
+            }).ConfigureAwait(false);
+            if (leavingDashboard)
+            {
+                _store.ReplaceCurrent(settings);
+            }
+            else
+            {
+                await _store.SaveAsync(settings).ConfigureAwait(false);
+            }
             await ApplyLoadedSettingsOnMainThreadAsync(
                     settings,
                     $"已切换产线：{lineName}（PLC {settings.Plc.Host}，ClientId {settings.Mqtt.ClientId}）")
@@ -508,6 +570,7 @@ public partial class SettingsViewModel : ObservableObject
         var settings = _store.Current;
         settings.LineName = SelectedLineName;
         settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
+        BindSubscribeLineOnSettings(settings);
         settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 2_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxScanIntervalMs);
         settings.PublishIntervalMs = ParseInt(PublishIntervalMs, 60_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxPublishIntervalMs);
         settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
@@ -781,9 +844,10 @@ public partial class SettingsViewModel : ObservableObject
 
             settings.SubscribeTopics = topics;
             settings.SubscribeTopic = topics.Count > 0 ? topics[0] : "monitor/+/telemetry";
-            settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
-            settings.LineName = SelectedLineName;
-            settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 2_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxScanIntervalMs);
+        settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
+        settings.LineName = SelectedLineName;
+        BindSubscribeLineOnSettings(settings);
+        settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 2_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxScanIntervalMs);
             settings.PublishIntervalMs = ParseInt(PublishIntervalMs, 60_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxPublishIntervalMs);
             settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
             settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
@@ -910,6 +974,11 @@ public partial class SettingsViewModel : ObservableObject
         SelectedLineName = string.IsNullOrWhiteSpace(settings.LineName)
             ? LineCatalog.LineNames[0]
             : settings.LineName;
+        if (settings.OperationMode == AppOperationMode.Subscribe
+            || IsSubscribeDashboardLocked)
+        {
+            SelectedLineName = LineCatalog.SubscribeDashboardLineName;
+        }
         ScanIntervalMs = settings.ScanIntervalMs.ToString();
         PublishIntervalMs = settings.PublishIntervalMs.ToString();
         TemperaturePublishThresholdC = settings.TemperaturePublishThresholdC.ToString("G");
@@ -979,6 +1048,35 @@ public partial class SettingsViewModel : ObservableObject
         }
 
         return Math.Clamp(value, min, max);
+    }
+
+    void BindSubscribeDashboardLine()
+    {
+        LineConfigPaths.EnsureLineExcel(LineCatalog.SubscribeDashboardLineName);
+        if (!string.Equals(SelectedLineName, LineCatalog.SubscribeDashboardLineName, StringComparison.Ordinal))
+        {
+            _isApplyingLine = true;
+            SelectedLineName = LineCatalog.SubscribeDashboardLineName;
+            _isApplyingLine = false;
+            _ = LoadSelectedLineFromExcelSilentAsync(LineCatalog.SubscribeDashboardLineName);
+        }
+
+        OnPropertyChanged(nameof(LineNames));
+        OnPropertyChanged(nameof(LineExcelPath));
+        OnPropertyChanged(nameof(CanChangeLinePicker));
+    }
+
+    static void BindSubscribeLineOnSettings(AppSettings settings)
+    {
+        if (settings.OperationMode != AppOperationMode.Subscribe
+            && !MonitorProcessInstance.IsSubscribeDashboardHost)
+        {
+            return;
+        }
+
+        settings.LineName = LineCatalog.SubscribeDashboardLineName;
+        settings.OperationMode = AppOperationMode.Subscribe;
+        settings.DeviceId = LineCatalog.SubscribeDashboardLineName;
     }
 
     bool IsServiceRunning() => _acquisition.IsRunning || _subscription.IsRunning;

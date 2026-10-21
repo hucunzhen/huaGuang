@@ -98,7 +98,13 @@ public static class LineConfigPaths
     public static void EnsureAllLineExcels()
     {
         Directory.CreateDirectory(LinesDirectory);
-        foreach (var lineName in LineCatalog.LineNames)
+        if (MonitorProcessInstance.IsSubscribeDashboardHost)
+        {
+            EnsureLineExcel(LineCatalog.SubscribeDashboardLineName);
+            return;
+        }
+
+        foreach (var lineName in LineCatalog.AcquisitionLineNames)
         {
             EnsureLineExcel(lineName);
         }
@@ -113,6 +119,15 @@ public static class LineConfigPaths
         {
             // 已有用户 Excel 时不要每次用 ClosedXML 打开全部产线，否则服务热加载会把 CPU 打满。
             return;
+        }
+
+        if (LineCatalog.IsSubscribeDashboard(lineName))
+        {
+            LineExcelConfigService.TrySeedSubscribeDashboardFile(path, GetLineExcelPath("先河热熔胶复合机"));
+            if (File.Exists(path) && new FileInfo(path).Length > 0)
+            {
+                return;
+            }
         }
 
         if (TryCopyBundledLineFile(lineName, path))

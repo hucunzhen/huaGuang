@@ -23,6 +23,13 @@ public static class LineAcquisitionOccupancy
             return false;
         }
 
+        if (LineCatalog.IsSubscribeDashboard(lineName))
+        {
+            error = "「订阅大屏」不是采集产线，请改选一条采集产线。";
+            LastError = error;
+            return false;
+        }
+
         Directory.CreateDirectory(DirectoryPath);
         var path = LockPath(lineName);
         var existing = Read(path);

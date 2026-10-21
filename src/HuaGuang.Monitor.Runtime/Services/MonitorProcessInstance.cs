@@ -150,6 +150,12 @@ public static class MonitorProcessInstance
             return false;
         }
 
+        if (string.Equals(id, "sub", StringComparison.OrdinalIgnoreCase))
+        {
+            lineName = LineCatalog.SubscribeDashboardLineName;
+            return true;
+        }
+
         if (!id.StartsWith("acq-", StringComparison.OrdinalIgnoreCase))
         {
             return false;
@@ -172,11 +178,13 @@ public static class MonitorProcessInstance
 
     static void ApplyDefaultSubscribeId()
     {
-        if (_startupMode is null
-            && string.Equals(_id, "sub", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(_id, "sub", StringComparison.OrdinalIgnoreCase))
         {
-            _startupMode = AppOperationMode.Subscribe;
+            return;
         }
+
+        _startupMode = AppOperationMode.Subscribe;
+        _startupLineName = LineCatalog.SubscribeDashboardLineName;
     }
 
     internal static void ResetForTests(string? id)
@@ -214,6 +222,17 @@ public static class MonitorProcessInstance
         {
             EnsureInitialized();
             return _startupLineName;
+        }
+    }
+
+    public static bool IsSubscribeDashboardHost
+    {
+        get
+        {
+            EnsureInitialized();
+            return string.Equals(_id, "sub", StringComparison.OrdinalIgnoreCase)
+                || _startupMode == AppOperationMode.Subscribe
+                || LineCatalog.IsSubscribeDashboard(_startupLineName);
         }
     }
 
@@ -487,6 +506,11 @@ public static class MonitorProcessInstance
     public static string FormatHostArgumentsFor(string instanceId, AppOperationMode operationMode, string? lineName)
     {
         var id = RequireSanitizedId(instanceId);
+        if (string.Equals(id, "sub", StringComparison.OrdinalIgnoreCase))
+        {
+            return "--instance sub --line subscribe --mode subscribe";
+        }
+
         var modeArg = operationMode == AppOperationMode.Subscribe ? "subscribe" : "acquisition";
         if (string.IsNullOrWhiteSpace(lineName) || !LineCatalog.TryResolveLineName(lineName, out var resolvedLine))
         {

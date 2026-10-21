@@ -144,6 +144,19 @@ foreach (var lineName in LineCatalog.LineNames)
 
     try
     {
+        if (LineCatalog.IsSubscribeDashboard(lineName))
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            var xianhePath = Path.Combine(outputDir, "先河热熔胶复合机.xlsx");
+            LineExcelConfigService.TrySeedSubscribeDashboardFile(path, xianhePath);
+            Console.WriteLine(path);
+            continue;
+        }
+
         LineExcelConfigService.Export(settings, path);
         Console.WriteLine(path);
     }

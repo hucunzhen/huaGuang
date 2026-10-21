@@ -55,7 +55,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty] string toggleText = "启动采集";
     [ObservableProperty] string deviceId = "LINE-01";
     [ObservableProperty] string topicPreview = string.Empty;
-    [ObservableProperty] string modeText = "模拟模式";
+    [ObservableProperty] string modeText = "采集模式";
     [ObservableProperty] bool isSubscribeMode;
     [ObservableProperty] bool isAcquisitionMode = true;
     [ObservableProperty] bool showRemoteDevicePicker;
@@ -150,18 +150,15 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     {
         RefreshStatus();
 
-        if (MonitorRuntimeOperatorControl.IsPausedByOperator ||
-            _autoStartAttempted ||
-            !_settings.Current.AutoStartAcquisition ||
-            MauiProgram.IsWindowsBackgroundServiceAvailable())
+        if (MonitorRuntimeOperatorControl.IsPausedByOperator || _autoStartAttempted)
         {
-            if (MauiProgram.IsWindowsBackgroundServiceAvailable() && !IsRunning)
-            {
-                _logger.LogInformation(
-                    "本实例后台 IPC 已连通，界面不在本进程采集/订阅 instance={Instance}",
-                    MonitorProcessInstance.Id ?? "primary");
-            }
+            return;
+        }
 
+        var wantsAutoStart = _settings.Current.AutoStartAcquisition
+            || (MonitorProcessInstance.IsIsolated && _settings.Current.StartWithWindows);
+        if (!wantsAutoStart)
+        {
             return;
         }
 

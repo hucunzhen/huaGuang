@@ -385,6 +385,55 @@ public static class LineExcelConfigService
         return settings;
     }
 
+    /// <summary>
+    /// 新建订阅大屏 Excel。可从采集产线工作簿只读拷贝订阅账号/主题，不改源文件。
+    /// </summary>
+    public static bool TrySeedSubscribeDashboardFile(string destinationPath, string? sourceLineFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath))
+        {
+            return false;
+        }
+
+        if (File.Exists(destinationPath) && new FileInfo(destinationPath).Length > 0)
+        {
+            return false;
+        }
+
+        var settings = CreateSeedSettings(LineCatalog.SubscribeDashboardLineName);
+        if (!string.IsNullOrWhiteSpace(sourceLineFilePath) && File.Exists(sourceLineFilePath))
+        {
+            try
+            {
+                var source = LoadLineExcelFromFile(sourceLineFilePath, templateFilePath: null);
+                if (source.SubscribeTopics.Count > 0)
+                {
+                    settings.SubscribeTopics = [.. source.SubscribeTopics];
+                }
+
+                if (!string.IsNullOrWhiteSpace(source.SubscribeMqtt.Host))
+                {
+                    settings.SubscribeMqtt = MqttSubscribeAccount.Clone(source.SubscribeMqtt);
+                    if (string.Equals(
+                            settings.SubscribeMqtt.ClientId,
+                            LineMqttDefaults.XianheClientId,
+                            StringComparison.OrdinalIgnoreCase)
+                        || string.IsNullOrWhiteSpace(settings.SubscribeMqtt.ClientId))
+                    {
+                        settings.SubscribeMqtt.ClientId = MqttSubscribeAccount.DefaultClientId;
+                    }
+                }
+            }
+            catch
+            {
+                // 只读拷贝失败时仍生成独立订阅大屏工作簿，不改源文件。
+            }
+        }
+
+        Export(settings, destinationPath);
+        return true;
+    }
+
     public static bool RemoveDeprecatedTagsFromFile(string filePath)
     {
         if (!File.Exists(filePath))
@@ -719,7 +768,7 @@ public static class LineExcelConfigService
             applied = settings.Tags.Count(tag => !string.IsNullOrWhiteSpace(tag.MqttField));
         }
 
-        if (applied == 0)
+        if (applied == 0 && !LineCatalog.IsSubscribeDashboard(settings.LineName))
         {
             throw new InvalidOperationException($"产线 Excel「{FieldMappingSheetName}」中没有有效的 id/name 映射行。");
         }
@@ -754,7 +803,7 @@ public static class LineExcelConfigService
             }
 
             var tagRowCount = Math.Max(0, (tagsSheet.LastRowUsed()?.RowNumber() ?? 1) - 1);
-            if (tagRowCount > 0)
+            if (tagRowCount > 0 || LineCatalog.IsSubscribeDashboard(lineName))
             {
                 return false;
             }
@@ -1171,7 +1220,7 @@ public static class LineExcelConfigService
         settings.PublishIntervalMs = GetInt(map, "发布周期毫秒", settings.PublishIntervalMs);
         settings.TemperaturePublishThresholdC = GetDouble(map, "温度发布阈值", settings.TemperaturePublishThresholdC);
         settings.TemperaturePrecision = GetInt(map, "精度", settings.TemperaturePrecision);
-        settings.UseSimulator = GetBool(map, "使用模拟数据", settings.UseSimulator);
+        settings.UseSimulator = GetBool(map, "使用模拟数据", false);
         settings.Mqtt.Host = GetString(map, "MQTT_Broker", settings.Mqtt.Host);
         settings.Mqtt.Port = GetInt(map, "MQTT端口", settings.Mqtt.Port);
         settings.Mqtt.ClientId = GetString(map, "MQTT_ClientId", settings.Mqtt.ClientId);

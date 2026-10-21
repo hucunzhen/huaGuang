@@ -10,7 +10,7 @@ public sealed class AppSettings
     public int ScanIntervalMs { get; set; } = 2_000;
     /// <summary>MQTT 数据发布最小间隔（毫秒），与 PLC 采集周期独立。</summary>
     public int PublishIntervalMs { get; set; } = 60_000;
-    public bool UseSimulator { get; set; } = true;
+    public bool UseSimulator { get; set; }
     /// <summary>0 = 仅按发布周期上报；大于 0 时，任一温度点位变化达到该值（℃）也会触发 MQTT 发布。</summary>
     public double TemperaturePublishThresholdC { get; set; }
     /// <summary>全局默认显示与 MQTT 小数位数（0–4），适用于温度及各类模拟量；点位未单独设置时使用。</summary>

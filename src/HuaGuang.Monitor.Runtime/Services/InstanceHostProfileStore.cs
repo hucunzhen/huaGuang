@@ -115,12 +115,13 @@ public static class InstanceHostProfileStore
             return false;
         }
 
-        if (settings.OperationMode == AppOperationMode.Subscribe)
+        if (settings.OperationMode == AppOperationMode.Subscribe
+            || LineCatalog.IsSubscribeDashboard(settings.LineName))
         {
             profile = new InstanceHostProfile
             {
                 InstanceId = "sub",
-                LineName = settings.LineName,
+                LineName = LineCatalog.SubscribeDashboardLineName,
                 OperationMode = nameof(AppOperationMode.Subscribe),
                 AutoStart = true
             };

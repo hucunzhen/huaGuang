@@ -192,6 +192,9 @@
 		<MauiAsset Include="..\..\config\lines\S7测试产线.xlsx"
 		           Link="Resources\Raw\lines\s7test.xlsx"
 		           LogicalName="lines/s7test.xlsx" />
+		<MauiAsset Include="..\..\config\lines\订阅大屏.xlsx"
+		           Link="Resources\Raw\lines\subscribe.xlsx"
+		           LogicalName="lines/subscribe.xlsx" />
 		<Content Include="..\..\config\lines\*.xlsx"
 		          Exclude="..\..\config\lines\~$*;..\..\config\lines\*.new.xlsx"
 		          Link="lines\%(Filename)%(Extension)"

@@ -25,6 +25,7 @@ public static class MonitorCoreTests
         Run("数值显示精度", TestValueFormatting),
         Run("产线点位数量", TestLineCatalog),
         Run("S7 测试产线种子", TestS7TestLineCatalog),
+        Run("订阅大屏独立产线", TestSubscribeDashboardLine),
         Run("计算点位表达式", TestTagComputedExpression),
         Run("设置读写", TestSettingsRoundTrip),
         Run("Excel 配置读写", TestLineExcelRoundTrip),
@@ -572,6 +573,57 @@ public static class MonitorCoreTests
         }
 
         AssertTrue(TagComputedCatalog.TryBuildPlan(settings.Tags, out _, out _));
+    }
+
+    static void TestSubscribeDashboardLine()
+    {
+        AssertTrue(LineCatalog.IsSubscribeDashboard("订阅大屏"));
+        AssertTrue(LineCatalog.IsSubscribeDashboard("subscribe"));
+        AssertTrue(LineCatalog.ToCommandAlias("订阅大屏") == "subscribe");
+        AssertTrue(!LineCatalog.AcquisitionLineNames.Contains(LineCatalog.SubscribeDashboardLineName));
+
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, "subscribe");
+        AssertTrue(settings.LineName == LineCatalog.SubscribeDashboardLineName);
+        AssertTrue(settings.OperationMode == AppOperationMode.Subscribe);
+        AssertTrue(settings.Tags.Count == 0);
+        AssertTrue(string.IsNullOrWhiteSpace(settings.Plc.Host));
+        AssertTrue(settings.MqttEndpoints.Count == 0);
+        AssertTrue(settings.SubscribeMqtt.ClientId == MqttSubscribeAccount.DefaultClientId);
+
+        var root = Path.Combine(Path.GetTempPath(), $"huaguang-subline-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(root);
+            var xianhePath = Path.Combine(root, "先河热熔胶复合机.xlsx");
+            var dashboardPath = Path.Combine(root, "订阅大屏.xlsx");
+            var xianhe = LineExcelConfigService.CreateSeedSettings(LineCatalog.Xianhe.Name);
+            xianhe.SubscribeTopics = ["monitor/custom/telemetry"];
+            xianhe.SubscribeMqtt.Host = "10.0.0.8";
+            xianhe.SubscribeMqtt.ClientId = LineMqttDefaults.XianheClientId;
+            LineExcelConfigService.Export(xianhe, xianhePath);
+            var xianheBefore = File.ReadAllBytes(xianhePath);
+
+            AssertTrue(LineExcelConfigService.TrySeedSubscribeDashboardFile(dashboardPath, xianhePath));
+            AssertTrue(File.ReadAllBytes(xianhePath).SequenceEqual(xianheBefore));
+
+            var loaded = LineExcelConfigService.LoadLineExcel(
+                LineCatalog.SubscribeDashboardLineName,
+                dashboardPath,
+                templateFilePath: null);
+            AssertTrue(loaded.LineName == LineCatalog.SubscribeDashboardLineName);
+            AssertTrue(loaded.Tags.Count == 0);
+            AssertTrue(loaded.SubscribeTopics.Contains("monitor/custom/telemetry"));
+            AssertTrue(loaded.SubscribeMqtt.Host == "10.0.0.8");
+            AssertTrue(loaded.SubscribeMqtt.ClientId == MqttSubscribeAccount.DefaultClientId);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     static void TestTagComputedExpression()

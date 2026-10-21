@@ -39,7 +39,8 @@ public sealed class SettingsStore
     public async Task<bool> LoadAsyncIfChanged()
     {
         var pending = CaptureConfigFingerprint();
-        if (pending == _loadedFingerprint && Current.Tags.Count > 0)
+        if (pending == _loadedFingerprint
+            && (Current.Tags.Count > 0 || LineCatalog.IsSubscribeDashboard(Current.LineName)))
         {
             return false;
         }
@@ -95,7 +96,11 @@ public sealed class SettingsStore
         }
 
         var lineName = MonitorProcessInstance.StartupLineName;
-        if (string.IsNullOrWhiteSpace(lineName) || !LineCatalog.LineNames.Contains(lineName))
+        if (MonitorProcessInstance.IsSubscribeDashboardHost)
+        {
+            lineName = LineCatalog.SubscribeDashboardLineName;
+        }
+        else if (string.IsNullOrWhiteSpace(lineName) || !LineCatalog.LineNames.Contains(lineName))
         {
             if (MonitorProcessInstance.IsIsolated
                 && MonitorProcessInstance.TryResolveLineFromInstanceId(MonitorProcessInstance.Id, out var fromInstance))
@@ -119,13 +124,9 @@ public sealed class SettingsStore
                         MonitorProcessInstance.Id);
                 }
             }
+        }
 
-            LineConfigPaths.WriteActiveLineName(lineName);
-        }
-        else
-        {
-            LineConfigPaths.WriteActiveLineName(lineName);
-        }
+        LineConfigPaths.WriteActiveLineName(lineName);
 
         LineConfigPaths.EnsureLineExcel(lineName);
 
@@ -133,6 +134,12 @@ public sealed class SettingsStore
             lineName,
             LineConfigPaths.GetLineExcelPath(lineName),
             templateFilePath: null);
+        if (MonitorProcessInstance.IsSubscribeDashboardHost)
+        {
+            Current.LineName = LineCatalog.SubscribeDashboardLineName;
+            Current.DeviceId = LineCatalog.SubscribeDashboardLineName;
+            Current.OperationMode = AppOperationMode.Subscribe;
+        }
 
         MqttEndpointCatalog.Normalize(Current);
         PlcEndpointCatalog.Normalize(Current);
@@ -220,8 +227,24 @@ public sealed class SettingsStore
     public Task SaveAsync(AppSettings settings) =>
         Task.Run(() => SaveCore(settings));
 
+    /// <summary>只更新内存，不写产线 Excel（订阅大屏切回采集时不得改写采集工作簿）。</summary>
+    public void ReplaceCurrent(AppSettings settings)
+    {
+        Current = settings;
+        _excelOperationMode = settings.OperationMode;
+        _excelStartWithWindows = settings.StartWithWindows;
+        Revision++;
+    }
+
     void SaveCore(AppSettings settings)
     {
+        if (MonitorProcessInstance.IsSubscribeDashboardHost
+            || settings.OperationMode == AppOperationMode.Subscribe)
+        {
+            settings.LineName = LineCatalog.SubscribeDashboardLineName;
+            settings.OperationMode = AppOperationMode.Subscribe;
+        }
+
         Current = settings;
         var excelPath = LineConfigPaths.GetLineExcelPath(Current.LineName);
         if (MonitorProcessInstance.IsIsolated)
@@ -251,7 +274,9 @@ public sealed class SettingsStore
     public static AppSettings CreateDefault()
     {
         var settings = new AppSettings();
-        settings.LineName = LineCatalog.LineNames[0];
+        settings.LineName = MonitorProcessInstance.IsSubscribeDashboardHost
+            ? LineCatalog.SubscribeDashboardLineName
+            : LineCatalog.LineNames[0];
         return settings;
     }
 

@@ -28,7 +28,9 @@
                    LineBreakMode="WordWrap"
                    IsVisible="{Binding HasOccupancyWarning}" />
             <Label Text="运行模式" TextColor="#8AA0B5" FontSize="12" />
-            <Picker ItemsSource="{Binding OperationModes}" SelectedItem="{Binding SelectedOperationMode}" />
+            <Picker ItemsSource="{Binding OperationModes}"
+                    SelectedItem="{Binding SelectedOperationMode}"
+                    IsEnabled="{Binding CanChangeOperationMode}" />
             <Label Text="采集模式：读 PLC 并发布 MQTT。订阅模式：一个窗口可同时订阅多个主题，查看多条产线。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
             <Label Text="订阅主题（支持 + / #，可添加多个）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsSubscribeSettings}" />
@@ -57,7 +59,7 @@
             </Grid>
             <Label Text="首页可切换「全部」或单个主题查看设备；运行中也可在首页直接添加主题。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsSubscribeSettings}" />
-            <Label Text="产线（采集：一条产线一个窗口，不可重复占用；订阅：只用该 Excel 的 Broker，主题可覆盖多条产线）" TextColor="#8AA0B5" FontSize="12" />
+            <Label Text="产线（采集：一条产线一个窗口，不可重复占用；订阅大屏固定使用独立 Excel，不读写任何采集产线工作簿）" TextColor="#8AA0B5" FontSize="12" />
             <Picker ItemsSource="{Binding LineNames}"
                     SelectedItem="{Binding SelectedLineName}"
                     IsEnabled="{Binding CanChangeLinePicker}" />

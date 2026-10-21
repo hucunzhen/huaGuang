@@ -212,6 +212,14 @@ public sealed class PlcClientHub : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            try
+            {
+                await client.DisconnectAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+
             return (new Dictionary<string, object?>(StringComparer.Ordinal), ex.Message);
         }
     }

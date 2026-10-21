@@ -42,6 +42,8 @@ public sealed class MonitorProcessInstanceTests
         Assert.Equal("上海火焰复合机", MonitorProcessInstance.ParseLine(["--line=进口机-上海机"]));
         Assert.Equal("MES火焰复合机", MonitorProcessInstance.ParseLine(["--line", "meshy"]));
         Assert.Equal("S7测试产线", MonitorProcessInstance.ParseLine(["--line", "s7"]));
+        Assert.Equal("订阅大屏", MonitorProcessInstance.ParseLine(["--line", "subscribe"]));
+        Assert.Equal("订阅大屏", MonitorProcessInstance.ParseLine(["--line=订阅"]));
         Assert.Equal(AppOperationMode.Acquisition, MonitorProcessInstance.ParseMode(["--mode", "采集"]));
         Assert.Equal(AppOperationMode.Subscribe, MonitorProcessInstance.ParseMode(["--mode=subscribe"]));
         Assert.Throws<InvalidOperationException>(() => MonitorProcessInstance.ParseLine(["--line", "unknown"]));
@@ -57,7 +59,8 @@ public sealed class MonitorProcessInstanceTests
         Assert.Equal("先河热熔胶复合机", xianhe);
         Assert.True(MonitorProcessInstance.TryResolveLineFromInstanceId("acq-cyhy", out var cyhy));
         Assert.Equal("C型火焰复合机", cyhy);
-        Assert.False(MonitorProcessInstance.TryResolveLineFromInstanceId("sub", out _));
+        Assert.True(MonitorProcessInstance.TryResolveLineFromInstanceId("sub", out var subscribe));
+        Assert.Equal("订阅大屏", subscribe);
         Assert.False(MonitorProcessInstance.TryResolveLineFromInstanceId(null, out _));
 
         var args = MonitorProcessInstance.FormatHostArgumentsFor(
@@ -129,8 +132,10 @@ public sealed class MonitorProcessInstanceTests
         {
             var args = MonitorProcessInstance.FormatHostArguments(AppOperationMode.Subscribe, "先河热熔胶复合机");
             Assert.Contains("--instance sub", args, StringComparison.Ordinal);
+            Assert.Contains("--line subscribe", args, StringComparison.Ordinal);
             Assert.Contains("--mode subscribe", args, StringComparison.Ordinal);
             Assert.DoesNotContain("--mode acquisition", args, StringComparison.Ordinal);
+            Assert.DoesNotContain("--line xianhe", args, StringComparison.Ordinal);
         }
         finally
         {
@@ -154,6 +159,18 @@ public sealed class MonitorProcessInstanceTests
         {
             MonitorProcessInstance.ResetForTests(null);
         }
+    }
+
+    [Fact]
+    public void Subscribe_instance_always_pins_dashboard_line()
+    {
+        Assert.True(MonitorProcessInstance.TryResolveLineFromInstanceId("sub", out var line));
+        Assert.Equal("订阅大屏", line);
+        var args = MonitorProcessInstance.FormatHostArgumentsFor(
+            "sub",
+            AppOperationMode.Acquisition,
+            "先河热熔胶复合机");
+        Assert.Equal("--instance sub --line subscribe --mode subscribe", args);
     }
 
     [Fact]
@@ -197,6 +214,7 @@ public sealed class MonitorProcessInstanceTests
         };
         Assert.True(InstanceHostProfileStore.TryCreateDiscoveredProfile(settings, out var profile));
         Assert.Equal("sub", profile.InstanceId);
+        Assert.Equal("订阅大屏", profile.LineName);
         Assert.Equal(nameof(AppOperationMode.Subscribe), profile.OperationMode);
     }
 

@@ -6,7 +6,7 @@ public static class DesktopShortcutCatalog
 
     public static IReadOnlyList<DesktopShortcutDefinition> Definitions { get; } =
     [
-        new("sub", "订阅大屏", "--instance sub --mode subscribe"),
+        new("sub", "订阅大屏", "--instance sub --line subscribe --mode subscribe"),
         new("acq-xianhe", "先河采集", "--instance acq-xianhe --line xianhe --mode acquisition"),
         new("acq-huadi", "华迪采集", "--instance acq-huadi --line huadi --mode acquisition"),
         new("acq-safen", "撒粉采集", "--instance acq-safen --line safen --mode acquisition"),

@@ -10,12 +10,13 @@ namespace HuaGuang.Monitor.Services;
 public static class LineCatalog
 {
     public const string ProductSkuTagName = "产品货号";
-    public const int Version = 13;
+    public const int Version = 14;
 
     public const string S7TestLineName = "S7测试产线";
     public const string ZhidahyLineName = "智达火焰复合机";
     public const string ShanghaihyLineName = "上海火焰复合机";
     public const string MeshyLineName = "MES火焰复合机";
+    public const string SubscribeDashboardLineName = "订阅大屏";
 
     public static IReadOnlyList<string> LineNames { get; } =
     [
@@ -27,11 +28,25 @@ public static class LineCatalog
         ZhidahyLineName,
         ShanghaihyLineName,
         MeshyLineName,
-        S7TestLineName
+        S7TestLineName,
+        SubscribeDashboardLineName
     ];
+
+    public static IReadOnlyList<string> AcquisitionLineNames { get; } =
+        LineNames.Where(name => !IsSubscribeDashboard(name)).ToArray();
+
+    public static bool IsSubscribeDashboard(string? lineName) =>
+        TryResolveLineName(lineName, out var resolved)
+        && resolved == SubscribeDashboardLineName;
 
     public static void Apply(AppSettings settings, string lineName)
     {
+        if (IsSubscribeDashboard(lineName) || lineName == SubscribeDashboardLineName)
+        {
+            ApplySubscribeDashboard(settings);
+            return;
+        }
+
         var line = Resolve(lineName);
         settings.LineName = line.Name;
         settings.DeviceId = line.Name;
@@ -69,7 +84,30 @@ public static class LineCatalog
         settings.Plc.Model = "XD5E-60T10";
         settings.Plc.Host = line.Host;
         settings.Plc.Port = 502;
+        settings.UseSimulator = false;
         PlcSettingsHelper.Normalize(settings.Plc);
+    }
+
+    static void ApplySubscribeDashboard(AppSettings settings)
+    {
+        settings.LineName = SubscribeDashboardLineName;
+        settings.DeviceId = SubscribeDashboardLineName;
+        settings.OperationMode = AppOperationMode.Subscribe;
+        settings.AddressCatalogVersion = Version;
+        settings.UseSimulator = false;
+        settings.StartWithWindows = false;
+        settings.Tags = [];
+        settings.Plc.Host = string.Empty;
+        settings.Plc.Port = 502;
+        PlcSettingsHelper.Normalize(settings.Plc);
+        settings.MqttPayload = MqttFieldMappingCatalog.CreatePropertiesPayloadProfile();
+        LineMqttDefaults.ApplyBroker(settings.Mqtt);
+        settings.Mqtt.Topic = string.Empty;
+        settings.Mqtt.ClientId = MqttSubscribeAccount.DefaultClientId;
+        settings.MqttEndpoints = [];
+        LineMqttDefaults.ApplySubscribeTopics(settings);
+        MqttSubscribeAccount.ApplyBrokerFromPublish(settings.SubscribeMqtt, settings.Mqtt);
+        settings.SubscribeMqtt.ClientId = MqttSubscribeAccount.DefaultClientId;
     }
 
     public static LineProfile Resolve(string? lineName) => lineName switch
@@ -82,6 +120,7 @@ public static class LineCatalog
         ShanghaihyLineName => Shanghaihy,
         MeshyLineName => Meshy,
         S7TestLineName => S7Test,
+        SubscribeDashboardLineName => SubscribeDashboard,
         _ => Xianhe
     };
 
@@ -96,8 +135,15 @@ public static class LineCatalog
         ShanghaihyLineName => "shanghaihy",
         MeshyLineName => "meshy",
         S7TestLineName => "s7test",
+        SubscribeDashboardLineName => "subscribe",
         _ => "xianhe"
     };
+
+    public static LineProfile SubscribeDashboard { get; } = new(
+        SubscribeDashboardLineName,
+        string.Empty,
+        string.Empty,
+        []);
 
     public static LineProfile S7Test { get; } = new(
         S7TestLineName,
@@ -448,6 +494,7 @@ public static class LineCatalog
         ShanghaihyLineName => "上海",
         MeshyLineName => "MES",
         S7TestLineName => "S7测试",
+        SubscribeDashboardLineName => "订阅大屏",
         "先河热熔胶复合机" => "先河",
         _ => string.IsNullOrWhiteSpace(lineName) ? "产线" : lineName.Trim()
     };
@@ -482,6 +529,7 @@ public static class LineCatalog
             "上海" or "上海机" or "进口机" or "进口机-上海机" or "上海火焰" or "SHANGHAIHY" or "SHHYFJ" => ShanghaihyLineName,
             "MES" or "复合机MES" or "MES火焰" or "MESHY" or "MESHYFJ" => MeshyLineName,
             "S7" or "S7TEST" or "S7测试" => S7TestLineName,
+            "订阅" or "订阅大屏" or "SUBSCRIBE" or "SUB" => SubscribeDashboardLineName,
             _ => string.Empty
         };
         return lineName.Length > 0;
@@ -504,6 +552,7 @@ public static class LineCatalog
             ShanghaihyLineName => "shanghaihy",
             MeshyLineName => "meshy",
             S7TestLineName => "s7",
+            SubscribeDashboardLineName => "subscribe",
             _ => "xianhe"
         };
     }
