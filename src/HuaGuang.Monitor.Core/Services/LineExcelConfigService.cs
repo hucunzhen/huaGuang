@@ -21,7 +21,8 @@ public static class LineExcelConfigService
 
     static readonly string[] TagHeaders =
     [
-        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "显示分组", "扫码输入", "表达式", "所属PLC"
+        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移",
+        "显示分组", "开关状态文案", "扫码输入", "表达式", "所属PLC"
     ];
 
     static readonly (string Key, string Label, string Hint)[] MqttPayloadRows =
@@ -677,6 +678,7 @@ public static class LineExcelConfigService
                 DisplayPrecision = catalogTag.DisplayPrecision,
                 MqttField = catalogTag.MqttField,
                 DisplayCategory = catalogTag.DisplayCategory,
+                SwitchStatusLabels = catalogTag.SwitchStatusLabels,
                 Enabled = catalogTag.Enabled
             };
             PlcTagIdentity.AssignStableId(added, settings.LineName);
@@ -1121,9 +1123,10 @@ public static class LineExcelConfigService
             sheet.Cell(row, 11).Value = tag.Offset;
             sheet.Cell(row, 12).Value = TagDisplayCategoryHelper.ToLabel(
                 tag.DisplayCategory ?? TagDisplayCategoryHelper.InferCategory(tag));
-            sheet.Cell(row, 13).Value = tag.UseScannerInput ? "是" : "否";
-            sheet.Cell(row, 14).Value = tag.IsComputed ? tag.Expression : string.Empty;
-            sheet.Cell(row, 15).Value = tag.IsPlc
+            sheet.Cell(row, 13).Value = tag.SwitchStatusLabels ?? string.Empty;
+            sheet.Cell(row, 14).Value = tag.UseScannerInput ? "是" : "否";
+            sheet.Cell(row, 15).Value = tag.IsComputed ? tag.Expression : string.Empty;
+            sheet.Cell(row, 16).Value = tag.IsPlc
                 ? PlcEndpointCatalog.Resolve(settings, tag.PlcId).Name
                 : string.Empty;
             row++;
@@ -1143,7 +1146,7 @@ public static class LineExcelConfigService
 
         var rows = new (TagDisplayCategory Category, string Description, string Presentation)[]
         {
-            (TagDisplayCategory.Switch, "Bool / 运行停止类点位", "大圆点 + 运行中/已停止，绿/红高亮"),
+            (TagDisplayCategory.Switch, "Bool / 运行停止类点位；可用「开关状态文案」自定义多档", "大圆点 + 状态文案，按状态码配色"),
             (TagDisplayCategory.Temperature, "名称含「温度」或单位 ℃；当前注胶机编号与当前工作温度同组", "橙色分组 + 左侧色条"),
             (TagDisplayCategory.Process, "车速、间隙、张力等工艺数值", "青色分组 + 左侧色条"),
             (TagDisplayCategory.Setting, "手动输入：型号、货号、门幅、厚度等", "蓝色分组 + 左侧色条"),
@@ -1162,6 +1165,9 @@ public static class LineExcelConfigService
 
         sheet.Cell(row + 1, 1).Value = "用法";
         sheet.Cell(row + 2, 1).Value = "在「点表」工作表的「显示分组」列填写上表分组名称；留空则程序按数据类型自动推断。";
+        sheet.Cell(row + 3, 1).Value = "开关状态文案";
+        sheet.Cell(row + 4, 1).Value =
+            "格式：0=关;1=开;2=待机。例：0=手动模式;1=自动模式;2=自动中;3=清洗模式;4=清洗中。留空则运行状态默认 关/开/待机，Bool 默认 开/关。";
         sheet.Columns(1, 4).AdjustToContents();
     }
 
@@ -1456,6 +1462,25 @@ public static class LineExcelConfigService
                 if (TagDisplayCategoryHelper.TryParseLabel(categoryText, out var category))
                 {
                     tag.DisplayCategory = category;
+                }
+            }
+
+            var switchLabelsColumn = FindTagColumn(sheet, "开关状态文案");
+            if (switchLabelsColumn <= 0)
+            {
+                switchLabelsColumn = FindTagColumn(sheet, "状态文案");
+            }
+
+            if (switchLabelsColumn > 0)
+            {
+                var rawLabels = sheet.Cell(row, switchLabelsColumn).GetString().Trim();
+                if (SwitchStatusLabelsParser.TryParse(rawLabels, out _, out var labelsError))
+                {
+                    tag.SwitchStatusLabels = SwitchStatusLabelsParser.Normalize(rawLabels);
+                }
+                else
+                {
+                    loadWarnings.Add($"点位「{tag.Name}」开关状态文案无效：{labelsError}");
                 }
             }
 

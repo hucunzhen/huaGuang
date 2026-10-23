@@ -24,6 +24,16 @@
             <Label Text="对应产线 Excel「点表·显示分组」。选「自动推断」则按类型/名称归类。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
 
+            <VerticalStackLayout Spacing="8" IsVisible="{Binding ShowSwitchStatusLabels}">
+                <Label Text="开关状态文案（可选）" TextColor="#8AA0B5" FontSize="12" />
+                <Picker ItemsSource="{Binding SwitchStatusPresetOptions}"
+                        SelectedItem="{Binding SelectedSwitchStatusPreset}" />
+                <Entry Text="{Binding SwitchStatusLabels}"
+                       Placeholder="0=关;1=开;2=待机" />
+                <Label Text="按 PLC 数值显示文案。例：0=手动模式;1=自动模式;2=自动中;3=清洗模式;4=清洗中。留空则运行状态默认关/开/待机。"
+                       TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            </VerticalStackLayout>
+
             <Label Text="MQTT 字段名" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding MqttField}" Placeholder="如 run_status、speed；留空用映射表或点位名称" />
             <Label Text="对应产线 Excel「字段映射」表的 id 列；平铺 JSON 报文根级字段名。"

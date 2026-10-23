@@ -12,7 +12,11 @@ internal static class ModbusTagBatchReader
 
 {
 
-    const int MaxRegisterGap = 120;
+    /// <summary>
+    /// 相邻点位地址差超过此值则拆成多次读。过大时会一次读穿大片空寄存器，
+    /// 信捷在连接异常时更容易半包/错事务号，表现为连上后读一直超时。
+    /// </summary>
+    const int MaxRegisterGap = 8;
 
     const int MaxRegistersPerRead = 125;
 

@@ -26,6 +26,12 @@ public sealed class PlcTag
     /// <summary>监控页显示分组；留空则按数据类型/名称自动推断（产线 Excel「点表·显示分组」）。</summary>
     public TagDisplayCategory? DisplayCategory { get; set; }
 
+    /// <summary>
+    /// 开关状态数值→文案，如 <c>0=关;1=开;2=待机</c> 或 <c>0=手动模式;1=自动模式;2=自动中;3=清洗模式;4=清洗中</c>。
+    /// 留空则按点位类型用内置默认（运行状态 0/1/2，Bool 开/关）。
+    /// </summary>
+    public string SwitchStatusLabels { get; set; } = string.Empty;
+
     /// <summary>手动文本点位是否在监控页支持 USB 扫码枪输入。</summary>
     public bool UseScannerInput { get; set; }
 

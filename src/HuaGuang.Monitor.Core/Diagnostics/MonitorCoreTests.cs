@@ -45,6 +45,7 @@ public static class MonitorCoreTests
         Run("产线 MQTT 默认", TestLineMqttDefaults),
         Run("字段映射参考", TestReferenceFieldMapping),
         Run("点位显示分类", TestTagDisplayCategory),
+        Run("开关状态文案", TestSwitchStatusLabels),
         Run("历史数据存储", TestHistoryStoreRoundTrip),
         Run("订阅历史点位名称", TestSubscribeHistoryTagNames),
         Run("订阅按发送产线点表", TestSubscribeUsesSenderLineCatalog),
@@ -733,6 +734,8 @@ public static class MonitorCoreTests
             original.MqttPayload.TagsPath = "data.tags";
             original.Tags.First(tag => tag.Name == "车速").MqttField = "speed";
             original.Tags.First(tag => tag.Name == "运行状态").DisplayCategory = TagDisplayCategory.Switch;
+            original.Tags.First(tag => tag.Name == "运行状态").SwitchStatusLabels =
+                SwitchStatusLabelsParser.HandAutoCleanLabels;
             original.Tags.First(tag => tag.Name == "车速").DisplayCategory = TagDisplayCategory.Process;
             original.SubscribeTopics = ["monitor/+/telemetry", "monitor/test/#"];
             original.HistoryDirectory = @"F:\Data\history";
@@ -749,6 +752,8 @@ public static class MonitorCoreTests
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").MqttField == "speed");
             AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").DataType == TagDataType.Int16);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").DisplayCategory == TagDisplayCategory.Switch);
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").SwitchStatusLabels
+                == SwitchStatusLabelsParser.Normalize(SwitchStatusLabelsParser.HandAutoCleanLabels));
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").DisplayCategory == TagDisplayCategory.Process);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "油温机温度").DisplayCategory == TagDisplayCategory.Temperature);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
@@ -1106,6 +1111,33 @@ public static class MonitorCoreTests
                 File.Delete(tempPath);
             }
         }
+    }
+
+    static void TestSwitchStatusLabels()
+    {
+        AssertTrue(SwitchStatusLabelsParser.TryParse(
+            "0=手动模式;1=自动模式;2=自动中;3=清洗模式;4=清洗中",
+            out var map,
+            out var error) && string.IsNullOrEmpty(error));
+        AssertTrue(map[0] == "手动模式" && map[4] == "清洗中");
+
+        var tag = new PlcTag
+        {
+            Name = "运行状态",
+            DataType = TagDataType.Int16,
+            DisplayCategory = TagDisplayCategory.Switch,
+            SwitchStatusLabels = SwitchStatusLabelsParser.HandAutoCleanLabels
+        };
+        AssertTrue(SwitchStatusFormatting.FormatDisplayText(tag, 0) == "手动模式");
+        AssertTrue(SwitchStatusFormatting.FormatDisplayText(tag, 2) == "自动中");
+        AssertTrue(SwitchStatusFormatting.FormatDisplayText(tag, 4) == "清洗中");
+        AssertTrue(SwitchStatusFormatting.FormatDisplayText(tag, 9) == "未知(9)");
+        AssertTrue(SwitchStatusFormatting.TryFormatMqttText(tag, 1, out var mqtt) && mqtt == "自动模式");
+
+        var legacy = new PlcTag { Name = "运行状态", DataType = TagDataType.Int16 };
+        AssertTrue(SwitchStatusFormatting.FormatDisplayText(legacy, 0) == "关");
+        AssertTrue(SwitchStatusFormatting.FormatDisplayText(legacy, 1) == "开");
+        AssertTrue(SwitchStatusFormatting.FormatDisplayText(legacy, 2) == "待机");
     }
 
     static void TestTagDisplayCategory()

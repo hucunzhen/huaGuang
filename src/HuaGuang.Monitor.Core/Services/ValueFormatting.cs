@@ -33,11 +33,6 @@ public static class ValueFormatting
             return "—";
         }
 
-        if (RunStatusFormatting.IsRunStatusTag(tag))
-        {
-            return RunStatusFormatting.GetStatusText(value);
-        }
-
         if (SwitchStatusFormatting.TryFormatDisplayText(tag, value, out var switchText))
         {
             return switchText;

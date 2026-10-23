@@ -67,33 +67,11 @@ public partial class TagRowViewModel : ObservableObject
     string ResolveSwitchIndicatorText() =>
         SwitchStatusFormatting.FormatIndicatorText(_tag, Value);
 
-    Color ResolveSwitchAccentColor()
-    {
-        if (RunStatusFormatting.IsRunStatusTag(_tag))
-            return Color.FromArgb(RunStatusFormatting.GetAccentColor(Value));
+    Color ResolveSwitchAccentColor() =>
+        Color.FromArgb(SwitchStatusFormatting.GetAccentColor(_tag, Value));
 
-        if (Value is bool flag)
-            return Color.FromArgb(flag ? "#3DDC97" : "#FF6B6B");
-
-        return Color.FromArgb(CategoryAccentColor);
-    }
-
-    Color ResolveSwitchBackgroundColor()
-    {
-        if (RunStatusFormatting.IsRunStatusTag(_tag))
-            return Color.FromArgb(RunStatusFormatting.GetBackgroundColor(Value));
-
-        if (Value is bool flag)
-            return Color.FromArgb(flag ? "#143328" : "#331E24");
-
-        return Category switch
-        {
-            TagDisplayCategory.Temperature => Color.FromArgb("#1E2430"),
-            TagDisplayCategory.Process => Color.FromArgb("#152536"),
-            TagDisplayCategory.Setting => Color.FromArgb("#182030"),
-            _ => Color.FromArgb("#152536")
-        };
-    }
+    Color ResolveSwitchBackgroundColor() =>
+        Color.FromArgb(SwitchStatusFormatting.GetBackgroundColor(_tag, Value));
 
     public Color ValueColor
     {

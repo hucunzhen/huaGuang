@@ -98,6 +98,12 @@ static class WindowsSingleInstanceGuard
                         continue;
                     }
 
+                    // 锁文件偶发读不到时，仍按命令行 --instance 排除独立窗口，避免主程序误退出。
+                    if (IsIsolatedHostProcess(process.Id))
+                    {
+                        continue;
+                    }
+
                     peerPid = process.Id;
                     return true;
                 }
@@ -183,6 +189,84 @@ static class WindowsSingleInstanceGuard
         return pids;
     }
 
+    /// <summary>
+    /// 独立窗口启动参数含 <c>--instance</c>；主程序不应把它当成「已有主 UI」。
+    /// </summary>
+    static bool IsIsolatedHostProcess(int pid)
+    {
+        if (!TryGetProcessCommandLine(pid, out var commandLine) || string.IsNullOrWhiteSpace(commandLine))
+        {
+            return false;
+        }
+
+        return CommandLineContainsInstanceSwitch(commandLine);
+    }
+
+    internal static bool CommandLineContainsInstanceSwitch(string commandLine)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine))
+        {
+            return false;
+        }
+
+        // 匹配 --instance / --instance=id，避免误伤路径里偶然出现的 instance 字样。
+        for (var i = 0; i < commandLine.Length; i++)
+        {
+            if (commandLine[i] != '-')
+            {
+                continue;
+            }
+
+            if (i > 0 && !char.IsWhiteSpace(commandLine[i - 1]) && commandLine[i - 1] != '"')
+            {
+                continue;
+            }
+
+            if (commandLine.AsSpan(i).StartsWith("--instance", StringComparison.OrdinalIgnoreCase))
+            {
+                var after = i + "--instance".Length;
+                if (after >= commandLine.Length
+                    || char.IsWhiteSpace(commandLine[after])
+                    || commandLine[after] == '='
+                    || commandLine[after] == '"')
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    static bool TryGetProcessCommandLine(int pid, out string? commandLine)
+    {
+        commandLine = null;
+        try
+        {
+            // 用 WMI 脚本 COM，避免额外引用 System.Management。
+            var locatorType = Type.GetTypeFromProgID("WbemScripting.SWbemLocator");
+            if (locatorType is null)
+            {
+                return false;
+            }
+
+            dynamic locator = Activator.CreateInstance(locatorType)!;
+            dynamic services = locator.ConnectServer(".", @"root\cimv2");
+            dynamic results = services.ExecQuery(
+                $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}");
+            foreach (dynamic proc in results)
+            {
+                commandLine = proc.CommandLine as string;
+                return !string.IsNullOrWhiteSpace(commandLine);
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
     static bool TryAcquireLockFile() => TryAcquireLockFileAt(LockFilePath);
 
     static bool TryAcquireLockFileAt(string lockFilePath)
@@ -193,11 +277,12 @@ static class WindowsSingleInstanceGuard
             Directory.CreateDirectory(directory);
 
             _lockStream?.Dispose();
+            // FileShare.Read：其它进程仍可读 PID；写权限仍互斥，避免双主实例。
             _lockStream = new FileStream(
                 lockFilePath,
                 FileMode.OpenOrCreate,
                 FileAccess.ReadWrite,
-                FileShare.None);
+                FileShare.Read);
 
             _lockStream.SetLength(0);
             var payload = Encoding.UTF8.GetBytes($"{Environment.ProcessId}{Environment.NewLine}{DateTimeOffset.Now:O}");
@@ -257,7 +342,13 @@ static class WindowsSingleInstanceGuard
                 return false;
             }
 
-            var firstLine = File.ReadLines(lockFilePath).FirstOrDefault();
+            using var stream = new FileStream(
+                lockFilePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            var firstLine = reader.ReadLine();
             return int.TryParse(firstLine, out pid);
         }
         catch

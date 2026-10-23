@@ -43,6 +43,13 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Other),
     ];
 
+    public string[] SwitchStatusPresetOptions { get; } =
+    [
+        "默认（关/开/待机）",
+        "手自动清洗（0–4）",
+        "自定义"
+    ];
+
     [ObservableProperty] string title = "新增点位";
     [ObservableProperty] string name = string.Empty;
     [ObservableProperty] string unit = string.Empty;
@@ -63,13 +70,18 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowPrecision))]
     [NotifyPropertyChangedFor(nameof(ShowScannerInputOption))]
+    [NotifyPropertyChangedFor(nameof(ShowSwitchStatusLabels))]
     string dataTypeName = nameof(TagDataType.Float32);
     [ObservableProperty] string byteOrderName = nameof(Models.ByteOrder.CDAB);
     [ObservableProperty] string scale = "1";
     [ObservableProperty] string offset = "0";
     [ObservableProperty] string displayPrecision = string.Empty;
     [ObservableProperty] string mqttField = string.Empty;
-    [ObservableProperty] string selectedDisplayCategoryOption = "自动推断";
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSwitchStatusLabels))]
+    string selectedDisplayCategoryOption = "自动推断";
+    [ObservableProperty] string switchStatusLabels = string.Empty;
+    [ObservableProperty] string selectedSwitchStatusPreset = "默认（关/开/待机）";
     [ObservableProperty] string statusMessage = string.Empty;
     [ObservableProperty] bool useScannerInput;
     [ObservableProperty]
@@ -90,10 +102,64 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     public bool ShowPrecision =>
         DataTypeName != nameof(TagDataType.String) && DataTypeName != nameof(TagDataType.Bool);
 
+    public bool ShowSwitchStatusLabels =>
+        SelectedDisplayCategoryOption == TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Switch)
+        || string.Equals(Name, RunStatusFormatting.TagName, StringComparison.Ordinal)
+        || DataTypeName == nameof(TagDataType.Bool)
+        || !string.IsNullOrWhiteSpace(SwitchStatusLabels);
+
+    partial void OnNameChanged(string value) => OnPropertyChanged(nameof(ShowSwitchStatusLabels));
+
+    partial void OnSwitchStatusLabelsChanged(string value)
+    {
+        OnPropertyChanged(nameof(ShowSwitchStatusLabels));
+        SyncPresetFromLabels(value);
+    }
+
+    partial void OnSelectedSwitchStatusPresetChanged(string value)
+    {
+        if (_suppressSwitchPreset)
+        {
+            return;
+        }
+
+        SwitchStatusLabels = value switch
+        {
+            "默认（关/开/待机）" => string.Empty,
+            "手自动清洗（0–4）" => SwitchStatusLabelsParser.HandAutoCleanLabels,
+            _ => SwitchStatusLabels
+        };
+    }
+
+    bool _suppressSwitchPreset;
+
+    void SyncPresetFromLabels(string value)
+    {
+        _suppressSwitchPreset = true;
+        try
+        {
+            var normalized = SwitchStatusLabelsParser.Normalize(value);
+            SelectedSwitchStatusPreset = normalized switch
+            {
+                "" => "默认（关/开/待机）",
+                _ when string.Equals(
+                    normalized,
+                    SwitchStatusLabelsParser.Normalize(SwitchStatusLabelsParser.HandAutoCleanLabels),
+                    StringComparison.Ordinal) => "手自动清洗（0–4）",
+                _ => "自定义"
+            };
+        }
+        finally
+        {
+            _suppressSwitchPreset = false;
+        }
+    }
+
     partial void OnDataTypeNameChanged(string value)
     {
         OnPropertyChanged(nameof(ShowPrecision));
         OnPropertyChanged(nameof(ShowScannerInputOption));
+        OnPropertyChanged(nameof(ShowSwitchStatusLabels));
         if (value != nameof(TagDataType.String))
         {
             UseScannerInput = false;
@@ -164,6 +230,8 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 SelectedDisplayCategoryOption = tag.DisplayCategory is { } category
                     ? TagDisplayCategoryHelper.ToLabel(category)
                     : "自动推断";
+                SwitchStatusLabels = tag.SwitchStatusLabels ?? string.Empty;
+                SyncPresetFromLabels(SwitchStatusLabels);
                 UseScannerInput = tag.UseScannerInput;
                 SelectedPlcName = PlcEndpointCatalog.Resolve(_store.Current, tag.PlcId).Name;
                 OnPropertyChanged(nameof(PlcNameOptions));
@@ -219,6 +287,14 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
             : TagDisplayCategoryHelper.TryParseLabel(SelectedDisplayCategoryOption, out var category)
                 ? category
                 : TagDisplayCategoryHelper.InferCategory(tag);
+
+        if (!SwitchStatusLabelsParser.TryParse(SwitchStatusLabels, out _, out var switchLabelsError))
+        {
+            StatusMessage = switchLabelsError;
+            return;
+        }
+
+        tag.SwitchStatusLabels = SwitchStatusLabelsParser.Normalize(SwitchStatusLabels);
         tag.UseScannerInput = UseScannerInput && IsManualSource && dataType == TagDataType.String;
 
         if (IsComputedSource)
@@ -342,6 +418,8 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         DisplayPrecision = string.Empty;
         MqttField = string.Empty;
         SelectedDisplayCategoryOption = "自动推断";
+        SwitchStatusLabels = string.Empty;
+        SelectedSwitchStatusPreset = "默认（关/开/待机）";
         UseScannerInput = false;
         StatusMessage = string.Empty;
         PlcEndpointCatalog.Normalize(_store.Current);

@@ -844,8 +844,8 @@ public partial class SettingsViewModel : ObservableObject
 
             settings.SubscribeTopics = topics;
             settings.SubscribeTopic = topics.Count > 0 ? topics[0] : "monitor/+/telemetry";
-        settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
-        settings.LineName = SelectedLineName;
+            settings.DeviceId = string.IsNullOrWhiteSpace(DeviceId) ? SelectedLineName : DeviceId.Trim();
+            settings.LineName = SelectedLineName;
         BindSubscribeLineOnSettings(settings);
         settings.ScanIntervalMs = ParseInt(ScanIntervalMs, 2_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxScanIntervalMs);
             settings.PublishIntervalMs = ParseInt(PublishIntervalMs, 60_000, AcquisitionTiming.MinIntervalMs, AcquisitionTiming.MaxPublishIntervalMs);

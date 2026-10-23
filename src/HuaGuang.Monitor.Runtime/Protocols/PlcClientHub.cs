@@ -196,7 +196,7 @@ public sealed class PlcClientHub : IAsyncDisposable
         return merged;
     }
 
-    static async Task<(IReadOnlyDictionary<string, object?> Values, string? Error)> ReadGroupAsync(
+    async Task<(IReadOnlyDictionary<string, object?> Values, string? Error)> ReadGroupAsync(
         IPlcClient client,
         IReadOnlyList<PlcTag> tags,
         CancellationToken cancellationToken)
@@ -220,7 +220,28 @@ public sealed class PlcClientHub : IAsyncDisposable
             {
             }
 
+            // 读失败后短退避，避免每 2 秒重连把信捷 TCP 槽打满。
+            MarkRetryAfter(client, TimeSpan.FromSeconds(3));
+            _logger.LogWarning(ex, "PLC 批量读取失败，已断开并退避重连");
             return (new Dictionary<string, object?>(StringComparer.Ordinal), ex.Message);
+        }
+    }
+
+    void MarkRetryAfter(IPlcClient client, TimeSpan delay)
+    {
+        lock (_gate)
+        {
+            foreach (var session in _sessions.Values)
+            {
+                if (ReferenceEquals(session.Client, client))
+                {
+                    session.RetryAfter = DateTimeOffset.UtcNow.Add(delay);
+                    session.LastError = string.IsNullOrWhiteSpace(session.LastError)
+                        ? "读失败，短暂退避后重连"
+                        : session.LastError;
+                    return;
+                }
+            }
         }
     }
 

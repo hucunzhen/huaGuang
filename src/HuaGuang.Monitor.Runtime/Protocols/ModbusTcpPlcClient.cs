@@ -45,10 +45,14 @@ public sealed class ModbusTcpPlcClient : IPlcClient
             client.ReceiveTimeout = timeoutMs;
             client.SendTimeout = timeoutMs;
 
+            var master = new ModbusFactory().CreateMaster(client);
+            master.Transport.ReadTimeout = timeoutMs;
+            master.Transport.WriteTimeout = timeoutMs;
+
             lock (_gate)
             {
                 _tcpClient = client;
-                _master = new ModbusFactory().CreateMaster(client);
+                _master = master;
                 _station = settings.Station;
                 _timeoutMs = timeoutMs;
             }
@@ -181,7 +185,6 @@ public sealed class ModbusTcpPlcClient : IPlcClient
 
     void AbortOnTimeout()
     {
-        _logger.LogWarning("PLC 读超时或传输失败，清理连接");
         lock (_gate)
         {
             try

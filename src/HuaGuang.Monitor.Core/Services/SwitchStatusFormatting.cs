@@ -2,7 +2,7 @@ using HuaGuang.Monitor.Models;
 
 namespace HuaGuang.Monitor.Services;
 
-/// <summary>开关类点位显示与 MQTT 发布统一为中文文本（开/关/待机）。</summary>
+/// <summary>开关类点位显示与 MQTT 发布统一为中文文本（可配置多档状态）。</summary>
 public static class SwitchStatusFormatting
 {
     public static string FormatDisplayText(PlcTag tag, object? value) =>
@@ -15,7 +15,7 @@ public static class SwitchStatusFormatting
             return "—";
         }
 
-        return text == "待机" ? "待" : text;
+        return ShortenIndicator(text);
     }
 
     public static bool TryFormatDisplayText(PlcTag tag, object? value, out string text) =>
@@ -29,21 +29,18 @@ public static class SwitchStatusFormatting
             return false;
         }
 
-        if (value is string existing && existing is "开" or "关" or "待机")
+        if (value is string existing
+            && (existing is "开" or "关" or "待机"
+                || LooksLikeKnownLabel(tag, existing)))
         {
             text = existing;
             return true;
         }
 
-        if (RunStatusFormatting.IsRunStatusTag(tag))
+        var map = ResolveMap(tag);
+        if (map is not null && RunStatusFormatting.TryGetCode(value) is int code)
         {
-            text = RunStatusFormatting.TryGetCode(value) switch
-            {
-                0 => "关",
-                1 => "开",
-                2 => "待机",
-                _ => "关"
-            };
+            text = SwitchStatusLabelsParser.FormatLabel(map, code);
             return true;
         }
 
@@ -55,6 +52,76 @@ public static class SwitchStatusFormatting
 
         return false;
     }
+
+    public static string GetAccentColor(PlcTag tag, object? value) =>
+        RunStatusFormatting.TryGetCode(value) is int code
+            ? GetAccentColor(code)
+            : value is bool flag
+                ? (flag ? "#3DDC97" : "#FF6B6B")
+                : "#8AA0B5";
+
+    public static string GetBackgroundColor(PlcTag tag, object? value) =>
+        RunStatusFormatting.TryGetCode(value) is int code
+            ? GetBackgroundColor(code)
+            : value is bool flag
+                ? (flag ? "#143328" : "#331E24")
+                : "#152536";
+
+    public static string GetAccentColor(int code) => code switch
+    {
+        0 => "#FF6B6B",
+        1 => "#3DDC97",
+        2 => "#FFB347",
+        3 => "#4DA3FF",
+        4 => "#B388FF",
+        _ => "#8AA0B5"
+    };
+
+    public static string GetBackgroundColor(int code) => code switch
+    {
+        0 => "#331E24",
+        1 => "#143328",
+        2 => "#332A14",
+        3 => "#142433",
+        4 => "#241433",
+        _ => "#152536"
+    };
+
+    static IReadOnlyDictionary<int, string>? ResolveMap(PlcTag tag)
+    {
+        if (SwitchStatusLabelsParser.TryParse(tag.SwitchStatusLabels, out var custom, out _)
+            && custom.Count > 0)
+        {
+            return custom;
+        }
+
+        if (RunStatusFormatting.IsRunStatusTag(tag))
+        {
+            return SwitchStatusLabelsParser.DefaultRunStatusMap;
+        }
+
+        return null;
+    }
+
+    static bool LooksLikeKnownLabel(PlcTag tag, string existing)
+    {
+        var map = ResolveMap(tag);
+        return map is not null && map.Values.Any(label =>
+            string.Equals(label, existing, StringComparison.Ordinal));
+    }
+
+    static string ShortenIndicator(string text) => text switch
+    {
+        "待机" => "待",
+        "手动模式" => "手",
+        "自动模式" => "自",
+        "自动中" => "自",
+        "清洗模式" => "洗",
+        "清洗中" => "洗",
+        "开" or "关" => text,
+        _ when text.Length <= 2 => text,
+        _ => text[..1]
+    };
 
     static bool IsOn(object? value) => value switch
     {

@@ -27,7 +27,8 @@ internal static class ModbusIoTimeout
                 throw;
             }
 
-            throw new TimeoutException($"Modbus 通信超时或中断（{timeoutMs} ms）。", ex);
+            // 保留真实原因（事务号错乱、半包等），勿只报“超时”，否则现场无法区分。
+            throw new TimeoutException($"Modbus 通信失败（限时 {timeoutMs} ms）：{ex.Message}", ex);
         }
     }
 

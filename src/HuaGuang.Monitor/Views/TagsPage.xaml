@@ -17,9 +17,9 @@
                     BackgroundColor="#152536"
                     Padding="{Binding Source={x:Reference ThisPage}, Path=CardPadding}"
                     MinimumHeightRequest="{Binding Source={x:Reference ThisPage}, Path=CardMinHeight}">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
                 <Grid ColumnDefinitions="4,*">
                     <BoxView Grid.Column="0" Color="{Binding AccentColor}" WidthRequest="4" VerticalOptions="Fill" />
                     <VerticalStackLayout Grid.Column="1" Spacing="4" Padding="4,0,0,0">
@@ -53,27 +53,27 @@
                                LineBreakMode="TailTruncation"
                                FontSize="{Binding Source={x:Reference ThisPage}, Path=CaptionFontSize}" />
                         <Grid ColumnDefinitions="*,*" ColumnSpacing="6">
-                            <Button Text="编辑"
-                                    Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.EditCommand}"
-                                    CommandParameter="{Binding .}"
+                                <Button Text="编辑"
+                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.EditCommand}"
+                                        CommandParameter="{Binding .}"
                                     Padding="6,4"
                                     MinimumHeightRequest="32"
                                     MinimumWidthRequest="0"
                                     FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
-                            <Button Grid.Column="1"
-                                    Text="删除"
-                                    Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.DeleteCommand}"
-                                    CommandParameter="{Binding .}"
-                                    BackgroundColor="#5A2430"
+                                <Button Grid.Column="1"
+                                        Text="删除"
+                                        Command="{Binding Source={x:Reference ThisPage}, Path=BindingContext.DeleteCommand}"
+                                        CommandParameter="{Binding .}"
+                                        BackgroundColor="#5A2430"
                                     Padding="6,4"
                                     MinimumHeightRequest="32"
                                     MinimumWidthRequest="0"
                                     FontSize="{Binding Source={x:Reference ThisPage}, Path=ButtonFontSize}" />
                         </Grid>
                     </VerticalStackLayout>
-                </Grid>
-            </Border>
-        </DataTemplate>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
     </views:MonitorPageBase.Resources>
 
     <Grid RowDefinitions="Auto,Auto,*,Auto"
