@@ -20,17 +20,25 @@ public sealed class FallbackLogExportLocationService : ILogExportLocationService
     public Task<LogExportDeliveryResult> WriteZipAsync(
         LogExportLocationChoice location,
         string localZipPath,
-        string zipFileName)
+        string zipFileName) =>
+        WriteFileAsync(location, localZipPath, zipFileName, "application/zip");
+
+    public Task<LogExportDeliveryResult> WriteFileAsync(
+        LogExportLocationChoice location,
+        string localFilePath,
+        string fileName,
+        string mimeType)
     {
+        _ = mimeType;
         var directory = location.SettingsStorageValue;
         Directory.CreateDirectory(directory);
-        var targetPath = Path.Combine(directory, zipFileName);
+        var targetPath = Path.Combine(directory, fileName);
         if (File.Exists(targetPath))
         {
             File.Delete(targetPath);
         }
 
-        File.Copy(localZipPath, targetPath, overwrite: true);
+        File.Copy(localFilePath, targetPath, overwrite: true);
         return Task.FromResult(new LogExportDeliveryResult
         {
             DisplayPath = targetPath,

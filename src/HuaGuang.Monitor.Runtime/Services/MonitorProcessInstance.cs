@@ -368,7 +368,16 @@ public static class MonitorProcessInstance
         "acq-zhidahy",
         "acq-shanghaihy",
         "acq-meshy",
-        "acq-s7"
+        "acq-zl028a",
+        "acq-zl028b",
+        "acq-zl028c",
+        "acq-zl027a",
+        "acq-zl027b",
+        "acq-zl027c",
+        "acq-dxj10",
+        "acq-s7",
+        "acq-dxj11",
+        "acq-hongbei"
     ];
 
     /// <summary>仅系统刚开机时短暂错峰；平时启动不再空等。</summary>

@@ -33,7 +33,7 @@
 		<ApplicationId>com.industrial.monitor</ApplicationId>
 
 		<!-- Versions: DisplayVersion=版本号, ApplicationVersion=修订号(Android versionCode) -->
-		<ApplicationDisplayVersion>1.1.15</ApplicationDisplayVersion>
+		<ApplicationDisplayVersion>1.1.16</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
@@ -76,6 +76,14 @@
 		      DestinationFiles="$(OutDir)logo.ico"
 		      SkipUnchangedFiles="true"
 		      Condition="Exists('$(MSBuildProjectDirectory)\Resources\AppIcon\appicon.ico')" />
+	</Target>
+
+	<!-- ReadyToRun 会改写 NuGet 程序集并去掉 Authenticode。
+	     工控机应用控制策略会拦截未签名文件（0x800711C7 / 无法确认发布者）。 -->
+	<Target Name="RestoreSignedAssemblies"
+	        AfterTargets="Publish"
+	        Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+		<Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\restore-signed-assemblies.ps1&quot; -PublishDir &quot;$(PublishDir.TrimEnd('\'))&quot;" />
 	</Target>
 
 	<Target Name="CopyWindowIconForTitleBarPublish"
@@ -189,6 +197,33 @@
 		<MauiAsset Include="..\..\config\lines\MES火焰复合机.xlsx"
 		           Link="Resources\Raw\lines\meshy.xlsx"
 		           LogicalName="lines/meshy.xlsx" />
+		<MauiAsset Include="..\..\config\lines\起毛机ZL-028A.xlsx"
+		           Link="Resources\Raw\lines\zl028a.xlsx"
+		           LogicalName="lines/zl028a.xlsx" />
+		<MauiAsset Include="..\..\config\lines\起毛机ZL-028B.xlsx"
+		           Link="Resources\Raw\lines\zl028b.xlsx"
+		           LogicalName="lines/zl028b.xlsx" />
+		<MauiAsset Include="..\..\config\lines\起毛机ZL-028C.xlsx"
+		           Link="Resources\Raw\lines\zl028c.xlsx"
+		           LogicalName="lines/zl028c.xlsx" />
+		<MauiAsset Include="..\..\config\lines\起毛机ZL-027A.xlsx"
+		           Link="Resources\Raw\lines\zl027a.xlsx"
+		           LogicalName="lines/zl027a.xlsx" />
+		<MauiAsset Include="..\..\config\lines\起毛机ZL-027B.xlsx"
+		           Link="Resources\Raw\lines\zl027b.xlsx"
+		           LogicalName="lines/zl027b.xlsx" />
+		<MauiAsset Include="..\..\config\lines\起毛机ZL-027C.xlsx"
+		           Link="Resources\Raw\lines\zl027c.xlsx"
+		           LogicalName="lines/zl027c.xlsx" />
+		<MauiAsset Include="..\..\config\lines\定型机10号.xlsx"
+		           Link="Resources\Raw\lines\dxj10.xlsx"
+		           LogicalName="lines/dxj10.xlsx" />
+		<MauiAsset Include="..\..\config\lines\定型机11号.xlsx"
+		           Link="Resources\Raw\lines\dxj11.xlsx"
+		           LogicalName="lines/dxj11.xlsx" />
+		<MauiAsset Include="..\..\config\lines\烘焙机.xlsx"
+		           Link="Resources\Raw\lines\hongbei.xlsx"
+		           LogicalName="lines/hongbei.xlsx" />
 		<MauiAsset Include="..\..\config\lines\S7测试产线.xlsx"
 		           Link="Resources\Raw\lines\s7test.xlsx"
 		           LogicalName="lines/s7test.xlsx" />

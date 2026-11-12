@@ -144,7 +144,7 @@
             </HorizontalStackLayout>
             <Label Text="保留天数（1–365）" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding HistoryRetentionDays}" Keyboard="Numeric" Placeholder="1" />
-            <Label Text="超出保留期的历史记录会在启动时自动清理。" TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
+            <Label Text="每天 0 点后清理。保留 1 天时清掉 2 天以前的数据，昨天整天会留下。启动时也会按同一规则清理一次。" TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" />
             <Label Text="历史数据保存目录" TextColor="#8AA0B5" FontSize="12" />
             <Entry Text="{Binding HistoryDirectory}" Placeholder="留空则使用程序数据目录" />
             <Label Text="{Binding HistoryDirectoryHint}" TextColor="#6E8499" FontSize="11" LineBreakMode="WordWrap" />

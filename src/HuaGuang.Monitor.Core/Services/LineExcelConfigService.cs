@@ -21,8 +21,8 @@ public static class LineExcelConfigService
 
     static readonly string[] TagHeaders =
     [
-        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移",
-        "显示分组", "开关状态文案", "扫码输入", "表达式", "所属PLC"
+        "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "二次",
+        "有效下限", "有效上限", "显示分组", "开关状态文案", "扫码输入", "表达式", "所属PLC"
     ];
 
     static readonly (string Key, string Label, string Hint)[] MqttPayloadRows =
@@ -679,6 +679,8 @@ public static class LineExcelConfigService
                 MqttField = catalogTag.MqttField,
                 DisplayCategory = catalogTag.DisplayCategory,
                 SwitchStatusLabels = catalogTag.SwitchStatusLabels,
+                ValidMin = catalogTag.ValidMin,
+                ValidMax = catalogTag.ValidMax,
                 Enabled = catalogTag.Enabled
             };
             PlcTagIdentity.AssignStableId(added, settings.LineName);
@@ -706,6 +708,105 @@ public static class LineExcelConfigService
         var required = catalogTags.Where(tag => requiredNames.Contains(tag.Name)).ToList();
         MergeMissingCatalogTags(settings, required);
     }
+
+    /// <summary>
+    /// 磁盘上的点表比本次加载更新时，以磁盘点表为底，只叠加上次加载后在界面里改过的点。
+    /// 避免保存设置或改一个点时，把启动时的旧点表整表写回去。
+    /// </summary>
+    public static List<PlcTag> MergeDiskTagsWithEdits(
+        IReadOnlyList<(string Name, string Signature)> loaded,
+        IReadOnlyList<PlcTag> edited,
+        IReadOnlyList<PlcTag> disk)
+    {
+        if (loaded.Count == 0)
+        {
+            return disk.ToList();
+        }
+
+        var loadedByName = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (name, signature) in loaded)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                loadedByName.TryAdd(name, signature);
+            }
+        }
+
+        var editedByName = new Dictionary<string, PlcTag>(StringComparer.Ordinal);
+        foreach (var tag in edited)
+        {
+            if (!string.IsNullOrWhiteSpace(tag.Name))
+            {
+                editedByName.TryAdd(tag.Name, tag);
+            }
+        }
+
+        var diskNames = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<PlcTag>(disk.Count);
+        foreach (var diskTag in disk)
+        {
+            if (string.IsNullOrWhiteSpace(diskTag.Name) || !diskNames.Add(diskTag.Name))
+            {
+                continue;
+            }
+
+            editedByName.TryGetValue(diskTag.Name, out var editedTag);
+            loadedByName.TryGetValue(diskTag.Name, out var loadedSignature);
+            if (editedTag is null)
+            {
+                if (loadedSignature is null)
+                {
+                    result.Add(diskTag);
+                }
+
+                continue;
+            }
+
+            var userChanged = loadedSignature is null
+                ? !string.Equals(TagEditSignature(diskTag), TagEditSignature(editedTag), StringComparison.Ordinal)
+                : !string.Equals(loadedSignature, TagEditSignature(editedTag), StringComparison.Ordinal);
+            result.Add(userChanged ? editedTag : diskTag);
+        }
+
+        foreach (var editedTag in edited)
+        {
+            if (string.IsNullOrWhiteSpace(editedTag.Name) || diskNames.Contains(editedTag.Name))
+            {
+                continue;
+            }
+
+            if (!loadedByName.TryGetValue(editedTag.Name, out var loadedSignature)
+                || !string.Equals(loadedSignature, TagEditSignature(editedTag), StringComparison.Ordinal))
+            {
+                result.Add(editedTag);
+            }
+        }
+
+        return result;
+    }
+
+    public static string TagEditSignature(PlcTag tag) =>
+        string.Join(
+            '\u001f',
+            tag.Name,
+            tag.Source,
+            tag.XinjeAddress,
+            tag.DataType,
+            tag.Unit,
+            tag.ByteOrder,
+            tag.Enabled,
+            tag.ManualValue,
+            tag.DisplayPrecision?.ToString() ?? string.Empty,
+            tag.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            tag.Offset.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            tag.Quadratic.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            tag.ValidMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+            tag.ValidMax?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+            tag.DisplayCategory?.ToString() ?? string.Empty,
+            tag.SwitchStatusLabels,
+            tag.UseScannerInput,
+            tag.Expression,
+            tag.MqttField);
 
     static void ValidateWorkbookFormat(XLWorkbook workbook)
     {
@@ -1121,12 +1222,15 @@ public static class LineExcelConfigService
             sheet.Cell(row, 9).Value = tag.DisplayPrecision?.ToString() ?? string.Empty;
             sheet.Cell(row, 10).Value = tag.Scale;
             sheet.Cell(row, 11).Value = tag.Offset;
-            sheet.Cell(row, 12).Value = TagDisplayCategoryHelper.ToLabel(
+            sheet.Cell(row, 12).Value = tag.Quadratic;
+            sheet.Cell(row, 13).Value = tag.ValidMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            sheet.Cell(row, 14).Value = tag.ValidMax?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            sheet.Cell(row, 15).Value = TagDisplayCategoryHelper.ToLabel(
                 tag.DisplayCategory ?? TagDisplayCategoryHelper.InferCategory(tag));
-            sheet.Cell(row, 13).Value = tag.SwitchStatusLabels ?? string.Empty;
-            sheet.Cell(row, 14).Value = tag.UseScannerInput ? "是" : "否";
-            sheet.Cell(row, 15).Value = tag.IsComputed ? tag.Expression : string.Empty;
-            sheet.Cell(row, 16).Value = tag.IsPlc
+            sheet.Cell(row, 16).Value = tag.SwitchStatusLabels ?? string.Empty;
+            sheet.Cell(row, 17).Value = tag.UseScannerInput ? "是" : "否";
+            sheet.Cell(row, 18).Value = tag.IsComputed ? tag.Expression : string.Empty;
+            sheet.Cell(row, 19).Value = tag.IsPlc
                 ? PlcEndpointCatalog.Resolve(settings, tag.PlcId).Name
                 : string.Empty;
             row++;
@@ -1168,6 +1272,9 @@ public static class LineExcelConfigService
         sheet.Cell(row + 3, 1).Value = "开关状态文案";
         sheet.Cell(row + 4, 1).Value =
             "格式：0=关;1=开;2=待机。例：0=手动模式;1=自动模式;2=自动中;3=清洗模式;4=清洗中。留空则运行状态默认 关/开/待机，Bool 默认 开/关。";
+        sheet.Cell(row + 5, 1).Value = "有效下限 / 有效上限";
+        sheet.Cell(row + 6, 1).Value =
+            "缩放后的数值范围；任一侧留空表示不限制。超出范围时该点位视为读取失败（Quality=Bad），不写入有效值。";
         sheet.Columns(1, 4).AdjustToContents();
     }
 
@@ -1429,8 +1536,24 @@ public static class LineExcelConfigService
             var manualValue = sheet.Cell(row, 8).GetString().Trim();
             var precisionText = sheet.Cell(row, 9).GetString().Trim();
             int? precision = int.TryParse(precisionText, out var parsedPrecision) ? parsedPrecision : null;
-            var scale = ParseDoubleCell(sheet.Cell(row, 10), 1);
-            var offset = ParseDoubleCell(sheet.Cell(row, 11), 0);
+            var scaleColumn = FindTagColumn(sheet, "倍率");
+            if (scaleColumn <= 0)
+            {
+                scaleColumn = FindTagColumn(sheet, "比例");
+            }
+
+            var offsetColumn = FindTagColumn(sheet, "偏移");
+            var quadraticColumn = FindTagColumn(sheet, "二次");
+            if (quadraticColumn <= 0)
+            {
+                quadraticColumn = FindTagColumn(sheet, "二次项");
+            }
+
+            var scale = ParseDoubleCell(sheet.Cell(row, scaleColumn > 0 ? scaleColumn : 10), 1);
+            var offset = ParseDoubleCell(sheet.Cell(row, offsetColumn > 0 ? offsetColumn : 11), 0);
+            var quadratic = quadraticColumn > 0
+                ? ParseDoubleCell(sheet.Cell(row, quadraticColumn), 0)
+                : 0;
 
             var expressionColumn = FindTagColumn(sheet, "表达式");
             var expression = expressionColumn > 0
@@ -1452,9 +1575,29 @@ public static class LineExcelConfigService
                 DisplayPrecision = precision,
                 Scale = scale,
                 Offset = offset,
+                Quadratic = quadratic,
                 Expression = source == TagSource.Computed ? expression : string.Empty,
                 PlcId = plcRef
             };
+
+            var minColumn = FindTagColumn(sheet, "有效下限");
+            var maxColumn = FindTagColumn(sheet, "有效上限");
+            if (minColumn > 0)
+            {
+                tag.ValidMin = ParseOptionalDoubleCell(sheet.Cell(row, minColumn));
+            }
+
+            if (maxColumn > 0)
+            {
+                tag.ValidMax = ParseOptionalDoubleCell(sheet.Cell(row, maxColumn));
+            }
+
+            if (!TagValueRange.TryValidateConfig(tag, out var rangeConfigError))
+            {
+                loadWarnings.Add($"点位「{tag.Name}」{rangeConfigError}");
+                tag.ValidMin = null;
+                tag.ValidMax = null;
+            }
 
             if (displayCategoryColumn > 0)
             {
@@ -1637,6 +1780,30 @@ public static class LineExcelConfigService
         }
 
         return double.TryParse(cell.GetString(), out var parsed) ? parsed : fallback;
+    }
+
+    static double? ParseOptionalDoubleCell(IXLCell cell)
+    {
+        if (cell.IsEmpty())
+        {
+            return null;
+        }
+
+        if (cell.TryGetValue(out double value))
+        {
+            return value;
+        }
+
+        var text = cell.GetString().Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        return double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            || double.TryParse(text, out parsed)
+            ? parsed
+            : null;
     }
 
     static string ReadCellText(IXLCell cell)

@@ -68,15 +68,11 @@ $appVer = & (Join-Path $PSScriptRoot "Get-AppVersion.ps1") $project
 
 Write-Host "Building installer ($($appVer.Label)) ..." -ForegroundColor Cyan
 $publishDirDefine = $publishDir.Trim().TrimEnd('\', '/')
-$publishDirArg = '/DPublishDir="{0}"' -f $publishDirDefine
-Invoke-NativeCommand -FilePath $iscc -WorkingDirectory $installerDir -ArgumentList @(
-    $publishDirArg,
-    "/DMyAppVersion=$($appVer.Version)",
-    "/DMyAppRevision=$($appVer.Revision)",
-    $iss
-) -Label "ISCC"
-
 $setup = Join-Path $outputDir "IndustrialMonitor-$($appVer.FileSuffix)-Setup.exe"
+$signScript = Join-Path $PSScriptRoot "sign-with-signtool.ps1"
+& $signScript -PublishDir $publishDirDefine -Iscc $iscc -Iss $iss -Version $appVer.Version -Revision $appVer.Revision -SetupPath $setup -SkipIfMissing
+if ($LASTEXITCODE -ne 0) { throw "签名或安装包编译失败。" }
+
 if (-not (Test-Path -LiteralPath $setup)) {
     $newest = Get-ChildItem -LiteralPath $outputDir -Filter "IndustrialMonitor-*-Setup.exe" -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTimeUtc -Descending |

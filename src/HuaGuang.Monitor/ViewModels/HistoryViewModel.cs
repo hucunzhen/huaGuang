@@ -4,13 +4,21 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HuaGuang.Monitor.Models;
 using HuaGuang.Monitor.Services;
+using HuaGuang.Monitor.Services.LogExport;
 
 namespace HuaGuang.Monitor.ViewModels;
 
 public partial class HistoryViewModel : ObservableObject
 {
+#if !WINDOWS
+    const string ExcelMimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+#endif
+
     readonly HistoryStore _store;
     readonly SettingsStore _settings;
+#if !WINDOWS
+    readonly ILogExportLocationService _exportLocation;
+#endif
 
     bool _suppressFilterRefresh;
     bool _refreshQueued;
@@ -27,10 +35,15 @@ public partial class HistoryViewModel : ObservableObject
     IReadOnlyList<PlcTag> _catalogTags = [];
     MqttPayloadProfile _mqttProfile = new();
 
-    public HistoryViewModel(HistoryStore store, SettingsStore settings)
+    public HistoryViewModel(HistoryStore store, SettingsStore settings, ILogExportLocationService exportLocation)
     {
         _store = store;
         _settings = settings;
+#if WINDOWS
+        _ = exportLocation;
+#else
+        _exportLocation = exportLocation;
+#endif
         RangeOptions = ["最近 24 小时", "最近 7 天", "最近 30 天", "自定义时间"];
         SelectedRange = RangeOptions[0];
         DeviceOptions = ["全部设备"];
@@ -67,6 +80,13 @@ public partial class HistoryViewModel : ObservableObject
     [ObservableProperty] DateTime customEndDate;
     [ObservableProperty] TimeSpan customEndTime;
     [ObservableProperty] bool showCustomTimeFilters;
+    [ObservableProperty] bool isExporting;
+    [ObservableProperty] double exportProgress;
+    [ObservableProperty] string exportProgressText = string.Empty;
+
+    public bool ShowBusySpinner => IsBusy && !IsExporting;
+
+    partial void OnIsExportingChanged(bool value) => OnPropertyChanged(nameof(ShowBusySpinner));
 
     public Task InitializeAsync()
     {
@@ -91,6 +111,259 @@ public partial class HistoryViewModel : ObservableObject
 
     [RelayCommand]
     Task RefreshAsync() => RefreshDataAsync();
+
+    [RelayCommand]
+    async Task ExportAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        string? tempPath = null;
+        var previousSummary = SummaryText;
+        try
+        {
+            await _settings.LoadAsyncIfChanged();
+            var (from, to) = ResolveQueryRange();
+            var selectedDevice = SelectedDevice;
+            var deviceFilter = ResolveDeviceFilter(selectedDevice);
+            var count = await _store.CountMatchingAsync(new HistoryQuery
+            {
+                From = from,
+                To = to,
+                DeviceId = deviceFilter
+            });
+            if (count == 0)
+            {
+                StatusMessage = "当前筛选条件下没有可导出的记录。";
+                return;
+            }
+
+            var fileName = BuildExportFileName(deviceFilter);
+            var destination = await PickExportDestinationAsync(fileName);
+            if (destination is null)
+            {
+                return;
+            }
+
+            StatusMessage = string.Empty;
+            SummaryText = $"正在导出 {count} 条…";
+            IsExporting = true;
+            ReportExportProgress(0, count);
+
+            var catalogTags = selectedDevice is "全部设备" or null
+                ? _settings.Current.Tags
+                : SubscribeLineCatalog.ResolveTags(selectedDevice, null, _settings.Current.Tags);
+            var preferredTags = _settings.Current.Tags
+                .Where(tag => tag.Enabled)
+                .Select(tag => tag.Name)
+                .ToList();
+            var tagUnits = _settings.Current.Tags
+                .Where(tag => tag.Enabled)
+                .GroupBy(tag => tag.Name, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => (string?)group.First().Unit, StringComparer.Ordinal);
+            var precision = _settings.Current.TemperaturePrecision;
+            var mqttProfile = _settings.Current.MqttPayload ?? new MqttPayloadProfile();
+
+            tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-history-{Guid.NewGuid():N}.xlsx");
+            IReadOnlyList<HistoryTableColumn>? fixedColumns = null;
+            HistoryExcelWriter? writer = null;
+            var written = 0;
+            try
+            {
+                var offset = 0;
+                while (offset < count)
+                {
+                    var table = await _store.QueryTableAsync(
+                        new HistoryQuery
+                        {
+                            From = from,
+                            To = to,
+                            DeviceId = deviceFilter,
+                            Limit = HistoryExcelWriter.ExportPageSize,
+                            Offset = offset
+                        },
+                        precision,
+                        preferredTags,
+                        fixedColumns,
+                        tagUnits,
+                        catalogTags,
+                        mqttProfile);
+                    if (table.Rows.Count == 0)
+                    {
+                        break;
+                    }
+
+                    fixedColumns ??= table.Columns;
+                    writer ??= new HistoryExcelWriter(fixedColumns);
+                    writer.AddRows(table.Rows);
+                    written += table.Rows.Count;
+                    offset += table.Rows.Count;
+                    ReportExportProgress(written, count);
+                    if (table.Rows.Count < HistoryExcelWriter.ExportPageSize)
+                    {
+                        break;
+                    }
+                }
+
+                if (writer is null || written == 0)
+                {
+                    SummaryText = previousSummary;
+                    StatusMessage = "当前筛选条件下没有可导出的记录。";
+                    return;
+                }
+
+                ReportExportProgress(written, count, "正在写入 Excel…", 0.95);
+                await Task.Yield();
+                var saving = writer;
+                writer = null;
+                var exportPath = tempPath;
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        saving.Save(exportPath);
+                    }
+                    finally
+                    {
+                        saving.Dispose();
+                    }
+                });
+            }
+            finally
+            {
+                writer?.Dispose();
+            }
+
+            ReportExportProgress(written, count, "正在保存文件…", 0.98);
+            await Task.Yield();
+            var delivered = await Task.Run(() => destination.DeliverAsync(tempPath, fileName));
+            ReportExportProgress(written, count, "导出完成", 1);
+            SummaryText = $"已导出 {written} 条到 {delivered}";
+        }
+        catch (Exception ex)
+        {
+            SummaryText = previousSummary;
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+            IsExporting = false;
+            ExportProgress = 0;
+            ExportProgressText = string.Empty;
+            if (tempPath is not null)
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch (IOException)
+                {
+                }
+            }
+        }
+    }
+
+    void ReportExportProgress(int written, int total, string? phase = null, double? progress = null)
+    {
+        var fraction = total <= 0 ? 0 : Math.Clamp(written / (double)total, 0, 1);
+        ExportProgress = progress ?? fraction * 0.9;
+        ExportProgressText = phase ?? $"已导出 {written} / {total}";
+    }
+
+    async Task<ExportDestination?> PickExportDestinationAsync(string fileName)
+    {
+#if WINDOWS
+        var picked = await PickWindowsExcelPathAsync(Path.GetFileNameWithoutExtension(fileName));
+        if (string.IsNullOrWhiteSpace(picked))
+        {
+            return null;
+        }
+
+        if (!picked.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            picked += ".xlsx";
+        }
+
+        var path = picked;
+        return new ExportDestination((temp, _) =>
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.Copy(temp, path, overwrite: true);
+            return Task.FromResult(path);
+        });
+#else
+        var choice = await _exportLocation.PickDirectoryAsync(_settings.Current.LogExportDirectory);
+        if (choice is null)
+        {
+            return null;
+        }
+
+        return new ExportDestination(async (temp, name) =>
+        {
+            var delivered = await _exportLocation.WriteFileAsync(choice, temp, name, ExcelMimeType);
+            return delivered.DisplayPath;
+        });
+#endif
+    }
+
+#if WINDOWS
+    static async Task<string?> PickWindowsExcelPathAsync(string suggestedName)
+    {
+        var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView
+                     as Microsoft.UI.Xaml.Window;
+        if (window is null)
+        {
+            throw new InvalidOperationException("无法打开保存对话框：窗口不可用。");
+        }
+
+        var picker = new global::Windows.Storage.Pickers.FileSavePicker
+        {
+            SuggestedStartLocation = global::Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = suggestedName
+        };
+        picker.FileTypeChoices.Add("Excel 工作簿", new List<string> { ".xlsx" });
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        var file = await picker.PickSaveFileAsync();
+        return file?.Path;
+    }
+#endif
+
+    static string BuildExportFileName(string? deviceFilter)
+    {
+        var devicePart = string.IsNullOrWhiteSpace(deviceFilter) ? "全部设备" : deviceFilter;
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(devicePart.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray()).Trim();
+        if (sanitized.Length > 40)
+        {
+            sanitized = sanitized[..40];
+        }
+
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            sanitized = "全部设备";
+        }
+
+        return $"历史数据-{sanitized}-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx";
+    }
+
+    sealed class ExportDestination
+    {
+        readonly Func<string, string, Task<string>> _deliver;
+
+        public ExportDestination(Func<string, string, Task<string>> deliver) => _deliver = deliver;
+
+        public Task<string> DeliverAsync(string tempPath, string fileName) => _deliver(tempPath, fileName);
+    }
 
     async Task RefreshDataAsync()
     {
@@ -200,6 +473,7 @@ public partial class HistoryViewModel : ObservableObject
 
     partial void OnIsBusyChanged(bool value)
     {
+        OnPropertyChanged(nameof(ShowBusySpinner));
         PreviousPageCommand.NotifyCanExecuteChanged();
         NextPageCommand.NotifyCanExecuteChanged();
         GoToPageCommand.NotifyCanExecuteChanged();

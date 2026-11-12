@@ -23,7 +23,7 @@ public static class TagComputedEvaluator
             return false;
         }
 
-        var scaled = number * tag.Scale + tag.Offset;
+        var scaled = Protocols.RegisterConverter.ToEngineering(number, tag);
         result = tag.DataType switch
         {
             TagDataType.Bool => scaled != 0,

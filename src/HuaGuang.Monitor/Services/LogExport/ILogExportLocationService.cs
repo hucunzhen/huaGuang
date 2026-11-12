@@ -22,4 +22,10 @@ public interface ILogExportLocationService
         LogExportLocationChoice location,
         string localZipPath,
         string zipFileName);
+
+    Task<LogExportDeliveryResult> WriteFileAsync(
+        LogExportLocationChoice location,
+        string localFilePath,
+        string fileName,
+        string mimeType);
 }

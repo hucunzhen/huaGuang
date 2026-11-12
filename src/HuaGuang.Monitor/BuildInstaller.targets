@@ -76,7 +76,7 @@
     <MakeDir Directories="$(InstallerOutputDir)" Condition="'$(_IsccPath)' != ''" />
 
     <Exec Condition="'$(_IsccPath)' != ''"
-          Command="&quot;$(_IsccPath)&quot; /DPublishDir=&quot;$(_PublishDirArg)&quot; /DMyAppVersion=&quot;$(ApplicationDisplayVersion)&quot; /DMyAppRevision=&quot;$(ApplicationVersion)&quot; &quot;$(InstallerIssFile)&quot;"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\sign-with-signtool.ps1&quot; -PublishDir &quot;$(_PublishDirArg)&quot; -Iscc &quot;$(_IsccPath)&quot; -Iss &quot;$(InstallerIssFile)&quot; -Version &quot;$(ApplicationDisplayVersion)&quot; -Revision &quot;$(ApplicationVersion)&quot; -SetupPath &quot;$(InstallerOutputDir)\IndustrialMonitor-$(ApplicationDisplayVersion)-r$(ApplicationVersion)-Setup.exe&quot; -SkipIfMissing"
           WorkingDirectory="$(MSBuildProjectDirectory)\..\..\installer"
           IgnoreExitCode="true"
           ConsoleToMSBuild="true">

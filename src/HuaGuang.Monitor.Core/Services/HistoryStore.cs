@@ -360,6 +360,7 @@ public sealed class HistoryStore
                 rows.Add(new HistoryTableRow
                 {
                     SampleId = sample.Id,
+                    RecordedAt = sample.RecordedAt,
                     RecordedAtText = recordedAtText,
                     DeviceId = sample.DeviceId,
                     TagCells = tagCells
@@ -674,6 +675,7 @@ public sealed class HistoryStore
                     if (day < cutoffDay)
                     {
                         await DeleteDatabaseFileAsync(path).ConfigureAwait(false);
+                        deleted++;
                         continue;
                     }
 

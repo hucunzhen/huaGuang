@@ -46,7 +46,13 @@ public static partial class SiemensS7AddressMapper
             return true;
         }
 
-        error = "S7 地址格式无效。示例：IW64、ID64、QW4、DB1.DBD0、M0.0、I0.0、%IW64。";
+        // S7-200 / SMART 的 V 区在 S7.Net 中按 DB1 访问（VW6000 → DB1.DBW6000）。
+        if (TryResolveVariableMemory(text, dataType, out resolved, out error))
+        {
+            return true;
+        }
+
+        error = "S7 地址格式无效。示例：IW64、ID64、QW4、VW6000、VD6030、DB1.DBD0、M0.0、I0.0、%IW64。";
         return false;
     }
 
@@ -156,6 +162,26 @@ public static partial class SiemensS7AddressMapper
         }
 
         return false;
+    }
+
+    static bool TryResolveVariableMemory(string text, TagDataType dataType, out S7ResolvedAddress resolved, out string error)
+    {
+        resolved = default;
+        error = string.Empty;
+        if (!TryResolveArea(text, "V", S7MemoryArea.DataBlock, dataType, out var areaResolved, out error))
+        {
+            return false;
+        }
+
+        // V 区映射到 DB1，保留原 VW/VD 写法便于对照点表。
+        resolved = new S7ResolvedAddress(
+            S7MemoryArea.DataBlock,
+            DbNumber: 1,
+            areaResolved.ByteOffset,
+            areaResolved.BitOffset,
+            areaResolved.IsBit,
+            areaResolved.Normalized);
+        return true;
     }
 
     static bool TryResolveArea(

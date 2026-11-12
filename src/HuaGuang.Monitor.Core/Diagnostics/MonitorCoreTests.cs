@@ -25,6 +25,8 @@ public static class MonitorCoreTests
         Run("数值显示精度", TestValueFormatting),
         Run("产线点位数量", TestLineCatalog),
         Run("S7 测试产线种子", TestS7TestLineCatalog),
+        Run("起毛机 MA876A 产线", TestQimaoMa876aLines),
+        Run("定型机与烘焙机产线", TestDingxingHongbeiLines),
         Run("订阅大屏独立产线", TestSubscribeDashboardLine),
         Run("计算点位表达式", TestTagComputedExpression),
         Run("设置读写", TestSettingsRoundTrip),
@@ -46,6 +48,7 @@ public static class MonitorCoreTests
         Run("字段映射参考", TestReferenceFieldMapping),
         Run("点位显示分类", TestTagDisplayCategory),
         Run("开关状态文案", TestSwitchStatusLabels),
+        Run("点位有效值范围", TestTagValueRange),
         Run("历史数据存储", TestHistoryStoreRoundTrip),
         Run("订阅历史点位名称", TestSubscribeHistoryTagNames),
         Run("订阅按发送产线点表", TestSubscribeUsesSenderLineCatalog),
@@ -544,6 +547,17 @@ public static class MonitorCoreTests
 
         AssertTrue(SiemensS7AddressMapper.TryResolve("ID100", TagDataType.Float32, out var inputDword, out _));
         AssertTrue(inputDword.ByteOffset == 100);
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("VW6000", TagDataType.Int16, out var vw, out _));
+        AssertTrue(vw.Area == S7MemoryArea.DataBlock);
+        AssertTrue(vw.DbNumber == 1);
+        AssertTrue(vw.ByteOffset == 6000);
+        AssertTrue(vw.Normalized == "VW6000");
+
+        AssertTrue(SiemensS7AddressMapper.TryResolve("VD6030", TagDataType.Int32, out var vd, out _));
+        AssertTrue(vd.DbNumber == 1);
+        AssertTrue(vd.ByteOffset == 6030);
+        AssertTrue(vd.Normalized == "VD6030");
     }
 
     static void TestRegisterConverter()
@@ -551,6 +565,20 @@ public static class MonitorCoreTests
         var value = RegisterConverter.ToValue([0x0000, 0x0000], TagDataType.Float32, ByteOrder.CDAB);
         AssertTrue(value is float);
         AssertTrue(Math.Abs(Convert.ToSingle(value)) < 0.001);
+
+        var linear = new PlcTag { DataType = TagDataType.Float32, Scale = 0.1, Offset = 2 };
+        AssertTrue(Math.Abs(Convert.ToDouble(RegisterConverter.ApplyScale(100, linear)) - 12) < 1e-9);
+
+        var quadratic = new PlcTag
+        {
+            DataType = TagDataType.Float32,
+            Quadratic = 0.01,
+            Scale = 2,
+            Offset = 3
+        };
+        // 0.01*10² + 2*10 + 3 = 24
+        AssertTrue(Math.Abs(Convert.ToDouble(RegisterConverter.ApplyScale(10, quadratic)) - 24) < 1e-9);
+        AssertTrue(Math.Abs(RegisterConverter.ToEngineering(10, quadratic) - 24) < 1e-9);
     }
 
     static void TestValueFormatting()
@@ -574,6 +602,96 @@ public static class MonitorCoreTests
         }
 
         AssertTrue(TagComputedCatalog.TryBuildPlan(settings.Tags, out _, out _));
+    }
+
+    static void TestQimaoMa876aLines()
+    {
+        AssertTrue(LineCatalog.QimaoLineNames.Count == 6);
+        AssertTrue(LineCatalog.IsQimaoLine("起毛机ZL-028A"));
+        AssertTrue(LineCatalog.ToCommandAlias("起毛机ZL-027C") == "zl027c");
+        AssertTrue(LineCatalog.TryResolveLineName("ZL028B", out var resolved) && resolved == LineCatalog.QimaoZl028bLineName);
+
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.QimaoZl028aLineName);
+        AssertTrue(settings.Plc.Protocol == PlcProtocol.S7);
+        AssertTrue(settings.Plc.Host == "172.14.3.204");
+        AssertTrue(settings.Plc.CpuType == "S7200SMART");
+        AssertTrue(settings.Plc.Rack == 0);
+        AssertTrue(settings.Plc.Slot == 1);
+        AssertTrue(settings.Plc.Port == 102);
+        AssertTrue(settings.Tags.Count >= 12);
+        AssertTrue(settings.Tags.First(tag => tag.Name == "设备状态").SwitchStatusLabels.Contains("待机", StringComparison.Ordinal));
+        AssertTrue(Math.Abs(settings.Tags.First(tag => tag.Name == "布速").Scale - 0.1) < 1e-9);
+        foreach (var tag in settings.Tags.Where(tag => tag.Source == TagSource.Plc))
+        {
+            AssertTrue(SiemensS7AddressMapper.TryResolve(tag.XinjeAddress, tag.DataType, out _, out var error), error);
+        }
+
+        var hosts = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [LineCatalog.QimaoZl028aLineName] = "172.14.3.204",
+            [LineCatalog.QimaoZl028bLineName] = "172.14.3.202",
+            [LineCatalog.QimaoZl028cLineName] = "172.14.3.200",
+            [LineCatalog.QimaoZl027aLineName] = "172.14.3.219",
+            [LineCatalog.QimaoZl027bLineName] = "172.14.3.216",
+            [LineCatalog.QimaoZl027cLineName] = "172.14.3.213"
+        };
+        foreach (var (line, host) in hosts)
+        {
+            var one = new AppSettings();
+            LineCatalog.Apply(one, line);
+            AssertTrue(one.Plc.Host == host, $"{line} host={one.Plc.Host}");
+            AssertTrue(one.Mqtt.Topic.Contains("QMZL", StringComparison.Ordinal));
+        }
+    }
+
+    static void TestDingxingHongbeiLines()
+    {
+        AssertTrue(LineCatalog.DingxingLineNames.Count == 3);
+        AssertTrue(LineCatalog.IsDingxingLine("定型机10号"));
+        AssertTrue(LineCatalog.ToCommandAlias("定型机10号") == "dxj10");
+        AssertTrue(LineCatalog.ToCommandAlias("定型机11号") == "dxj11");
+        AssertTrue(LineCatalog.ToCommandAlias("烘焙机") == "hongbei");
+        AssertTrue(LineCatalog.TryResolveLineName("HGDXJ10", out var resolved10)
+                   && resolved10 == LineCatalog.Dingxing10LineName);
+        AssertTrue(LineCatalog.TryResolveLineName("HGDXJ11", out var resolved11)
+                   && resolved11 == LineCatalog.Dingxing11LineName);
+        AssertTrue(LineCatalog.TryResolveLineName("HGHBJ", out var resolvedBake)
+                   && resolvedBake == LineCatalog.HongbeiLineName);
+        AssertTrue(!LineCatalog.TryResolveLineName("HGDXHB", out _));
+        AssertTrue(LineCatalog.UsesS7Protocol(LineCatalog.Dingxing10LineName));
+
+        var settings = new AppSettings();
+        LineCatalog.Apply(settings, LineCatalog.Dingxing10LineName);
+        AssertTrue(settings.Plc.Protocol == PlcProtocol.S7);
+        AssertTrue(settings.Plc.Host == "192.168.100.2");
+        AssertTrue(settings.Plc.CpuType == "S71500");
+        AssertTrue(settings.Plc.Port == 102);
+        AssertTrue(settings.Tags.Count == 42);
+        AssertTrue(settings.Mqtt.ClientId == LineMqttDefaults.Dingxing10ClientId);
+        AssertTrue(settings.Mqtt.Topic == LineMqttDefaults.Dingxing10PublishTopic);
+
+        var bake = new AppSettings();
+        LineCatalog.Apply(bake, LineCatalog.HongbeiLineName);
+        AssertTrue(bake.Tags.Count == 42);
+        AssertTrue(bake.Mqtt.ClientId == LineMqttDefaults.HongbeiClientId);
+        AssertTrue(LineMqttDefaults.SubscribeTopics.Contains(LineMqttDefaults.Dingxing11PublishTopic));
+
+        var overfeed = settings.Tags.First(tag => tag.Name == "下超喂实际值");
+        AssertTrue(Math.Abs(overfeed.Scale - 0.1) < 1e-9);
+        AssertTrue(overfeed.ValidMin == -300);
+        AssertTrue(overfeed.ValidMax == 300);
+
+        var temp = settings.Tags.First(tag => tag.Name == "第一箱温度");
+        AssertTrue(temp.XinjeAddress == "DB55.DBW48");
+        AssertTrue(temp.DisplayCategory == TagDisplayCategory.Temperature);
+        AssertTrue(temp.MqttField == "yxwd1");
+
+        foreach (var tag in settings.Tags.Where(tag => tag.Source == TagSource.Plc))
+        {
+            AssertTrue(SiemensS7AddressMapper.TryResolve(tag.XinjeAddress, tag.DataType, out _, out var error), error);
+            AssertTrue(!string.IsNullOrWhiteSpace(tag.MqttField), tag.Name);
+        }
     }
 
     static void TestSubscribeDashboardLine()
@@ -737,6 +855,11 @@ public static class MonitorCoreTests
             original.Tags.First(tag => tag.Name == "运行状态").SwitchStatusLabels =
                 SwitchStatusLabelsParser.HandAutoCleanLabels;
             original.Tags.First(tag => tag.Name == "车速").DisplayCategory = TagDisplayCategory.Process;
+            original.Tags.First(tag => tag.Name == "车速").ValidMin = 0;
+            original.Tags.First(tag => tag.Name == "车速").ValidMax = 200;
+            original.Tags.First(tag => tag.Name == "车速").Scale = 0.1;
+            original.Tags.First(tag => tag.Name == "车速").Offset = 1.5;
+            original.Tags.First(tag => tag.Name == "车速").Quadratic = 0.002;
             original.SubscribeTopics = ["monitor/+/telemetry", "monitor/test/#"];
             original.HistoryDirectory = @"F:\Data\history";
             LineExcelConfigService.Export(original, tempPath);
@@ -755,6 +878,11 @@ public static class MonitorCoreTests
             AssertTrue(loaded.Tags.First(tag => tag.Name == "运行状态").SwitchStatusLabels
                 == SwitchStatusLabelsParser.Normalize(SwitchStatusLabelsParser.HandAutoCleanLabels));
             AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").DisplayCategory == TagDisplayCategory.Process);
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").ValidMin == 0);
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").ValidMax == 200);
+            AssertTrue(Math.Abs(loaded.Tags.First(tag => tag.Name == "车速").Scale - 0.1) < 1e-9);
+            AssertTrue(Math.Abs(loaded.Tags.First(tag => tag.Name == "车速").Offset - 1.5) < 1e-9);
+            AssertTrue(Math.Abs(loaded.Tags.First(tag => tag.Name == "车速").Quadratic - 0.002) < 1e-9);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "油温机温度").DisplayCategory == TagDisplayCategory.Temperature);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
             AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));
@@ -1138,6 +1266,48 @@ public static class MonitorCoreTests
         AssertTrue(SwitchStatusFormatting.FormatDisplayText(legacy, 0) == "关");
         AssertTrue(SwitchStatusFormatting.FormatDisplayText(legacy, 1) == "开");
         AssertTrue(SwitchStatusFormatting.FormatDisplayText(legacy, 2) == "待机");
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(legacy, "待机") == SwitchStatusFormatting.GetAccentColor(2));
+
+        var qimao = new PlcTag
+        {
+            Name = "设备状态",
+            DataType = TagDataType.Int16,
+            DisplayCategory = TagDisplayCategory.Switch,
+            SwitchStatusLabels = "0=待机;1=运行;2=故障"
+        };
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, 0) == SwitchStatusFormatting.GetAccentColor(0));
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "待机") == SwitchStatusFormatting.GetAccentColor(0));
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "运行") == SwitchStatusFormatting.GetAccentColor(1));
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "故障") == SwitchStatusFormatting.GetAccentColor(2));
+        AssertTrue(SwitchStatusFormatting.GetBackgroundColor(qimao, "故障") == SwitchStatusFormatting.GetBackgroundColor(2));
+    }
+
+    static void TestTagValueRange()
+    {
+        var tag = new PlcTag
+        {
+            Name = "车速",
+            DataType = TagDataType.Float32,
+            ValidMin = 0,
+            ValidMax = 100
+        };
+        AssertTrue(TagValueRange.TryValidateValue(tag, 50.5, out _));
+        AssertTrue(TagValueRange.TryValidateValue(tag, 0, out _));
+        AssertTrue(TagValueRange.TryValidateValue(tag, 100, out _));
+        AssertFalse(TagValueRange.TryValidateValue(tag, -0.1, out var lowError));
+        AssertTrue(lowError.Contains("下限", StringComparison.Ordinal));
+        AssertFalse(TagValueRange.TryValidateValue(tag, 100.1, out var highError));
+        AssertTrue(highError.Contains("上限", StringComparison.Ordinal));
+
+        var openMax = new PlcTag { Name = "温度", DataType = TagDataType.Float32, ValidMin = -20 };
+        AssertTrue(TagValueRange.TryValidateValue(openMax, 999, out _));
+        AssertFalse(TagValueRange.TryValidateValue(openMax, -21, out _));
+
+        var inverted = new PlcTag { Name = "坏配置", DataType = TagDataType.Float32, ValidMin = 10, ValidMax = 1 };
+        AssertFalse(TagValueRange.TryValidateConfig(inverted, out _));
+
+        var noRange = new PlcTag { Name = "无范围", DataType = TagDataType.Float32 };
+        AssertTrue(TagValueRange.TryValidateValue(noRange, 1e9, out _));
     }
 
     static void TestTagDisplayCategory()

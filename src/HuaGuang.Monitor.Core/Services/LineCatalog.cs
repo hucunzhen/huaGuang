@@ -10,13 +10,33 @@ namespace HuaGuang.Monitor.Services;
 public static class LineCatalog
 {
     public const string ProductSkuTagName = "产品货号";
-    public const int Version = 14;
+    public const int Version = 17;
 
     public const string S7TestLineName = "S7测试产线";
     public const string ZhidahyLineName = "智达火焰复合机";
     public const string ShanghaihyLineName = "上海火焰复合机";
     public const string MeshyLineName = "MES火焰复合机";
     public const string SubscribeDashboardLineName = "订阅大屏";
+
+    public const string QimaoZl028aLineName = "起毛机ZL-028A";
+    public const string QimaoZl028bLineName = "起毛机ZL-028B";
+    public const string QimaoZl028cLineName = "起毛机ZL-028C";
+    public const string QimaoZl027aLineName = "起毛机ZL-027A";
+    public const string QimaoZl027bLineName = "起毛机ZL-027B";
+    public const string QimaoZl027cLineName = "起毛机ZL-027C";
+    public const string Dingxing10LineName = "定型机10号";
+    public const string Dingxing11LineName = "定型机11号";
+    public const string HongbeiLineName = "烘焙机";
+
+    public static IReadOnlyList<string> QimaoLineNames { get; } =
+    [
+        QimaoZl028aLineName,
+        QimaoZl028bLineName,
+        QimaoZl028cLineName,
+        QimaoZl027aLineName,
+        QimaoZl027bLineName,
+        QimaoZl027cLineName
+    ];
 
     public static IReadOnlyList<string> LineNames { get; } =
     [
@@ -28,9 +48,38 @@ public static class LineCatalog
         ZhidahyLineName,
         ShanghaihyLineName,
         MeshyLineName,
+        QimaoZl028aLineName,
+        QimaoZl028bLineName,
+        QimaoZl028cLineName,
+        QimaoZl027aLineName,
+        QimaoZl027bLineName,
+        QimaoZl027cLineName,
+        Dingxing10LineName,
+        Dingxing11LineName,
+        HongbeiLineName,
         S7TestLineName,
         SubscribeDashboardLineName
     ];
+
+    public static bool IsQimaoLine(string? lineName) =>
+        TryResolveLineName(lineName, out var resolved)
+        && QimaoLineNames.Contains(resolved);
+
+    public static IReadOnlyList<string> DingxingLineNames { get; } =
+    [
+        Dingxing10LineName,
+        Dingxing11LineName,
+        HongbeiLineName
+    ];
+
+    public static bool IsDingxingLine(string? lineName) =>
+        TryResolveLineName(lineName, out var resolved)
+        && DingxingLineNames.Contains(resolved);
+
+    public static bool UsesS7Protocol(string? lineName) =>
+        string.Equals(lineName, S7TestLineName, StringComparison.Ordinal)
+        || IsQimaoLine(lineName)
+        || IsDingxingLine(lineName);
 
     public static IReadOnlyList<string> AcquisitionLineNames { get; } =
         LineNames.Where(name => !IsSubscribeDashboard(name)).ToArray();
@@ -69,6 +118,36 @@ public static class LineCatalog
         {
             settings.Plc.Protocol = PlcProtocol.S7;
             settings.Plc.Model = "S7-1515";
+            settings.Plc.Host = line.Host;
+            settings.Plc.Port = 102;
+            settings.Plc.Rack = 0;
+            settings.Plc.Slot = 0;
+            settings.Plc.CpuType = "S71500";
+            settings.Plc.TimeoutMs = 3000;
+            settings.UseSimulator = false;
+            PlcSettingsHelper.Normalize(settings.Plc);
+            return;
+        }
+
+        if (IsQimaoLine(lineName))
+        {
+            settings.Plc.Protocol = PlcProtocol.S7;
+            settings.Plc.Model = "MA876AH";
+            settings.Plc.Host = line.Host;
+            settings.Plc.Port = 102;
+            settings.Plc.Rack = 0;
+            settings.Plc.Slot = 1;
+            settings.Plc.CpuType = "S7200SMART";
+            settings.Plc.TimeoutMs = 3000;
+            settings.UseSimulator = false;
+            PlcSettingsHelper.Normalize(settings.Plc);
+            return;
+        }
+
+        if (IsDingxingLine(lineName))
+        {
+            settings.Plc.Protocol = PlcProtocol.S7;
+            settings.Plc.Model = "S7-1500";
             settings.Plc.Host = line.Host;
             settings.Plc.Port = 102;
             settings.Plc.Rack = 0;
@@ -119,6 +198,15 @@ public static class LineCatalog
         ZhidahyLineName => Zhidahy,
         ShanghaihyLineName => Shanghaihy,
         MeshyLineName => Meshy,
+        QimaoZl028aLineName => QimaoZl028a,
+        QimaoZl028bLineName => QimaoZl028b,
+        QimaoZl028cLineName => QimaoZl028c,
+        QimaoZl027aLineName => QimaoZl027a,
+        QimaoZl027bLineName => QimaoZl027b,
+        QimaoZl027cLineName => QimaoZl027c,
+        Dingxing10LineName => Dingxing10,
+        Dingxing11LineName => Dingxing11,
+        HongbeiLineName => Hongbei,
         S7TestLineName => S7Test,
         SubscribeDashboardLineName => SubscribeDashboard,
         _ => Xianhe
@@ -134,6 +222,15 @@ public static class LineCatalog
         ZhidahyLineName => "zhidahy",
         ShanghaihyLineName => "shanghaihy",
         MeshyLineName => "meshy",
+        QimaoZl028aLineName => "zl028a",
+        QimaoZl028bLineName => "zl028b",
+        QimaoZl028cLineName => "zl028c",
+        QimaoZl027aLineName => "zl027a",
+        QimaoZl027bLineName => "zl027b",
+        QimaoZl027cLineName => "zl027c",
+        Dingxing10LineName => "dxj10",
+        Dingxing11LineName => "dxj11",
+        HongbeiLineName => "hongbei",
         S7TestLineName => "s7test",
         SubscribeDashboardLineName => "subscribe",
         _ => "xianhe"
@@ -243,6 +340,169 @@ public static class LineCatalog
         "172.14.1.212",
         LineMqttDefaults.MeshyPublishTopic,
         MeshyTags());
+
+    /// <summary>强力起毛机 MA876A：厂内编号 / PLC IP 来自确认版点表。</summary>
+    public static LineProfile QimaoZl028a { get; } = new(
+        QimaoZl028aLineName,
+        "172.14.3.204",
+        LineMqttDefaults.QimaoZl028aPublishTopic,
+        QimaoMa876aTags());
+
+    public static LineProfile QimaoZl028b { get; } = new(
+        QimaoZl028bLineName,
+        "172.14.3.202",
+        LineMqttDefaults.QimaoZl028bPublishTopic,
+        QimaoMa876aTags());
+
+    public static LineProfile QimaoZl028c { get; } = new(
+        QimaoZl028cLineName,
+        "172.14.3.200",
+        LineMqttDefaults.QimaoZl028cPublishTopic,
+        QimaoMa876aTags());
+
+    public static LineProfile QimaoZl027a { get; } = new(
+        QimaoZl027aLineName,
+        "172.14.3.219",
+        LineMqttDefaults.QimaoZl027aPublishTopic,
+        QimaoMa876aTags());
+
+    public static LineProfile QimaoZl027b { get; } = new(
+        QimaoZl027bLineName,
+        "172.14.3.216",
+        LineMqttDefaults.QimaoZl027bPublishTopic,
+        QimaoMa876aTags());
+
+    public static LineProfile QimaoZl027c { get; } = new(
+        QimaoZl027cLineName,
+        "172.14.3.213",
+        LineMqttDefaults.QimaoZl027cPublishTopic,
+        QimaoMa876aTags());
+
+    /// <summary>定型机 10 号、11 号和烘焙机共用 2025043 点表。点表只给了 192.168.100.2，三条先用这个地址。</summary>
+    public static LineProfile Dingxing10 { get; } = new(
+        Dingxing10LineName,
+        "192.168.100.2",
+        LineMqttDefaults.Dingxing10PublishTopic,
+        DingxingHongbeiTags());
+
+    public static LineProfile Dingxing11 { get; } = new(
+        Dingxing11LineName,
+        "192.168.100.2",
+        LineMqttDefaults.Dingxing11PublishTopic,
+        DingxingHongbeiTags());
+
+    public static LineProfile Hongbei { get; } = new(
+        HongbeiLineName,
+        "192.168.100.2",
+        LineMqttDefaults.HongbeiPublishTopic,
+        DingxingHongbeiTags());
+
+    static List<PlcTag> QimaoMa876aTags() =>
+    [
+        new PlcTag
+        {
+            Name = "设备状态",
+            XinjeAddress = "VW6000",
+            DataType = TagDataType.Int16,
+            DisplayCategory = TagDisplayCategory.Switch,
+            SwitchStatusLabels = "0=待机;1=运行;2=故障"
+        },
+        S7ScaledInt16("锡林转速", "VW6002", "r/min", scale: 1),
+        S7ScaledInt16("后导急停延时", "VW6006", "s", scale: 0.1),
+        S7ScaledInt16("上导辊张力", "VW6012", "%", scale: 0.1),
+        S7ScaledInt16("后导辊张力", "VW6014", "%", scale: 0.1),
+        S7ScaledInt16("顺针辊转速", "VW6016", "r/min", scale: 1),
+        S7ScaledInt16("逆针辊转速", "VW6018", "r/min", scale: 1),
+        S7ScaledInt16("布速", "VW6020", "m/min", scale: 0.1),
+        S7ScaledInt16("前导辊张力", "VW6022", "%", scale: 0.1),
+        S7ScaledInt16("锡林微调", "VW6026", "r/min", scale: 1),
+        S7ScaledInt16("扩幅转速", "VW6028", "r/min", scale: 1),
+        new PlcTag
+        {
+            Name = "设备运行时间",
+            Unit = "h",
+            XinjeAddress = "VD6030",
+            DataType = TagDataType.Int32,
+            ByteOrder = ByteOrder.ABCD,
+            Scale = 1,
+            DisplayCategory = TagDisplayCategory.Process
+        }
+    ];
+
+    static PlcTag S7ScaledInt16(string name, string address, string unit, double scale) => new()
+    {
+        Name = name,
+        Unit = unit,
+        XinjeAddress = address,
+        DataType = TagDataType.Int16,
+        Scale = scale,
+        DisplayCategory = TagDisplayCategory.Process
+    };
+
+    static List<PlcTag> DingxingHongbeiTags() =>
+    [
+        S7RangedInt16("1#排风实际速度", "DB55.DBW0", "%", 30, 100),
+        S7RangedInt16("2#排风实际速度", "DB55.DBW2", "%", 30, 100),
+        S7RangedInt16("1#门幅实际值", "DB55.DBW4", "CM", 60, 220),
+        S7RangedInt16("2#门幅实际值", "DB55.DBW6", "CM", 60, 220),
+        S7RangedInt16("3#门幅实际值", "DB55.DBW8", "CM", 60, 220),
+        S7RangedInt16("4#门幅实际值", "DB55.DBW10", "CM", 60, 220),
+        S7RangedInt16("5#门幅实际值", "DB55.DBW12", "CM", 60, 220),
+        S7RangedInt16("6#门幅实际值", "DB55.DBW14", "CM", 60, 220),
+        S7RangedInt16("7#门幅实际值", "DB55.DBW16", "CM", 60, 220),
+        S7RangedInt16("8#门幅实际值", "DB55.DBW18", "CM", 60, 220),
+        S7RangedInt16("1+2上风实际速度", "DB55.DBW28", "%", 30, 100),
+        S7RangedInt16("3+4上风实际速度", "DB55.DBW30", "%", 30, 100),
+        S7RangedInt16("5+6上风实际速度", "DB55.DBW32", "%", 30, 100),
+        S7RangedInt16("7+8上风实际速度", "DB55.DBW34", "%", 30, 100),
+        S7RangedInt16("9+10上风实际速度", "DB55.DBW36", "%", 30, 100),
+        S7RangedInt16("1+2下风实际速度", "DB55.DBW38", "%", 30, 100),
+        S7RangedInt16("3+4下风实际速度", "DB55.DBW40", "%", 30, 100),
+        S7RangedInt16("5+6下风实际速度", "DB55.DBW42", "%", 30, 100),
+        S7RangedInt16("7+8下风实际速度", "DB55.DBW44", "%", 30, 100),
+        S7RangedInt16("9+10下风实际速度", "DB55.DBW46", "%", 30, 100),
+        S7RangedInt16("第一箱温度", "DB55.DBW48", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第二箱温度", "DB55.DBW50", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第三箱温度", "DB55.DBW52", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第四箱温度", "DB55.DBW54", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第五箱温度", "DB55.DBW56", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第六箱温度", "DB55.DBW58", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第七箱温度", "DB55.DBW60", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第八箱温度", "DB55.DBW62", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第九箱温度", "DB55.DBW64", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("第十箱温度", "DB55.DBW66", "℃", 0, 250, TagDisplayCategory.Temperature),
+        S7RangedInt16("机器实际速度", "DB55.DBW68", "M/MIN", 0, 100),
+        S7RangedInt16("进布实际张力", "DB55.DBW70", "N", 0, 300),
+        S7RangedInt16("轧车实际张力", "DB55.DBW72", "N", 0, 300),
+        S7RangedInt16("下超喂实际值", "DB55.DBW74", "%", -300, 300, scale: 0.1),
+        S7RangedInt16("上超喂实际值", "DB55.DBW76", "%", -150, 800, scale: 0.1),
+        S7RangedInt16("出布超喂实际值", "DB55.DBW78", "%", -200, 500, scale: 0.1),
+        S7RangedInt16("摆布超喂实际值", "DB55.DBW80", "%", -300, 300, scale: 0.1),
+        S7RangedInt16("提布实际张力", "DB55.DBW114", "N", 0, 300),
+        S7RangedInt16("表面打卷超喂实际值", "DB55.DBW116", "%", -300, 300, scale: 0.1),
+        S7RangedInt16("冷水棍超喂实际值", "DB55.DBW118", "%", -300, 300, scale: 0.1),
+        S7RangedInt16("J-BOX超喂实际值", "DB55.DBW120", "%", -300, 300, scale: 0.1),
+        S7RangedInt16("2#出布超喂实际值", "DB55.DBW122", "%", -300, 300, scale: 0.1)
+    ];
+
+    static PlcTag S7RangedInt16(
+        string name,
+        string address,
+        string unit,
+        double validMin,
+        double validMax,
+        TagDisplayCategory? category = null,
+        double scale = 1) => new()
+    {
+        Name = name,
+        Unit = unit,
+        XinjeAddress = address,
+        DataType = TagDataType.Int16,
+        Scale = scale,
+        ValidMin = validMin,
+        ValidMax = validMax,
+        DisplayCategory = category ?? TagDisplayCategory.Process
+    };
 
     static List<PlcTag> FlameCommonManuals() =>
     [
@@ -462,16 +722,20 @@ public static class LineCatalog
             DisplayPrecision = source.DisplayPrecision,
             MqttField = source.MqttField,
             DisplayCategory = source.DisplayCategory,
+            SwitchStatusLabels = source.SwitchStatusLabels,
+            ValidMin = source.ValidMin,
+            ValidMax = source.ValidMax,
             UseScannerInput = source.UseScannerInput,
             Expression = source.Expression,
             Scale = source.Scale,
             Offset = source.Offset,
+            Quadratic = source.Quadratic,
             Enabled = source.Enabled
         };
 
         if (tag.IsPlc)
         {
-            if (lineName == S7TestLineName)
+            if (UsesS7Protocol(lineName))
             {
                 PlcAddressMapper.ApplyTo(tag, PlcProtocol.S7);
             }
@@ -493,6 +757,15 @@ public static class LineCatalog
         ZhidahyLineName => "智达",
         ShanghaihyLineName => "上海",
         MeshyLineName => "MES",
+        QimaoZl028aLineName => "ZL028A",
+        QimaoZl028bLineName => "ZL028B",
+        QimaoZl028cLineName => "ZL028C",
+        QimaoZl027aLineName => "ZL027A",
+        QimaoZl027bLineName => "ZL027B",
+        QimaoZl027cLineName => "ZL027C",
+        Dingxing10LineName => "定型10",
+        Dingxing11LineName => "定型11",
+        HongbeiLineName => "烘焙",
         S7TestLineName => "S7测试",
         SubscribeDashboardLineName => "订阅大屏",
         "先河热熔胶复合机" => "先河",
@@ -528,6 +801,15 @@ public static class LineCatalog
             "智达" or "智达机" or "智达火焰" or "ZHIDAHY" or "ZDHYFJ" => ZhidahyLineName,
             "上海" or "上海机" or "进口机" or "进口机-上海机" or "上海火焰" or "SHANGHAIHY" or "SHHYFJ" => ShanghaihyLineName,
             "MES" or "复合机MES" or "MES火焰" or "MESHY" or "MESHYFJ" => MeshyLineName,
+            "ZL028A" or "起毛机ZL-028A" or "起毛028A" or "QMZL028A" => QimaoZl028aLineName,
+            "ZL028B" or "起毛机ZL-028B" or "起毛028B" or "QMZL028B" => QimaoZl028bLineName,
+            "ZL028C" or "起毛机ZL-028C" or "起毛028C" or "QMZL028C" => QimaoZl028cLineName,
+            "ZL027A" or "起毛机ZL-027A" or "起毛027A" or "QMZL027A" => QimaoZl027aLineName,
+            "ZL027B" or "起毛机ZL-027B" or "起毛027B" or "QMZL027B" => QimaoZl027bLineName,
+            "ZL027C" or "起毛机ZL-027C" or "起毛027C" or "QMZL027C" => QimaoZl027cLineName,
+            "定型机10号" or "定型10" or "定型机10" or "DXJ10" or "HGDXJ10" => Dingxing10LineName,
+            "定型机11号" or "定型11" or "定型机11" or "DXJ11" or "HGDXJ11" => Dingxing11LineName,
+            "烘焙机" or "烘焙" or "HONGPEI" or "HGHBJ" => HongbeiLineName,
             "S7" or "S7TEST" or "S7测试" => S7TestLineName,
             "订阅" or "订阅大屏" or "SUBSCRIBE" or "SUB" => SubscribeDashboardLineName,
             _ => string.Empty
@@ -551,6 +833,15 @@ public static class LineCatalog
             ZhidahyLineName => "zhidahy",
             ShanghaihyLineName => "shanghaihy",
             MeshyLineName => "meshy",
+            QimaoZl028aLineName => "zl028a",
+            QimaoZl028bLineName => "zl028b",
+            QimaoZl028cLineName => "zl028c",
+            QimaoZl027aLineName => "zl027a",
+            QimaoZl027bLineName => "zl027b",
+            QimaoZl027cLineName => "zl027c",
+            Dingxing10LineName => "dxj10",
+            Dingxing11LineName => "dxj11",
+            HongbeiLineName => "hongbei",
             S7TestLineName => "s7",
             SubscribeDashboardLineName => "subscribe",
             _ => "xianhe"

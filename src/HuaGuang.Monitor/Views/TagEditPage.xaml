@@ -85,15 +85,21 @@
             <Picker ItemsSource="{Binding PlcDataTypes}" SelectedItem="{Binding DataTypeName}" IsVisible="{Binding IsPlcSource}" />
             <Label Text="结果数据类型" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsComputedSource}" />
             <Picker ItemsSource="{Binding PlcDataTypes}" SelectedItem="{Binding DataTypeName}" IsVisible="{Binding IsComputedSource}" />
-            <Label Text="倍率 / 偏移（对表达式结果再 y=k×x+b）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsComputedSource}" />
-            <Entry Text="{Binding Scale}" Keyboard="Numeric" IsVisible="{Binding IsComputedSource}" />
-            <Entry Text="{Binding Offset}" Keyboard="Numeric" IsVisible="{Binding IsComputedSource}" />
+            <Label Text="比例 / 偏移 / 二次（对表达式结果再 y=a×x²+k×x+b）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsComputedSource}" />
+            <Entry Text="{Binding Scale}" Keyboard="Numeric" Placeholder="比例 k" IsVisible="{Binding IsComputedSource}" />
+            <Entry Text="{Binding Offset}" Keyboard="Numeric" Placeholder="偏移 b" IsVisible="{Binding IsComputedSource}" />
+            <Entry Text="{Binding Quadratic}" Keyboard="Numeric" Placeholder="二次 a（默认0）" IsVisible="{Binding IsComputedSource}" />
             <Label Text="字节序（32 位）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Picker ItemsSource="{Binding ByteOrders}" SelectedItem="{Binding ByteOrderName}" IsVisible="{Binding IsPlcSource}" />
-            <Label Text="比例 Scale" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="比例 Scale（k）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Entry Text="{Binding Scale}" Keyboard="Numeric" IsVisible="{Binding IsPlcSource}" />
-            <Label Text="偏移 Offset" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="偏移 Offset（b）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Entry Text="{Binding Offset}" Keyboard="Numeric" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="二次 Quadratic（a）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
+            <Entry Text="{Binding Quadratic}" Keyboard="Numeric" IsVisible="{Binding IsPlcSource}" />
+            <Label Text="工程值 = a×raw² + k×raw + b。二次默认 0，即线性。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding IsPlcSource}" />
 
             <Label Text="显示精度（小数位）" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding ShowPrecision}" />
             <Entry Text="{Binding DisplayPrecision}" Keyboard="Numeric" Placeholder="留空=全局默认"
@@ -101,6 +107,16 @@
             <Label Text="0–4。留空则使用「设置」里的全局默认精度；影响监控显示与 MQTT 发布。"
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
                    IsVisible="{Binding ShowPrecision}" />
+
+            <Label Text="有效下限" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding ShowValidRange}" />
+            <Entry Text="{Binding ValidMin}" Keyboard="Numeric" Placeholder="留空=不限制"
+                   IsVisible="{Binding ShowValidRange}" />
+            <Label Text="有效上限" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding ShowValidRange}" />
+            <Entry Text="{Binding ValidMax}" Keyboard="Numeric" Placeholder="留空=不限制"
+                   IsVisible="{Binding ShowValidRange}" />
+            <Label Text="缩放后的数值范围。超出则视为读取失败（监控显示 Bad，MQTT 不带该有效值）。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding ShowValidRange}" />
 
             <HorizontalStackLayout Spacing="8">
                 <Button Text="返回"

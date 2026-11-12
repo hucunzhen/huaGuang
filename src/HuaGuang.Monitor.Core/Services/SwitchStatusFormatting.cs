@@ -54,18 +54,59 @@ public static class SwitchStatusFormatting
     }
 
     public static string GetAccentColor(PlcTag tag, object? value) =>
-        RunStatusFormatting.TryGetCode(value) is int code
+        TryResolveColorCode(tag, value, out var code)
             ? GetAccentColor(code)
             : value is bool flag
                 ? (flag ? "#3DDC97" : "#FF6B6B")
                 : "#8AA0B5";
 
     public static string GetBackgroundColor(PlcTag tag, object? value) =>
-        RunStatusFormatting.TryGetCode(value) is int code
+        TryResolveColorCode(tag, value, out var code)
             ? GetBackgroundColor(code)
             : value is bool flag
                 ? (flag ? "#143328" : "#331E24")
                 : "#152536";
+
+    /// <summary>
+    /// 采集值是状态码；订阅收到的是产线点表里的中文文案。文案先按点表反查码，再上色。
+    /// </summary>
+    static bool TryResolveColorCode(PlcTag tag, object? value, out int code)
+    {
+        if (value is string text && TryResolveLabelCode(tag, text, out code))
+        {
+            return true;
+        }
+
+        if (RunStatusFormatting.TryGetCode(value) is int parsed)
+        {
+            code = parsed;
+            return true;
+        }
+
+        code = 0;
+        return false;
+    }
+
+    static bool TryResolveLabelCode(PlcTag tag, string text, out int code)
+    {
+        code = 0;
+        var map = ResolveMap(tag);
+        if (map is null || int.TryParse(text, out _))
+        {
+            return false;
+        }
+
+        foreach (var pair in map.OrderBy(pair => pair.Key))
+        {
+            if (string.Equals(pair.Value, text, StringComparison.Ordinal))
+            {
+                code = pair.Key;
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public static string GetAccentColor(int code) => code switch
     {

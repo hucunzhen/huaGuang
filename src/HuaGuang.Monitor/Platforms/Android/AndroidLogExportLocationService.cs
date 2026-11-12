@@ -38,13 +38,20 @@ public sealed class AndroidLogExportLocationService : ILogExportLocationService
     public Task<LogExportDeliveryResult> WriteZipAsync(
         LogExportLocationChoice location,
         string localZipPath,
-        string zipFileName)
+        string zipFileName) =>
+        WriteFileAsync(location, localZipPath, zipFileName, "application/zip");
+
+    public Task<LogExportDeliveryResult> WriteFileAsync(
+        LogExportLocationChoice location,
+        string localFilePath,
+        string fileName,
+        string mimeType)
     {
         var treeUri = ResolveTreeUri(location);
         var resolver = Platform.CurrentActivity?.ContentResolver
                        ?? throw new InvalidOperationException("ContentResolver 不可用。");
 
-        var safeName = AndroidSafTreeUri.ToSafFileName(zipFileName);
+        var safeName = AndroidSafTreeUri.ToSafFileName(fileName);
         var parentUri = AndroidSafTreeUri.ToCreateDocumentParent(treeUri);
 
         AUri? docUri = null;
@@ -53,7 +60,7 @@ public sealed class AndroidLogExportLocationService : ILogExportLocationService
         {
             try
             {
-                docUri = DocumentsContract.CreateDocument(resolver, parent, "application/zip", safeName);
+                docUri = DocumentsContract.CreateDocument(resolver, parent, mimeType, safeName);
                 if (docUri is not null)
                 {
                     break;
@@ -69,11 +76,11 @@ public sealed class AndroidLogExportLocationService : ILogExportLocationService
         {
             throw new IOException(
                 lastError is null
-                    ? "无法在所选目录创建 zip 文件。"
-                    : $"无法在所选目录创建 zip 文件：{lastError.Message}");
+                    ? $"无法在所选目录创建 {safeName}。"
+                    : $"无法在所选目录创建 {safeName}：{lastError.Message}");
         }
 
-        using (var input = File.OpenRead(localZipPath))
+        using (var input = File.OpenRead(localFilePath))
         using (var output = resolver.OpenOutputStream(docUri)
                                   ?? throw new IOException("无法写入所选目录。"))
         {

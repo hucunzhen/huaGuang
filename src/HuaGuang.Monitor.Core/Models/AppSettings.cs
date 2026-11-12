@@ -43,7 +43,10 @@ public sealed class AppSettings
     public List<PlcTag> Tags { get; set; } = [];
     /// <summary>是否记录采集/订阅数据到本地 SQLite。</summary>
     public bool EnableHistoryRecording { get; set; } = true;
-    /// <summary>历史数据保留天数；超出后自动清理。</summary>
+    /// <summary>
+    /// 至少保留的完整历史天数。每天 0 点后清理更早的按日文件。
+    /// 保留 1 天时删掉 2 天以前的数据，昨天整天仍然留下。
+    /// </summary>
     public int HistoryRetentionDays { get; set; } = 1;
     /// <summary>历史 SQLite 按日文件目录；为空时使用程序数据目录下 history。</summary>
     public string HistoryDirectory { get; set; } = string.Empty;

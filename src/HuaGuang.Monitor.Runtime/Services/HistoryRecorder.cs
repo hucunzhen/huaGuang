@@ -16,6 +16,7 @@ public sealed class HistoryRecorder : IAsyncDisposable
     readonly Channel<HistorySampleWriteRequest> _channel;
     readonly CancellationTokenSource _cts = new();
     readonly Task _writer;
+    readonly Task _pruneLoop;
 
     public HistoryRecorder(
         HistoryStore store,
@@ -35,6 +36,7 @@ public sealed class HistoryRecorder : IAsyncDisposable
             SingleWriter = false
         });
         _writer = Task.Run(WriteLoopAsync);
+        _pruneLoop = Task.Run(PruneLoopAsync);
         _acquisition.TagsUpdated += OnAcquisitionTagsUpdated;
         _subscription.TelemetryReceived += OnTelemetryReceived;
     }
@@ -132,10 +134,28 @@ public sealed class HistoryRecorder : IAsyncDisposable
         }
     }
 
+    async Task PruneLoopAsync()
+    {
+        var token = _cts.Token;
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(DelayUntilAfterLocalMidnight(DateTimeOffset.Now), token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            await PruneIfNeededAsync().ConfigureAwait(false);
+        }
+    }
+
     public async Task PruneIfNeededAsync()
     {
         var days = Math.Clamp(_settings.Current.HistoryRetentionDays, 1, 365);
-        var cutoff = DateTimeOffset.Now.AddDays(-days);
+        var cutoff = RetentionCutoff(DateTimeOffset.Now, days);
         try
         {
             var deleted = await _store.PruneOlderThanAsync(cutoff).ConfigureAwait(false);
@@ -158,6 +178,25 @@ public sealed class HistoryRecorder : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 保留 <paramref name="retentionDays"/> 个完整自然日，再加今天。
+    /// 保留 1 天时，截止点是昨天 0 点，因此只删除 2 天以前的分日文件。
+    /// </summary>
+    internal static DateTimeOffset RetentionCutoff(DateTimeOffset now, int retentionDays)
+    {
+        var days = Math.Clamp(retentionDays, 1, 365);
+        var oldestKept = now.ToLocalTime().Date.AddDays(-days);
+        return new DateTimeOffset(oldestKept, TimeZoneInfo.Local.GetUtcOffset(oldestKept));
+    }
+
+    internal static TimeSpan DelayUntilAfterLocalMidnight(DateTimeOffset now)
+    {
+        var local = now.ToLocalTime();
+        var next = local.Date.AddDays(1).AddMinutes(1);
+        var delay = next - local.DateTime;
+        return delay < TimeSpan.FromSeconds(1) ? TimeSpan.FromDays(1) : delay;
+    }
+
     bool ShouldRecord() => _settings.Current.EnableHistoryRecording;
 
     static string TruncatePayload(string payload) =>
@@ -176,6 +215,14 @@ public sealed class HistoryRecorder : IAsyncDisposable
         try
         {
             await _writer.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        try
+        {
+            await _pruneLoop.ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

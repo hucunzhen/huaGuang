@@ -117,6 +117,7 @@ public sealed class HistoryTableCell : INotifyPropertyChanged
 public sealed class HistoryTableRow
 {
     public long SampleId { get; init; }
+    public DateTimeOffset RecordedAt { get; init; }
     public string RecordedAtText { get; init; } = string.Empty;
     public string DeviceId { get; init; } = string.Empty;
     public IReadOnlyList<HistoryTableCell> TagCells { get; init; } = [];

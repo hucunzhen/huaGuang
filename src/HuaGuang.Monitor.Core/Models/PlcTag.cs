@@ -17,6 +17,16 @@ public sealed class PlcTag
     public ByteOrder ByteOrder { get; set; } = ByteOrder.CDAB;
     public double Scale { get; set; } = 1;
     public double Offset { get; set; }
+
+    /// <summary>二次项系数：工程值 = Quadratic×raw² + Scale×raw + Offset；默认 0 即线性。</summary>
+    public double Quadratic { get; set; }
+
+    /// <summary>有效值下限（缩放后）；null 表示不限制。超出范围视为读取失败。</summary>
+    public double? ValidMin { get; set; }
+
+    /// <summary>有效值上限（缩放后）；null 表示不限制。超出范围视为读取失败。</summary>
+    public double? ValidMax { get; set; }
+
     /// <summary>显示与 MQTT 小数位数（0–4）。null 表示使用设置里的全局默认。</summary>
     public int? DisplayPrecision { get; set; }
 

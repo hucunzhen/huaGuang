@@ -18,6 +18,8 @@ public class FitGrid : ContentView
     INotifyCollectionChanged? _subscribed;
     bool _useFillMode;
     bool _rebuildQueued;
+    bool _updatingLayout;
+    double _heightConstraint = double.PositiveInfinity;
     int _lastColumns;
     int _lastRows;
     int _lastCount = -1;
@@ -267,6 +269,22 @@ public class FitGrid : ContentView
         Dispatcher.Dispatch(() => UpdateLayout(Width, Height));
     }
 
+    protected override Size MeasureOverride(double widthConstraint, double heightConstraint)
+    {
+        _heightConstraint = heightConstraint;
+        if (double.IsPositiveInfinity(heightConstraint))
+        {
+            var width = double.IsFinite(widthConstraint) && widthConstraint > 0
+                ? widthConstraint
+                : Math.Max(120, MinItemWidth);
+            var height = EstimateWrappedHeight(width);
+            base.MeasureOverride(width, height);
+            return new Size(width, height);
+        }
+
+        return base.MeasureOverride(widthConstraint, heightConstraint);
+    }
+
     protected override void OnSizeAllocated(double width, double height)
     {
         base.OnSizeAllocated(width, height);
@@ -297,16 +315,14 @@ public class FitGrid : ContentView
 
     void RebuildItemViews()
     {
-        foreach (var view in _itemViews)
+        if (IsUnboundedHeight())
         {
-            if (view.Parent is Layout parent)
-            {
-                parent.Remove(view);
-            }
+            ClearItemViews();
+            ApplyScrollMode();
+            return;
         }
 
-        _itemViews.Clear();
-        _fillGrid.Children.Clear();
+        ClearItemViews();
 
         var template = ItemTemplate;
         if (template is null || ItemsSource is null)
@@ -334,14 +350,72 @@ public class FitGrid : ContentView
         RefreshScrollItemsSource();
     }
 
+    void ClearItemViews()
+    {
+        foreach (var view in _itemViews)
+        {
+            view.BindingContext = null;
+            if (view.Parent is Layout parent)
+            {
+                parent.Remove(view);
+            }
+        }
+
+        _itemViews.Clear();
+        _fillGrid.Children.Clear();
+    }
+
     void RefreshScrollItemsSource()
     {
         _collectionView.ItemsSource = null;
         _collectionView.ItemsSource = ItemsSource;
     }
 
+    bool IsUnboundedHeight() =>
+        double.IsPositiveInfinity(_heightConstraint) || _heightConstraint <= 0;
+
+    double EstimateWrappedHeight(double width)
+    {
+        var count = CountItems(ItemsSource);
+        var minHeight = Math.Max(80, MinItemHeight);
+        if (count <= 0)
+        {
+            return minHeight;
+        }
+
+        var minWidth = Math.Max(120, MinItemWidth);
+        var columns = Math.Max(1, (int)((width + Spacing) / (minWidth + Spacing)));
+        var rows = (int)Math.Ceiling(count / (double)columns);
+        return rows * minHeight + Spacing * Math.Max(0, rows - 1);
+    }
+
     void UpdateLayout(double width, double height)
     {
+        if (_updatingLayout)
+        {
+            return;
+        }
+
+        _updatingLayout = true;
+        try
+        {
+            UpdateLayoutCore(width, height);
+        }
+        finally
+        {
+            _updatingLayout = false;
+        }
+    }
+
+    void UpdateLayoutCore(double width, double height)
+    {
+        if (IsUnboundedHeight())
+        {
+            ApplyScrollMode();
+            UpdateSpan(width > 0 ? width : Width);
+            return;
+        }
+
         var sourceCount = CountItems(ItemsSource);
         if (_itemViews.Count == 0 && sourceCount > 0)
         {
@@ -443,6 +517,26 @@ public class FitGrid : ContentView
 
     void ApplyScrollMode()
     {
+        if (!ReferenceEquals(_collectionView.ItemTemplate, ItemTemplate))
+        {
+            _collectionView.ItemTemplate = ItemTemplate;
+        }
+
+        if (!ReferenceEquals(_collectionView.EmptyView, EmptyView))
+        {
+            _collectionView.EmptyView = EmptyView;
+        }
+
+        if (!ReferenceEquals(_collectionView.ItemsSource, ItemsSource))
+        {
+            _collectionView.ItemsSource = ItemsSource;
+        }
+
+        if (!_useFillMode && ReferenceEquals(Content, _collectionView))
+        {
+            return;
+        }
+
         _useFillMode = false;
         _lastColumns = 0;
         _lastRows = 0;
@@ -450,23 +544,16 @@ public class FitGrid : ContentView
         _lastLayoutWidth = -1;
         _lastLayoutHeight = -1;
         _fillGrid.Children.Clear();
-
-        _collectionView.ItemTemplate = ItemTemplate;
-        _collectionView.EmptyView = EmptyView;
-        RefreshScrollItemsSource();
-
-        if (!ReferenceEquals(Content, _collectionView))
-        {
-            Content = _collectionView;
-        }
-        else
-        {
-            UpdateSpan(Width);
-        }
+        Content = _collectionView;
     }
 
     void ShowEmptyInFillGrid()
     {
+        if (_useFillMode && ReferenceEquals(Content, _fillGrid) && _fillGrid.Children.Count == (EmptyView is null ? 0 : 1))
+        {
+            return;
+        }
+
         _fillGrid.Children.Clear();
         _fillGrid.ColumnDefinitions.Clear();
         _fillGrid.RowDefinitions.Clear();

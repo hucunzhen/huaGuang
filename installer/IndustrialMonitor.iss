@@ -53,6 +53,11 @@ UninstallDisplayIcon={app}\appicon.ico
 SetupLogging=yes
 ; 界面进程拦截关闭仅隐藏窗口，Restart Manager 无法结束进程会导致安装卡住。
 CloseApplications=no
+; 仅在编译时传入代码签名证书时定义。signtool 由 scripts\sign-with-signtool.ps1 传给 ISCC。
+#ifdef SignToolConfigured
+SignTool=huaguang
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
@@ -99,6 +104,9 @@ Type: filesandordirs; Name: "{app}"
 [Code]
 var
   DeleteUserData: Boolean;
+  ReplaceLinesPage: TWizardPage;
+  KeepLinesRadio: TNewRadioButton;
+  ReplaceLinesRadio: TNewRadioButton;
 
 const
   ForceUiExitFlagRel = 'com.industrial.monitor\Data\installer-force-ui-exit.flag';
@@ -114,6 +122,64 @@ begin
     '，内部版本 ' + IntToStr(Version.Build) + '。' + #13#10 + #13#10 +
     '过旧系统无法加载 Windows App Runtime（常见报错：找不到入口点 IsWow64Process2）。' + #13#10 +
     '请升级到 Win10 LTSC 2019/2021、Win10 21H2/22H2 或 Windows 11 后再安装。';
+end;
+
+procedure InitializeWizard();
+var
+  Hint: TNewStaticText;
+begin
+  ReplaceLinesPage := CreateCustomPage(
+    wpSelectTasks,
+    '产线文件',
+    '本机已有的产线 Excel 默认保留。需要时可以改用安装包里的那一份。');
+
+  KeepLinesRadio := TNewRadioButton.Create(ReplaceLinesPage);
+  KeepLinesRadio.Parent := ReplaceLinesPage.Surface;
+  KeepLinesRadio.Caption := '保留本机产线文件（推荐）';
+  KeepLinesRadio.Checked := True;
+  KeepLinesRadio.Left := 0;
+  KeepLinesRadio.Top := 0;
+  KeepLinesRadio.Width := ReplaceLinesPage.SurfaceWidth;
+  KeepLinesRadio.Height := ScaleY(22);
+
+  ReplaceLinesRadio := TNewRadioButton.Create(ReplaceLinesPage);
+  ReplaceLinesRadio.Parent := ReplaceLinesPage.Surface;
+  ReplaceLinesRadio.Caption := '强制用安装包中的产线文件替换本机已有产线';
+  ReplaceLinesRadio.Left := 0;
+  ReplaceLinesRadio.Top := KeepLinesRadio.Top + KeepLinesRadio.Height + ScaleY(8);
+  ReplaceLinesRadio.Width := ReplaceLinesPage.SurfaceWidth;
+  ReplaceLinesRadio.Height := ScaleY(22);
+
+  Hint := TNewStaticText.Create(ReplaceLinesPage);
+  Hint.Parent := ReplaceLinesPage.Surface;
+  Hint.Left := 0;
+  Hint.Top := ReplaceLinesRadio.Top + ReplaceLinesRadio.Height + ScaleY(16);
+  Hint.Width := ReplaceLinesPage.SurfaceWidth;
+  Hint.Height := ScaleY(140);
+  Hint.AutoSize := False;
+  Hint.WordWrap := True;
+  Hint.Caption :=
+    '替换的是本机数据目录里与安装包同名的产线 Excel（通常在' + #13#10 +
+    'C:\ProgramData\com.industrial.monitor\Data\lines）。' + #13#10 +
+    '现场改过的点表、PLC 地址、MQTT 会变成安装包里的版本。' + #13#10 +
+    '历史数据不删除，当前选中的产线也不会改。' + #13#10 +
+    '被覆盖的原文件会先备份到该目录下的 _installer-backup-日期时间 文件夹。' + #13#10 + #13#10 +
+    '不替换时，安装不会改动已有产线文件；本机还没有的产线仍由程序首次启动时补上。';
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (ReplaceLinesPage <> nil) and (CurPageID = ReplaceLinesPage.ID) and ReplaceLinesRadio.Checked then
+  begin
+    Result := MsgBox(
+      '将用安装包里的产线 Excel 覆盖本机已有的同名产线。' + #13#10 +
+      '现场改过的点表、PLC 地址、MQTT 会被替换，此操作不能在安装程序里撤销。' + #13#10 +
+      '原文件会先备份。' + #13#10 + #13#10 +
+      '确定要强制替换吗？',
+      mbConfirmation,
+      MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  end;
 end;
 
 function InitializeSetup(): Boolean;
@@ -297,6 +363,123 @@ begin
   Result := True;
 end;
 
+function SharedLinesDirectory(): String;
+var
+  OriginPath: String;
+  Lines: TArrayOfString;
+  Recorded: String;
+begin
+  Result := ExpandConstant('{commonappdata}\com.industrial.monitor\Data');
+  OriginPath := Result + '\path-origin.txt';
+  if LoadStringsFromFile(OriginPath, Lines) and (GetArrayLength(Lines) >= 2) then
+  begin
+    Recorded := Trim(Lines[1]);
+    if (Recorded <> '') and DirExists(Recorded) then
+      Result := Recorded;
+  end;
+  Result := Result + '\lines';
+end;
+
+procedure GrantUsersModify(const Directory: String);
+var
+  ResultCode: Integer;
+begin
+  { 与程序启动时一致：Users 可改产线 Excel，避免管理员复制后现场无法保存。 }
+  Exec(
+    ExpandConstant('{sys}\icacls.exe'),
+    '"' + Directory + '" /grant *S-1-5-32-545:(OI)(CI)M /T /C',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode);
+end;
+
+procedure ReplaceLocalLineFiles();
+var
+  SourceDir, DestDir, BackupDir, SourceFile, DestFile: String;
+  FindRec: TFindRec;
+  Copied, BackedUp, Failed: Integer;
+  FailedNames: String;
+  SkipReplace: Boolean;
+begin
+  SourceDir := ExpandConstant('{app}\lines');
+  DestDir := SharedLinesDirectory();
+  if not DirExists(SourceDir) then
+  begin
+    MsgBox('安装目录中没有产线文件，无法替换。', mbError, MB_OK);
+    Exit;
+  end;
+
+  ForceDirectories(DestDir);
+  BackupDir := DestDir + '\_installer-backup-' + GetDateTimeString('yyyymmdd-hhnnss', #0, #0);
+  Copied := 0;
+  BackedUp := 0;
+  Failed := 0;
+  FailedNames := '';
+
+  if FindFirst(SourceDir + '\*.xlsx', FindRec) then
+  try
+    repeat
+      if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0) and
+         (CompareText(Copy(FindRec.Name, 1, 2), '~$') <> 0) then
+      begin
+        SourceFile := SourceDir + '\' + FindRec.Name;
+        DestFile := DestDir + '\' + FindRec.Name;
+        SkipReplace := False;
+        if FileExists(DestFile) then
+        begin
+          if (not ForceDirectories(BackupDir)) or (not FileCopy(DestFile, BackupDir + '\' + FindRec.Name, False)) then
+          begin
+            Failed := Failed + 1;
+            FailedNames := FailedNames + #13#10 + FindRec.Name + '（备份失败，未覆盖）';
+            Log('备份产线文件失败，已跳过替换: ' + DestFile);
+            SkipReplace := True;
+          end
+          else
+            BackedUp := BackedUp + 1;
+        end;
+        if not SkipReplace then
+        begin
+          if FileCopy(SourceFile, DestFile, False) then
+          begin
+            Copied := Copied + 1;
+            Log('已用安装包替换产线文件: ' + FindRec.Name);
+          end
+          else
+          begin
+            Failed := Failed + 1;
+            FailedNames := FailedNames + #13#10 + FindRec.Name;
+            Log('替换产线文件失败: ' + DestFile);
+          end;
+        end;
+      end;
+    until not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+
+  if Copied > 0 then
+    GrantUsersModify(DestDir);
+
+  if not WizardSilent then
+  begin
+    if Failed > 0 then
+      MsgBox(
+        '已替换 ' + IntToStr(Copied) + ' 个产线文件，' + IntToStr(Failed) + ' 个失败。' +
+        '请关闭正在打开这些 Excel 的程序后重新安装并再次选择替换。' + FailedNames,
+        mbError, MB_OK)
+    else if Copied = 0 then
+      MsgBox('安装包中没有可替换的产线 Excel。', mbInformation, MB_OK)
+    else if BackedUp = 0 then
+      MsgBox('已写入 ' + IntToStr(Copied) + ' 个产线文件。本机之前没有同名文件。', mbInformation, MB_OK)
+    else
+      MsgBox(
+        '已用安装包中的产线文件替换本机 ' + IntToStr(Copied) + ' 个文件。' + #13#10 +
+        '原文件备份在：' + #13#10 + BackupDir,
+        mbInformation, MB_OK);
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
@@ -305,6 +488,8 @@ begin
   if CurStep = ssPostInstall then
   begin
     RemoveForceUiExitFlag();
+    if (ReplaceLinesRadio <> nil) and ReplaceLinesRadio.Checked then
+      ReplaceLocalLineFiles();
     ConfigureOldWindowsCompat();
     if WizardIsTaskSelected('installservice') then
       InstallMonitorService();

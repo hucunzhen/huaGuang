@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
     [switch]$RegenerateLines
@@ -49,6 +49,14 @@ function Sync-WindowIconToPublish {
     Write-Host "Synced title bar icon to publish\logo.ico." -ForegroundColor DarkGray
 }
 
+function Restore-SignedAssemblies {
+    param([string]$PublishDir)
+
+    $script = Join-Path $PSScriptRoot "restore-signed-assemblies.ps1"
+    & $script -PublishDir $PublishDir
+    if (-not $?) { throw "restore-signed-assemblies.ps1 failed." }
+}
+
 try {
     Start-Transcript -LiteralPath $logFile -Force | Out-Null
 }
@@ -88,6 +96,7 @@ try {
 
     Sync-LineExcelToPublish -PublishDir $publishDir
     Sync-WindowIconToPublish -PublishDir $publishDir
+    Restore-SignedAssemblies -PublishDir $publishDir
 
     $fixScript = Join-Path $root "scripts\fix-old-windows.ps1"
     $compatScript = Join-Path $root "scripts\configure-old-windows-compat.ps1"

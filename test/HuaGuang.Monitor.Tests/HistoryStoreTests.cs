@@ -121,11 +121,58 @@ public sealed class HistoryStoreTests
             Assert.Equal(["压力"], table.Columns.Select(column => column.TagName).ToArray());
             Assert.Single(table.Rows);
             Assert.Equal("1.2", table.Rows[0].TagCells[0].Text);
+            Assert.Equal(now, table.Rows[0].RecordedAt);
         }
         finally
         {
             Cleanup(dbPath);
         }
+    }
+
+    [Fact]
+    public void One_day_retention_keeps_yesterday_and_drops_the_day_before()
+    {
+        var now = DateTimeOffset.Now;
+        var cutoff = HistoryRecorder.RetentionCutoff(now, 1);
+        Assert.Equal(now.ToLocalTime().Date.AddDays(-1), cutoff.DateTime);
+        Assert.Equal(TimeSpan.Zero, cutoff.TimeOfDay);
+
+        var dbPath = Path.Combine(Path.GetTempPath(), $"huaguang-history-retain-{Guid.NewGuid():N}.db");
+        try
+        {
+            var store = new HistoryStore(dbPath);
+            store.InitializeAsync().GetAwaiter().GetResult();
+            store.AppendAsync(Sample("今天", now)).GetAwaiter().GetResult();
+            store.AppendAsync(Sample("昨天", now.AddDays(-1))).GetAwaiter().GetResult();
+            store.AppendAsync(Sample("前天", now.AddDays(-2))).GetAwaiter().GetResult();
+
+            var deleted = store.PruneOlderThanAsync(cutoff).GetAwaiter().GetResult();
+            Assert.True(deleted >= 1);
+
+            var rows = store.QueryAsync(new HistoryQuery
+            {
+                From = now.AddDays(-3),
+                To = now.AddHours(1),
+                Limit = 10
+            }).GetAwaiter().GetResult();
+            Assert.Equal(2, rows.Count);
+            Assert.Contains(rows, row => row.DeviceId == "今天");
+            Assert.Contains(rows, row => row.DeviceId == "昨天");
+        }
+        finally
+        {
+            Cleanup(dbPath);
+        }
+    }
+
+    [Fact]
+    public void Daily_prune_waits_until_after_local_midnight()
+    {
+        var now = DateTimeOffset.Now;
+        var delay = HistoryRecorder.DelayUntilAfterLocalMidnight(now);
+        var due = now + delay;
+        var next = now.ToLocalTime().Date.AddDays(1).AddMinutes(1);
+        Assert.Equal(next, due.ToLocalTime().DateTime);
     }
 
     static void Cleanup(string dbPath)

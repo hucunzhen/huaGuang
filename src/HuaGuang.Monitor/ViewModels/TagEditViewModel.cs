@@ -69,12 +69,16 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     string xinjeAddress = "D0";
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowPrecision))]
+    [NotifyPropertyChangedFor(nameof(ShowValidRange))]
     [NotifyPropertyChangedFor(nameof(ShowScannerInputOption))]
     [NotifyPropertyChangedFor(nameof(ShowSwitchStatusLabels))]
     string dataTypeName = nameof(TagDataType.Float32);
     [ObservableProperty] string byteOrderName = nameof(Models.ByteOrder.CDAB);
     [ObservableProperty] string scale = "1";
     [ObservableProperty] string offset = "0";
+    [ObservableProperty] string quadratic = "0";
+    [ObservableProperty] string validMin = string.Empty;
+    [ObservableProperty] string validMax = string.Empty;
     [ObservableProperty] string displayPrecision = string.Empty;
     [ObservableProperty] string mqttField = string.Empty;
     [ObservableProperty]
@@ -101,6 +105,8 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         IsManualSource && DataTypeName == nameof(TagDataType.String);
     public bool ShowPrecision =>
         DataTypeName != nameof(TagDataType.String) && DataTypeName != nameof(TagDataType.Bool);
+
+    public bool ShowValidRange => ShowPrecision;
 
     public bool ShowSwitchStatusLabels =>
         SelectedDisplayCategoryOption == TagDisplayCategoryHelper.GetTitle(TagDisplayCategory.Switch)
@@ -158,6 +164,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     partial void OnDataTypeNameChanged(string value)
     {
         OnPropertyChanged(nameof(ShowPrecision));
+        OnPropertyChanged(nameof(ShowValidRange));
         OnPropertyChanged(nameof(ShowScannerInputOption));
         OnPropertyChanged(nameof(ShowSwitchStatusLabels));
         if (value != nameof(TagDataType.String))
@@ -225,6 +232,9 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 ByteOrderName = tag.ByteOrder.ToString();
                 Scale = tag.Scale.ToString("0.####");
                 Offset = tag.Offset.ToString("0.####");
+                Quadratic = tag.Quadratic.ToString("0.####");
+                ValidMin = tag.ValidMin?.ToString("0.####") ?? string.Empty;
+                ValidMax = tag.ValidMax?.ToString("0.####") ?? string.Empty;
                 DisplayPrecision = tag.DisplayPrecision?.ToString() ?? string.Empty;
                 MqttField = tag.MqttField;
                 SelectedDisplayCategoryOption = tag.DisplayCategory is { } category
@@ -297,6 +307,20 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         tag.SwitchStatusLabels = SwitchStatusLabelsParser.Normalize(SwitchStatusLabels);
         tag.UseScannerInput = UseScannerInput && IsManualSource && dataType == TagDataType.String;
 
+        if (!TryParseOptionalRange(ValidMin, ValidMax, dataType, out var rangeMin, out var rangeMax, out var rangeError))
+        {
+            StatusMessage = rangeError;
+            return;
+        }
+
+        tag.ValidMin = rangeMin;
+        tag.ValidMax = rangeMax;
+        if (!TagValueRange.TryValidateConfig(tag, out var rangeConfigError))
+        {
+            StatusMessage = rangeConfigError;
+            return;
+        }
+
         if (IsComputedSource)
         {
             if (string.IsNullOrWhiteSpace(Expression))
@@ -324,11 +348,17 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 offset = 0;
             }
 
+            if (!double.TryParse(Quadratic, out var quadratic))
+            {
+                quadratic = 0;
+            }
+
             tag.Source = TagSource.Computed;
             tag.Expression = Expression.Trim();
             tag.ManualValue = string.Empty;
             tag.Scale = scale;
             tag.Offset = offset;
+            tag.Quadratic = quadratic;
         }
         else if (IsManualSource)
         {
@@ -372,12 +402,18 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 offset = 0;
             }
 
+            if (!double.TryParse(Quadratic, out var quadratic))
+            {
+                quadratic = 0;
+            }
+
             tag.Source = TagSource.Plc;
             tag.Expression = string.Empty;
             tag.ManualValue = string.Empty;
             tag.XinjeAddress = XinjeAddress.Trim();
             tag.Scale = scale;
             tag.Offset = offset;
+            tag.Quadratic = quadratic;
             var endpoint = PlcEndpointCatalog.Resolve(_store.Current, SelectedPlcName);
             tag.PlcId = endpoint.Id;
             PlcAddressMapper.ApplyTo(tag, endpoint.Protocol);
@@ -415,6 +451,9 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         ByteOrderName = nameof(Models.ByteOrder.CDAB);
         Scale = "1";
         Offset = "0";
+        Quadratic = "0";
+        ValidMin = string.Empty;
+        ValidMax = string.Empty;
         DisplayPrecision = string.Empty;
         MqttField = string.Empty;
         SelectedDisplayCategoryOption = "自动推断";
@@ -449,6 +488,51 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         }
 
         precision = value;
+        return true;
+    }
+
+    static bool TryParseOptionalRange(
+        string minText,
+        string maxText,
+        TagDataType dataType,
+        out double? min,
+        out double? max,
+        out string error)
+    {
+        min = null;
+        max = null;
+        error = string.Empty;
+
+        if (dataType is TagDataType.Bool or TagDataType.String)
+        {
+            return true;
+        }
+
+        if (!TryParseOptionalDouble(minText, "有效下限", out min, out error)
+            || !TryParseOptionalDouble(maxText, "有效上限", out max, out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    static bool TryParseOptionalDouble(string text, string label, out double? value, out string error)
+    {
+        value = null;
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        if (!double.TryParse(text.Trim(), out var parsed) || double.IsNaN(parsed) || double.IsInfinity(parsed))
+        {
+            error = $"{label}应为有效数字，或留空表示不限制。";
+            return false;
+        }
+
+        value = parsed;
         return true;
     }
 }

@@ -29,6 +29,7 @@ public sealed class SettingsStore
     public int Revision { get; private set; }
 
     ConfigFingerprint _loadedFingerprint;
+    List<(string Name, string Signature)> _loadedTagSignatures = [];
 
     readonly record struct ConfigFingerprint(
         string ActiveLineName,
@@ -181,6 +182,7 @@ public sealed class SettingsStore
         }
 
         _loadedFingerprint = CaptureConfigFingerprint();
+        RememberLoadedTags();
         Revision++;
     }
 
@@ -246,6 +248,7 @@ public sealed class SettingsStore
         }
 
         Current = settings;
+        AdoptNewerDiskTags(settings);
         var excelPath = LineConfigPaths.GetLineExcelPath(Current.LineName);
         if (MonitorProcessInstance.IsIsolated)
         {
@@ -264,11 +267,50 @@ public sealed class SettingsStore
             _excelOperationMode = Current.OperationMode;
         }
         _loadedFingerprint = CaptureConfigFingerprint();
+        RememberLoadedTags();
         Revision++;
         _logger.LogInformation(
             "配置已保存 line={LineName} excel={ExcelPath}",
             Current.LineName,
             excelPath);
+    }
+
+    void RememberLoadedTags() =>
+        _loadedTagSignatures = Current.Tags
+            .Where(tag => !string.IsNullOrWhiteSpace(tag.Name))
+            .Select(tag => (tag.Name, LineExcelConfigService.TagEditSignature(tag)))
+            .ToList();
+
+    void AdoptNewerDiskTags(AppSettings settings)
+    {
+        var excelPath = LineConfigPaths.GetLineExcelPath(settings.LineName);
+        if (!File.Exists(excelPath) || _loadedTagSignatures.Count == 0)
+        {
+            return;
+        }
+
+        var ticks = File.GetLastWriteTimeUtc(excelPath).Ticks;
+        if (ticks == _loadedFingerprint.LineExcelUtcTicks)
+        {
+            return;
+        }
+
+        try
+        {
+            var disk = LineExcelConfigService.LoadLineExcelFromFile(excelPath, templateFilePath: null, settings.LineName);
+            var merged = LineExcelConfigService.MergeDiskTagsWithEdits(_loadedTagSignatures, settings.Tags, disk.Tags);
+            _logger.LogInformation(
+                "点表文件在加载后有更新，保存时保留磁盘点表并叠加上界面改动 line={LineName} disk={DiskCount} memory={MemoryCount} merged={MergedCount}",
+                settings.LineName,
+                disk.Tags.Count,
+                settings.Tags.Count,
+                merged.Count);
+            settings.Tags = merged;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "点表文件已变化，重新读取失败，仍写入当前内存点表 excel={ExcelPath}", excelPath);
+        }
     }
 
     public static AppSettings CreateDefault()

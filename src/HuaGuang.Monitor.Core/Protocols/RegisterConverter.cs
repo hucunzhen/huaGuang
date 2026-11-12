@@ -33,8 +33,8 @@ public static class RegisterConverter
             return raw;
         }
 
-        var engineering = Convert.ToDouble(raw) * tag.Scale + tag.Offset;
-        if (tag.DataType == TagDataType.Float32 || Math.Abs(tag.Scale - 1) > double.Epsilon || Math.Abs(tag.Offset) > double.Epsilon)
+        var engineering = ToEngineering(Convert.ToDouble(raw), tag);
+        if (tag.DataType == TagDataType.Float32 || HasNonIdentityScale(tag))
         {
             return Math.Round(engineering, 4);
         }
@@ -48,6 +48,15 @@ public static class RegisterConverter
             _ => engineering
         };
     }
+
+    /// <summary>工程值 = Quadratic×raw² + Scale×raw + Offset。</summary>
+    public static double ToEngineering(double raw, PlcTag tag) =>
+        tag.Quadratic * raw * raw + tag.Scale * raw + tag.Offset;
+
+    public static bool HasNonIdentityScale(PlcTag tag) =>
+        Math.Abs(tag.Quadratic) > double.Epsilon
+        || Math.Abs(tag.Scale - 1) > double.Epsilon
+        || Math.Abs(tag.Offset) > double.Epsilon;
 
     static uint ToUInt32(ushort[] registers, ByteOrder order)
     {

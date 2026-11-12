@@ -312,6 +312,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                     }
 
                     value = ValueFormatting.ApplyTemperaturePrecision(tag, value, settings.TemperaturePrecision);
+                    TagValueRange.EnsureInRangeOrThrow(tag, value);
                     snapshots.Add(new TagSnapshot
                     {
                         TagId = tag.Id,
@@ -630,6 +631,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 }
 
                 value = ValueFormatting.ApplyTemperaturePrecision(tag, value, temperaturePrecision);
+                TagValueRange.EnsureInRangeOrThrow(tag, value);
                 snapshots.Add(new TagSnapshot
                 {
                     TagId = tag.Id,
@@ -683,7 +685,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         }
 
         var analog = 40 + 12 * Math.Sin(wave / 6 + phase) + tag.Address;
-        var scaled = analog * tag.Scale + tag.Offset;
+        var scaled = RegisterConverter.ToEngineering(analog, tag);
         return tag.DataType switch
         {
             TagDataType.Int16 => Convert.ToInt16(Math.Clamp(scaled, short.MinValue, short.MaxValue)),
