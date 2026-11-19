@@ -107,6 +107,7 @@ public sealed class AdaptiveMonitorSubscription : IMonitorSubscription
     public bool IsConnected => Active.IsConnected;
     public string LastError => Active.LastError;
     public string LastPayload => Active.LastPayload;
+    public int WebClientCount => Active.WebClientCount;
     public IReadOnlyList<string> ActiveSubscribeTopics => Active.ActiveSubscribeTopics;
     public IReadOnlyDictionary<string, RemoteDeviceState> Devices => Active.Devices;
 
@@ -175,6 +176,23 @@ static class AdaptiveRuntimeHandoff
         Func<Task> startRemote,
         Func<Task> startLocal)
     {
+        if (MonitorProcessInstance.IsSubscribeDashboardHost)
+        {
+            if (!MonitorIpcClient.IsServiceAvailable())
+            {
+                launcher.EnsureRunning(TimeSpan.FromSeconds(2));
+            }
+
+            if (MonitorIpcClient.IsServiceAvailable())
+            {
+                await startRemote().ConfigureAwait(false);
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "订阅网页在后台服务中。后台尚未就绪，界面不会自己连接 MQTT。");
+        }
+
         var wait = MonitorProcessInstance.IsIsolated
             ? TimeSpan.FromSeconds(8)
             : TimeSpan.FromSeconds(12);

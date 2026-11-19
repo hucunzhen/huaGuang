@@ -272,25 +272,91 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
             var snapshots = new List<TagSnapshot>();
             var values = new Dictionary<string, object?>(StringComparer.Ordinal);
             var allGood = true;
+            var skippedPlc = new HashSet<string>(StringComparer.Ordinal);
             IReadOnlyDictionary<string, object?> plcValues = new Dictionary<string, object?>(StringComparer.Ordinal);
+            object? simulatedStatus = null;
 
             if (plcTags.Count > 0 && !settings.UseSimulator)
             {
-                plcValues = await _plc.ReadTagsAsync(settings, plcTags, cancellationToken).ConfigureAwait(false);
-                if (plcValues.Count == 0 && plcTags.Count > 0)
+                var merged = new Dictionary<string, object?>(StringComparer.Ordinal);
+                var machineOff = false;
+                var statusTags = plcTags.Where(RunStatusFormatting.IsRunStatusTag).ToList();
+                if (statusTags.Count > 0)
+                {
+                    var statusValues = await _plc.ReadTagsAsync(settings, statusTags, cancellationToken).ConfigureAwait(false);
+                    foreach (var pair in statusValues)
+                    {
+                        merged[pair.Key] = pair.Value;
+                    }
+
+                    machineOff = statusTags.Any(tag =>
+                        merged.TryGetValue(tag.Name, out var statusValue) &&
+                        TagShutdownAcquire.IsMachineOff(statusValue));
+                }
+
+                foreach (var tag in plcTags)
+                {
+                    if (!TagShutdownAcquire.ShouldRead(tag, machineOff))
+                    {
+                        skippedPlc.Add(tag.Name);
+                    }
+                }
+
+                var toRead = plcTags.Where(tag =>
+                    !skippedPlc.Contains(tag.Name) &&
+                    !RunStatusFormatting.IsRunStatusTag(tag)).ToList();
+                if (toRead.Count > 0)
+                {
+                    var more = await _plc.ReadTagsAsync(settings, toRead, cancellationToken).ConfigureAwait(false);
+                    foreach (var pair in more)
+                    {
+                        merged[pair.Key] = pair.Value;
+                    }
+                }
+
+                plcValues = merged;
+                var attempted = plcTags.Count - skippedPlc.Count;
+                if (merged.Count == 0 && attempted > 0)
                 {
                     allGood = false;
                     _plcError = "PLC: 所有点位读取均失败，请核对 S7 地址与 DB 是否存在于 PLC。";
-                    _logger.LogWarning("PLC 批量读取无有效数据 tagCount={TagCount}", plcTags.Count);
+                    _logger.LogWarning("PLC 批量读取无有效数据 tagCount={TagCount}", attempted);
                 }
                 else
                 {
                     _plcError = string.Empty;
+                    if (skippedPlc.Count > 0)
+                    {
+                        _logger.LogDebug("关机跳过 {Count} 个点位", skippedPlc.Count);
+                    }
+                }
+            }
+            else if (settings.UseSimulator && plcTags.Count > 0)
+            {
+                var status = plcTags.FirstOrDefault(RunStatusFormatting.IsRunStatusTag);
+                if (status is not null)
+                {
+                    simulatedStatus = Simulate(status, settings.TemperaturePrecision);
+                }
+
+                var machineOff = TagShutdownAcquire.IsMachineOff(simulatedStatus);
+                foreach (var tag in plcTags)
+                {
+                    if (!TagShutdownAcquire.ShouldRead(tag, machineOff))
+                    {
+                        skippedPlc.Add(tag.Name);
+                    }
                 }
             }
 
             foreach (var tag in enabledTags.Where(t => !t.IsComputed))
             {
+                if (skippedPlc.Contains(tag.Name))
+                {
+                    AddClearedSnapshot(tag, snapshots, values);
+                    continue;
+                }
+
                 try
                 {
                     object value;
@@ -300,7 +366,9 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                     }
                     else if (settings.UseSimulator)
                     {
-                        value = Simulate(tag, settings.TemperaturePrecision);
+                        value = simulatedStatus is not null && RunStatusFormatting.IsRunStatusTag(tag)
+                            ? simulatedStatus
+                            : Simulate(tag, settings.TemperaturePrecision);
                     }
                     else if (!plcValues.TryGetValue(tag.Name, out var plcValue) || plcValue is null)
                     {
@@ -347,6 +415,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 values,
                 snapshots,
                 settings.TemperaturePrecision,
+                skippedPlc,
                 ref allGood);
 
             LastPlcElapsedMs = Stopwatch.GetElapsedTime(plcStarted).TotalMilliseconds;
@@ -599,6 +668,7 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
         Dictionary<string, object?> values,
         List<TagSnapshot> snapshots,
         int temperaturePrecision,
+        HashSet<string> skippedPlc,
         ref bool allGood)
     {
         if (!TagComputedCatalog.TryBuildPlan(settings.Tags, out var plan, out var planError))
@@ -623,6 +693,13 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
 
         foreach (var tag in plan.EvaluationOrder.Where(t => t.Enabled))
         {
+            if (TagShutdownAcquire.DependsOnSkipped(tag, skippedPlc))
+            {
+                skippedPlc.Add(tag.Name);
+                AddClearedSnapshot(tag, snapshots, values);
+                continue;
+            }
+
             try
             {
                 if (!TagComputedEvaluator.TryEvaluateTag(tag, values, out var value, out var error))
@@ -658,6 +735,23 @@ public sealed class AcquisitionService : IMonitorAcquisition, IDisposable
                 values[tag.Name] = null;
             }
         }
+    }
+
+    static void AddClearedSnapshot(
+        PlcTag tag,
+        List<TagSnapshot> snapshots,
+        Dictionary<string, object?> values)
+    {
+        snapshots.Add(new TagSnapshot
+        {
+            TagId = tag.Id,
+            Name = tag.Name,
+            Unit = tag.Unit,
+            Value = null,
+            Quality = "Good",
+            Timestamp = DateTimeOffset.Now
+        });
+        values[tag.Name] = null;
     }
 
     static object Simulate(PlcTag tag, int temperaturePrecision)

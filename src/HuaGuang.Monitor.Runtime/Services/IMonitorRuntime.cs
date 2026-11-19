@@ -38,6 +38,7 @@ public interface IMonitorSubscription : IAsyncDisposable
     bool IsConnected { get; }
     string LastError { get; }
     string LastPayload { get; }
+    int WebClientCount { get; }
     IReadOnlyList<string> ActiveSubscribeTopics { get; }
     IReadOnlyDictionary<string, RemoteDeviceState> Devices { get; }
 

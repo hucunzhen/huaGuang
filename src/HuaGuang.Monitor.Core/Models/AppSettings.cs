@@ -52,6 +52,10 @@ public sealed class AppSettings
     public string HistoryDirectory { get; set; } = string.Empty;
     /// <summary>诊断页「打包日志」输出目录；为空时使用数据目录下 log-export。</summary>
     public string LogExportDirectory { get; set; } = string.Empty;
+    /// <summary>订阅网页登录用户名。空则使用 <see cref="WebLoginAccount.DefaultUsername"/>。</summary>
+    public string WebLoginUsername { get; set; } = WebLoginAccount.DefaultUsername;
+    /// <summary>订阅网页登录密码，界面明文显示。空则使用 <see cref="WebLoginAccount.DefaultPassword"/>。</summary>
+    public string WebLoginPassword { get; set; } = WebLoginAccount.DefaultPassword;
     /// <summary>一次性迁移标记；避免每次启动重复覆盖用户配置。</summary>
     public int SettingsMigrationVersion { get; set; }
 

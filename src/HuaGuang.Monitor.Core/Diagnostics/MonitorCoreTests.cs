@@ -27,6 +27,8 @@ public static class MonitorCoreTests
         Run("S7 测试产线种子", TestS7TestLineCatalog),
         Run("起毛机 MA876A 产线", TestQimaoMa876aLines),
         Run("定型机与烘焙机产线", TestDingxingHongbeiLines),
+        Run("瑞安1号机与2号机", TestRuianLines),
+        Run("关机默认不采集", TestTagShutdownAcquire),
         Run("订阅大屏独立产线", TestSubscribeDashboardLine),
         Run("计算点位表达式", TestTagComputedExpression),
         Run("设置读写", TestSettingsRoundTrip),
@@ -658,6 +660,8 @@ public static class MonitorCoreTests
                    && resolved11 == LineCatalog.Dingxing11LineName);
         AssertTrue(LineCatalog.TryResolveLineName("HGHBJ", out var resolvedBake)
                    && resolvedBake == LineCatalog.HongbeiLineName);
+        AssertTrue(LineCatalog.TryResolveLineName("hongbei", out var fromShortcut)
+                   && fromShortcut == LineCatalog.HongbeiLineName);
         AssertTrue(!LineCatalog.TryResolveLineName("HGDXHB", out _));
         AssertTrue(LineCatalog.UsesS7Protocol(LineCatalog.Dingxing10LineName));
 
@@ -691,6 +695,65 @@ public static class MonitorCoreTests
         {
             AssertTrue(SiemensS7AddressMapper.TryResolve(tag.XinjeAddress, tag.DataType, out _, out var error), error);
             AssertTrue(!string.IsNullOrWhiteSpace(tag.MqttField), tag.Name);
+        }
+    }
+
+    static void TestRuianLines()
+    {
+        AssertTrue(LineCatalog.RuianLineNames.Count == 2);
+        AssertTrue(LineCatalog.IsRuianLine("1号机"));
+        AssertTrue(LineCatalog.IsRuianLine("2号机"));
+        AssertTrue(LineCatalog.ToCommandAlias("瑞安1号机") == "ra1");
+        AssertTrue(LineCatalog.ToCommandAlias("瑞安2号机") == "ra2");
+        AssertTrue(LineCatalog.TryResolveLineName("RA1", out var fromAlias)
+                   && fromAlias == LineCatalog.Ruian1LineName);
+        AssertTrue(LineCatalog.TryResolveLineName("HGRA2", out var fromClient)
+                   && fromClient == LineCatalog.Ruian2LineName);
+        AssertTrue(LineCatalog.UsesS7Protocol(LineCatalog.Ruian1LineName));
+        AssertTrue(LineMqttDefaults.ResolveLineNameFromClientId(LineMqttDefaults.Ruian1ClientId)
+                   == LineCatalog.Ruian1LineName);
+        AssertTrue(LineMqttDefaults.SubscribeTopics.Contains(LineMqttDefaults.Ruian1PublishTopic));
+        AssertTrue(LineMqttDefaults.SubscribeTopics.Contains(LineMqttDefaults.Ruian2PublishTopic));
+
+        var one = new AppSettings();
+        LineCatalog.Apply(one, LineCatalog.Ruian1LineName);
+        AssertTrue(one.Plc.Protocol == PlcProtocol.S7);
+        AssertTrue(one.Plc.Host == "172.15.0.60");
+        AssertTrue(one.Plc.CpuType == "S71500");
+        AssertTrue(one.Plc.Port == 102);
+        AssertTrue(one.Tags.Count == 92, $"tags={one.Tags.Count}");
+        AssertTrue(one.Mqtt.ClientId == LineMqttDefaults.Ruian1ClientId);
+        AssertTrue(one.Mqtt.Topic == LineMqttDefaults.Ruian1PublishTopic);
+
+        var two = new AppSettings();
+        LineCatalog.Apply(two, LineCatalog.Ruian2LineName);
+        AssertTrue(two.Plc.Host == "172.15.0.46");
+        AssertTrue(two.Tags.Count == 92);
+        AssertTrue(two.Mqtt.ClientId == LineMqttDefaults.Ruian2ClientId);
+        AssertTrue(two.Mqtt.ClientId != one.Mqtt.ClientId);
+
+        var oven = one.Tags.First(tag => tag.Name == "烘箱1实际温度");
+        AssertTrue(oven.XinjeAddress == "DB55.DBW54");
+        AssertTrue(oven.DisplayCategory == TagDisplayCategory.Temperature);
+        var speed = one.Tags.First(tag => tag.Name == "机器实际速度");
+        AssertTrue(speed.XinjeAddress == "DB55.DBW78");
+        var actualOverfeed = one.Tags.First(tag => tag.Name == "下超喂实际值");
+        AssertTrue(Math.Abs(actualOverfeed.Scale - 0.1) < 1e-9);
+        AssertTrue(actualOverfeed.XinjeAddress == "DB55.DBW86");
+        var setOverfeed = one.Tags.First(tag => tag.Name == "下超喂设定值");
+        AssertTrue(Math.Abs(setOverfeed.Scale - 10) < 1e-9);
+        AssertTrue(setOverfeed.XinjeAddress == "DB56.DBW72");
+        AssertTrue(setOverfeed.DisplayCategory == TagDisplayCategory.Setting);
+        var ovenSet = one.Tags.First(tag => tag.Name == "烘箱9设定温度");
+        AssertTrue(ovenSet.XinjeAddress == "DB56.DBW64");
+        AssertTrue(!one.Tags.Any(tag => tag.Name == "烘箱10设定温度"));
+
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tag in one.Tags.Where(tag => tag.Source == TagSource.Plc))
+        {
+            AssertTrue(SiemensS7AddressMapper.TryResolve(tag.XinjeAddress, tag.DataType, out _, out var error), error);
+            AssertTrue(!string.IsNullOrWhiteSpace(tag.MqttField), tag.Name);
+            AssertTrue(fields.Add(tag.MqttField), tag.MqttField);
         }
     }
 
@@ -839,6 +902,48 @@ public static class MonitorCoreTests
         }
     }
 
+    static void TestTagShutdownAcquire()
+    {
+        var speed = new PlcTag { Name = "车速", Source = TagSource.Plc };
+        var status = new PlcTag { Name = RunStatusFormatting.TagName, Source = TagSource.Plc };
+        var keep = new PlcTag { Name = "烘箱1实际温度", Source = TagSource.Plc, ReadWhenShutdown = true };
+        var computed = new PlcTag
+        {
+            Name = "温差",
+            Source = TagSource.Computed,
+            Expression = "[烘箱1实际温度]-[车速]"
+        };
+
+        AssertTrue(!speed.ReadWhenShutdown);
+        AssertTrue(TagShutdownAcquire.IsMachineOff(0));
+        AssertTrue(TagShutdownAcquire.IsMachineOff((short)0));
+        AssertTrue(TagShutdownAcquire.IsMachineOff("关"));
+        AssertTrue(!TagShutdownAcquire.IsMachineOff(1));
+        AssertTrue(!TagShutdownAcquire.IsMachineOff(2));
+        AssertTrue(!TagShutdownAcquire.IsMachineOff("待机"));
+        AssertTrue(!TagShutdownAcquire.IsMachineOff(null));
+
+        AssertTrue(!TagShutdownAcquire.ShouldRead(speed, machineOff: true));
+        AssertTrue(TagShutdownAcquire.ShouldRead(speed, machineOff: false));
+        AssertTrue(TagShutdownAcquire.ShouldRead(status, machineOff: true));
+        AssertTrue(TagShutdownAcquire.ShouldRead(keep, machineOff: true));
+
+        var skipped = new HashSet<string>(StringComparer.Ordinal) { speed.Name };
+        AssertTrue(TagShutdownAcquire.DependsOnSkipped(computed, skipped));
+        AssertTrue(!TagShutdownAcquire.DependsOnSkipped(keep, skipped));
+
+        var settings = new AppSettings
+        {
+            MqttPayload = new MqttPayloadProfile { TagsPath = "properties" }
+        };
+        settings.Tags.Add(new PlcTag { Name = "车速", MqttField = "speed", Enabled = true });
+        var payload = MqttPayloadMapper.BuildPayload(
+            settings,
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["车速"] = null },
+            allGood: true);
+        AssertTrue(payload.Contains("\"speed\":null", StringComparison.Ordinal));
+    }
+
     static void TestLineExcelRoundTrip()
     {
         var tempPath = Path.Combine(Path.GetTempPath(), $"huaguang-line-{Guid.NewGuid():N}.xlsx");
@@ -860,6 +965,7 @@ public static class MonitorCoreTests
             original.Tags.First(tag => tag.Name == "车速").Scale = 0.1;
             original.Tags.First(tag => tag.Name == "车速").Offset = 1.5;
             original.Tags.First(tag => tag.Name == "车速").Quadratic = 0.002;
+            original.Tags.First(tag => tag.Name == "车速").ReadWhenShutdown = true;
             original.SubscribeTopics = ["monitor/+/telemetry", "monitor/test/#"];
             original.HistoryDirectory = @"F:\Data\history";
             LineExcelConfigService.Export(original, tempPath);
@@ -883,6 +989,8 @@ public static class MonitorCoreTests
             AssertTrue(Math.Abs(loaded.Tags.First(tag => tag.Name == "车速").Scale - 0.1) < 1e-9);
             AssertTrue(Math.Abs(loaded.Tags.First(tag => tag.Name == "车速").Offset - 1.5) < 1e-9);
             AssertTrue(Math.Abs(loaded.Tags.First(tag => tag.Name == "车速").Quadratic - 0.002) < 1e-9);
+            AssertTrue(loaded.Tags.First(tag => tag.Name == "车速").ReadWhenShutdown);
+            AssertTrue(!loaded.Tags.First(tag => tag.Name == "油温机温度").ReadWhenShutdown);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "油温机温度").DisplayCategory == TagDisplayCategory.Temperature);
             AssertTrue(loaded.Tags.First(tag => tag.Name == "胶辊型号").DisplayCategory == TagDisplayCategory.Setting);
             AssertTrue(loaded.Tags.Any(tag => tag.Name == "产品货号"));

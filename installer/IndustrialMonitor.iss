@@ -20,6 +20,9 @@
 #define MyAppPackageId "com.industrial.monitor"
 #define MyAppId "{{A7C3E9F1-2B4D-4F8A-9E6C-1D5A0B3C7E2F}"
 #define ServiceName "HuaGuangMonitor"
+#define SubscribeServiceName "HuaGuangMonitor-sub"
+#define SubscribeServiceDisplayName "工业监控订阅网页"
+#define SubscribeServiceDescription "订阅大屏后台：不打开界面也提供 8088 网页，并负责订阅 MQTT"
 #define ServiceExeName "HuaGuang.Monitor.Service.exe"
 #define ServiceDisplayName "工业监控采集服务"
 #define ServiceDescription "工业监控 PLC 采集与 MQTT 推送后台服务"
@@ -72,7 +75,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Name: "startup"; Description: "登录 Windows 时自动打开监控界面（可选）"; GroupDescription: "附加选项:"; Flags: checkedonce
 
 [Files]
-Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\appicon.ico"; WorkingDir: "{app}"
@@ -228,12 +231,25 @@ begin
   Exec(ExpandConstant('{sys}\net.exe'), 'stop ' + ServiceName, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-{ 升级/覆盖安装前必须先停守护、采集服务并结束界面，否则 exe 被占用会复制失败。 }
+{ 按名称前缀停掉全部采集实例，避免漏掉后加的 acq-hongbei / acq-dxj10 等。 }
+procedure StopAllHuaGuangServices();
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -ExecutionPolicy Bypass -Command "Get-Service -Name ''HuaGuangMonitor*'' -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+{ 升级/覆盖安装前必须先停守护、采集服务并结束界面，否则 dll 被占用会 DeleteFile 拒绝访问。 }
 procedure StopRunningAppAndServices();
+var
+  I: Integer;
 begin
   EnsureForceUiExitFlag();
   { 先停守护，避免它把采集服务或界面再拉起来。 }
   StopWindowsService('{#WatchdogServiceName}');
+  StopAllHuaGuangServices();
   StopWindowsService('{#ServiceName}');
   StopWindowsService('{#ServiceName}-acq-xianhe');
   StopWindowsService('{#ServiceName}-acq-huadi');
@@ -244,11 +260,26 @@ begin
   StopWindowsService('{#ServiceName}-acq-shanghaihy');
   StopWindowsService('{#ServiceName}-acq-meshy');
   StopWindowsService('{#ServiceName}-acq-s7');
+  StopWindowsService('{#ServiceName}-acq-zl028a');
+  StopWindowsService('{#ServiceName}-acq-zl028b');
+  StopWindowsService('{#ServiceName}-acq-zl028c');
+  StopWindowsService('{#ServiceName}-acq-zl027a');
+  StopWindowsService('{#ServiceName}-acq-zl027b');
+  StopWindowsService('{#ServiceName}-acq-zl027c');
+  StopWindowsService('{#ServiceName}-acq-dxj10');
+  StopWindowsService('{#ServiceName}-acq-dxj11');
+  StopWindowsService('{#ServiceName}-acq-hongbei');
+  StopWindowsService('{#ServiceName}-acq-ra1');
+  StopWindowsService('{#ServiceName}-acq-ra2');
+  StopWindowsService('{#ServiceName}-acq-dingxing');
   StopWindowsService('{#ServiceName}-sub');
-  KillImage('{#MyAppExeName}');
-  KillImage('{#ServiceExeName}');
-  KillImage('{#WatchdogExeName}');
-  Sleep(1000);
+  for I := 1 to 5 do
+  begin
+    KillImage('{#MyAppExeName}');
+    KillImage('{#ServiceExeName}');
+    KillImage('{#WatchdogExeName}');
+    Sleep(400);
+  end;
 end;
 
 procedure KillMonitorUiProcess();
@@ -278,6 +309,33 @@ var
 begin
   Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#SubscribeServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#SubscribeServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure InstallSubscribeDashboardService();
+var
+  ResultCode: Integer;
+  BinPath, CreateArgs: String;
+begin
+  if not FileExists(ServiceExePath()) then
+    Exit;
+
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#SubscribeServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'delete {#SubscribeServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  BinPath := ServiceExePath();
+  CreateArgs := 'create {#SubscribeServiceName} binPath= "\"' + BinPath + '\" --instance sub --line subscribe --mode subscribe" start= auto depend= Tcpip/Afd DisplayName= "{#SubscribeServiceDisplayName}"';
+  if not Exec(ExpandConstant('{sys}\sc.exe'), CreateArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('注册订阅网页后台服务失败。', mbError, MB_OK);
+    Exit;
+  end;
+
+  Exec(ExpandConstant('{sys}\sc.exe'), 'description {#SubscribeServiceName} "{#SubscribeServiceDescription}"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'failure {#SubscribeServiceName} reset= 86400 actions= restart/3000/restart/15000/restart/30000', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'failureflag {#SubscribeServiceName} 1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'start {#SubscribeServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure StopAndDeleteWatchdogService();
@@ -480,6 +538,18 @@ begin
   end;
 end;
 
+procedure EnsureSubscribeWebFirewallRule();
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall delete rule name="工业监控订阅网页"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\netsh.exe'),
+    'advfirewall firewall add rule name="工业监控订阅网页" dir=in action=allow protocol=TCP localport=8088',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
@@ -492,9 +562,13 @@ begin
       ReplaceLocalLineFiles();
     ConfigureOldWindowsCompat();
     if WizardIsTaskSelected('installservice') then
+    begin
       InstallMonitorService();
+      InstallSubscribeDashboardService();
+    end;
     if WizardIsTaskSelected('installwatchdog') then
       InstallWatchdogService();
+    EnsureSubscribeWebFirewallRule();
   end;
 end;
 

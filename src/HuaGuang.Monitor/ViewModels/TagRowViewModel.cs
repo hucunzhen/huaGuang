@@ -121,8 +121,24 @@ public partial class TagRowViewModel : ObservableObject
 
     public void Apply(TagSnapshot snapshot)
     {
-        Value = snapshot.Value;
-        Quality = snapshot.Quality;
+        var nextQuality = string.IsNullOrWhiteSpace(snapshot.Quality) ? "—" : snapshot.Quality;
+        var valueChanged = !JsonValueNormalizer.ValuesEqual(Value, snapshot.Value);
+        var qualityChanged = !string.Equals(Quality, nextQuality, StringComparison.Ordinal);
+        if (!valueChanged && !qualityChanged)
+        {
+            return;
+        }
+
+        if (valueChanged)
+        {
+            Value = snapshot.Value;
+        }
+
+        if (qualityChanged)
+        {
+            Quality = nextQuality;
+        }
+
         UpdatedAt = snapshot.Timestamp.ToLocalTime().ToString("HH:mm:ss");
     }
 }

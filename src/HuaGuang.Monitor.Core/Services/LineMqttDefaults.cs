@@ -27,6 +27,8 @@ public static class LineMqttDefaults
     public const string Dingxing10ClientId = "HGDXJ10";
     public const string Dingxing11ClientId = "HGDXJ11";
     public const string HongbeiClientId = "HGHBJ";
+    public const string Ruian1ClientId = "HGRA1";
+    public const string Ruian2ClientId = "HGRA2";
 
     public const string XianhePublishTopic = "/RRJFHJ/XHRRJFHJ/properties/report";
     public const string HuadiPublishTopic = "/RRJFHJ/HDRRJFHJ/properties/report";
@@ -46,6 +48,8 @@ public static class LineMqttDefaults
     public const string Dingxing10PublishTopic = "/RRJFHJ/HGDXJ10/properties/report";
     public const string Dingxing11PublishTopic = "/RRJFHJ/HGDXJ11/properties/report";
     public const string HongbeiPublishTopic = "/RRJFHJ/HGHBJ/properties/report";
+    public const string Ruian1PublishTopic = "/RRJFHJ/HGRA1/properties/report";
+    public const string Ruian2PublishTopic = "/RRJFHJ/HGRA2/properties/report";
 
     public static IReadOnlyList<string> SubscribeTopics { get; } =
     [
@@ -66,6 +70,8 @@ public static class LineMqttDefaults
         Dingxing10PublishTopic,
         Dingxing11PublishTopic,
         HongbeiPublishTopic,
+        Ruian1PublishTopic,
+        Ruian2PublishTopic,
         S7TestPublishTopic
     ];
 
@@ -87,6 +93,8 @@ public static class LineMqttDefaults
         LineCatalog.Dingxing10LineName => Dingxing10PublishTopic,
         LineCatalog.Dingxing11LineName => Dingxing11PublishTopic,
         LineCatalog.HongbeiLineName => HongbeiPublishTopic,
+        LineCatalog.Ruian1LineName => Ruian1PublishTopic,
+        LineCatalog.Ruian2LineName => Ruian2PublishTopic,
         LineCatalog.S7TestLineName => S7TestPublishTopic,
         _ => XianhePublishTopic
     };
@@ -109,6 +117,8 @@ public static class LineMqttDefaults
         LineCatalog.Dingxing10LineName => Dingxing10ClientId,
         LineCatalog.Dingxing11LineName => Dingxing11ClientId,
         LineCatalog.HongbeiLineName => HongbeiClientId,
+        LineCatalog.Ruian1LineName => Ruian1ClientId,
+        LineCatalog.Ruian2LineName => Ruian2ClientId,
         LineCatalog.S7TestLineName => S7TestClientId,
         _ => XianheClientId
     };
@@ -171,6 +181,8 @@ public static class LineMqttDefaults
         Dingxing10ClientId => LineCatalog.Dingxing10LineName,
         Dingxing11ClientId => LineCatalog.Dingxing11LineName,
         HongbeiClientId => LineCatalog.HongbeiLineName,
+        Ruian1ClientId => LineCatalog.Ruian1LineName,
+        Ruian2ClientId => LineCatalog.Ruian2LineName,
         S7TestClientId => LineCatalog.S7TestLineName,
         _ => null
     };

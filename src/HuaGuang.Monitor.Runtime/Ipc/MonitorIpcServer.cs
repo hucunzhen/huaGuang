@@ -219,6 +219,7 @@ public sealed class MonitorIpcServer : BackgroundService
             OperatorStopRequested = MonitorRuntimeOperatorControl.IsPausedByOperator,
             PlcConnected = isSubscribe ? false : acquisition.PlcConnected,
             MqttConnected = isSubscribe ? subscription.IsConnected : acquisition.MqttConnected,
+            WebClientCount = SubscribeWebSessions.ActiveCount,
             LastError = isSubscribe ? subscription.LastError : acquisition.LastError,
             LastPayload = isSubscribe ? subscription.LastPayload : acquisition.LastPayload,
             ActiveSubscribeTopics = subscription.ActiveSubscribeTopics

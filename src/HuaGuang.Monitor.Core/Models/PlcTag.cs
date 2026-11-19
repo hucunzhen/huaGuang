@@ -45,6 +45,12 @@ public sealed class PlcTag
     /// <summary>手动文本点位是否在监控页支持 USB 扫码枪输入。</summary>
     public bool UseScannerInput { get; set; }
 
+    /// <summary>
+    /// 运行状态为关（关机）时是否仍读取该 PLC 点。默认否。
+    /// 运行状态点本身不受此开关影响，始终读取。
+    /// </summary>
+    public bool ReadWhenShutdown { get; set; }
+
     /// <summary>计算点位表达式，引用其它点位用 [名称]；仅 <see cref="TagSource.Computed"/> 有效。</summary>
     public string Expression { get; set; } = string.Empty;
 

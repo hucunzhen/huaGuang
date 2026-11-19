@@ -145,7 +145,16 @@ try {
 
     if ($Iscc) {
         if (-not $Iss) { throw "编译安装包需要 -Iss。" }
-        $isccArgs = @(
+        $stageDir = $null
+        if ($SetupPath) {
+            $stageDir = Join-Path (Split-Path -Parent $SetupPath) ("staging-" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+        }
+        $isccArgs = @()
+        if ($stageDir) {
+            $isccArgs += ('/O"{0}"' -f $stageDir)
+        }
+        $isccArgs += @(
             ('/DPublishDir="{0}"' -f $PublishDir.Trim().TrimEnd('\', '/')),
             "/DMyAppVersion=$Version",
             "/DMyAppRevision=$Revision"
@@ -162,6 +171,30 @@ try {
         $isccArgs += $Iss
         & $Iscc @isccArgs
         if ($LASTEXITCODE -ne 0) { throw "ISCC 失败，退出码 $LASTEXITCODE。" }
+        if ($stageDir) {
+            $built = Get-ChildItem -LiteralPath $stageDir -Filter "*.exe" -File |
+                Sort-Object LastWriteTimeUtc -Descending |
+                Select-Object -First 1
+            if (-not $built) { throw "ISCC 完成，但临时目录里没有安装包。" }
+            $delivered = $SetupPath
+            try {
+                $parent = Split-Path -Parent $SetupPath
+                if (-not (Test-Path -LiteralPath $parent)) {
+                    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+                }
+                if (Test-Path -LiteralPath $SetupPath) {
+                    Remove-Item -LiteralPath $SetupPath -Force
+                }
+                Move-Item -LiteralPath $built.FullName -Destination $SetupPath -Force
+            }
+            catch {
+                $delivered = Join-Path (Split-Path -Parent $SetupPath) "IndustrialMonitor-$Version-r$Revision-built-Setup.exe"
+                Copy-Item -LiteralPath $built.FullName -Destination $delivered -Force
+                Write-Host "无法覆盖 $SetupPath，文件正被其他程序占用。新安装包：$delivered" -ForegroundColor Yellow
+            }
+            Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+            $SetupPath = $delivered
+        }
     }
 
     if ($certificate -and $SetupPath -and (Test-Path -LiteralPath $SetupPath)) {

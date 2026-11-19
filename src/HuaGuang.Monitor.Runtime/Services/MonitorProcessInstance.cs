@@ -377,7 +377,9 @@ public static class MonitorProcessInstance
         "acq-dxj10",
         "acq-s7",
         "acq-dxj11",
-        "acq-hongbei"
+        "acq-hongbei",
+        "acq-ra1",
+        "acq-ra2"
     ];
 
     /// <summary>仅系统刚开机时短暂错峰；平时启动不再空等。</summary>

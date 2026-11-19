@@ -16,7 +16,11 @@ public class FitGrid : ContentView
 
     readonly List<View> _itemViews = [];
     INotifyCollectionChanged? _subscribed;
+    /// <summary>卡片区放在页面 ScrollView 里时，视口超过这个高度就在格子内部滚动，避免把每张卡片都建出来。</summary>
+    const double ScrollHostViewportHeight = 560;
+
     bool _useFillMode;
+    bool _inScrollHost;
     bool _rebuildQueued;
     bool _updatingLayout;
     double _heightConstraint = double.PositiveInfinity;
@@ -274,12 +278,14 @@ public class FitGrid : ContentView
         _heightConstraint = heightConstraint;
         if (double.IsPositiveInfinity(heightConstraint))
         {
+            // 外层 ScrollView 给出无限高度。按全部卡片的高度再测一遍会让 WinUI 布局循环，
+            // 并把每一张卡片都建出来。这里改成有限视口，多出来的卡片在格子内部滚动。
+            _inScrollHost = true;
             var width = double.IsFinite(widthConstraint) && widthConstraint > 0
                 ? widthConstraint
                 : Math.Max(120, MinItemWidth);
-            var height = EstimateWrappedHeight(width);
-            base.MeasureOverride(width, height);
-            return new Size(width, height);
+            var height = Math.Min(EstimateWrappedHeight(width), ScrollHostViewportHeight);
+            return base.MeasureOverride(width, height);
         }
 
         return base.MeasureOverride(widthConstraint, heightConstraint);
@@ -315,7 +321,7 @@ public class FitGrid : ContentView
 
     void RebuildItemViews()
     {
-        if (IsUnboundedHeight())
+        if (_inScrollHost || IsUnboundedHeight())
         {
             ClearItemViews();
             ApplyScrollMode();
@@ -409,7 +415,7 @@ public class FitGrid : ContentView
 
     void UpdateLayoutCore(double width, double height)
     {
-        if (IsUnboundedHeight())
+        if (_inScrollHost || IsUnboundedHeight())
         {
             ApplyScrollMode();
             UpdateSpan(width > 0 ? width : Width);

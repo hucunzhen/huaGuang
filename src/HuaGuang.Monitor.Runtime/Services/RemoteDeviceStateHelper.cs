@@ -5,9 +5,11 @@ namespace HuaGuang.Monitor.Services;
 
 static class RemoteDeviceStateHelper
 {
+    /// <summary>
+    /// 点位内容和质量是否相同。忽略 ReceivedAt/Timestamp：
+    /// 每次遥测都会刷新时间，不能据此触发整页刷新。
+    /// </summary>
     public static bool HasSameContent(RemoteDeviceState existing, RemoteDeviceStateDto dto) =>
-        existing.ReceivedAt == dto.ReceivedAt &&
-        existing.Timestamp == dto.Timestamp &&
         existing.Quality == dto.Quality &&
         existing.PlcHost == dto.PlcHost &&
         existing.Simulator == dto.Simulator &&
@@ -21,6 +23,13 @@ static class RemoteDeviceStateHelper
         target.Simulator = dto.Simulator;
         target.ReceivedAt = dto.ReceivedAt;
         ApplyTags(target.Tags, dto.Tags);
+    }
+
+    /// <summary>仅同步到达时间，不改动点位字典。</summary>
+    public static void ApplyArrivalOnly(RemoteDeviceState target, RemoteDeviceStateDto dto)
+    {
+        target.ReceivedAt = dto.ReceivedAt;
+        target.Timestamp = dto.Timestamp;
     }
 
     public static RemoteDeviceState FromDto(RemoteDeviceStateDto dto) => new()
@@ -72,30 +81,12 @@ static class RemoteDeviceStateHelper
                 return false;
             }
 
-            if (!ValuesEqual(pair.Value, other))
+            if (!JsonValueNormalizer.ValuesEqual(pair.Value, other))
             {
                 return false;
             }
         }
 
         return true;
-    }
-
-    static bool ValuesEqual(object? left, object? right)
-    {
-        left = JsonValueNormalizer.Normalize(left);
-        right = JsonValueNormalizer.Normalize(right);
-        if (left is null || right is null)
-        {
-            return left is null && right is null;
-        }
-
-        if (left.Equals(right))
-        {
-            return true;
-        }
-
-        return left is IFormattable && right is IFormattable &&
-               left.ToString() == right.ToString();
     }
 }

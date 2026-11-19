@@ -285,6 +285,22 @@
                 </VerticalStackLayout>
             </Border>
 
+            <Label Text="网页登录" TextColor="White" FontSize="18" FontAttributes="Bold" Margin="0,8,0,0" IsVisible="{Binding IsSubscribeSettings}" />
+            <Label Text="浏览器打开订阅页面时使用。默认密码固定显示在下面，重置后回到该密码。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap" IsVisible="{Binding IsSubscribeSettings}" />
+            <Label Text="{Binding WebLoginDefaultPassword, StringFormat='默认密码：{0}'}"
+                   TextColor="#FFB347"
+                   FontSize="14"
+                   IsVisible="{Binding IsSubscribeSettings}" />
+            <Label Text="用户名" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsSubscribeSettings}" />
+            <Entry Text="{Binding WebLoginUsername}" IsVisible="{Binding IsSubscribeSettings}" />
+            <Label Text="密码" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsSubscribeSettings}" />
+            <Entry Text="{Binding WebLoginPassword}" IsVisible="{Binding IsSubscribeSettings}" />
+            <Button Text="重置密码"
+                    Command="{Binding ResetWebLoginPasswordCommand}"
+                    BackgroundColor="#1F3A52"
+                    IsVisible="{Binding IsSubscribeSettings}" />
+
             <Button Text="{Binding SaveButtonText}" Command="{Binding SaveCommand}" />
             <Label Text="{Binding StatusMessage}"
                    TextColor="#2EC4B6"

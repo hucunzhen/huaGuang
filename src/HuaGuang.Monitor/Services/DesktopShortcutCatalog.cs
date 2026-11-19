@@ -24,6 +24,8 @@ public static class DesktopShortcutCatalog
         new("acq-dxj10", "定型机10号采集", "--instance acq-dxj10 --line dxj10 --mode acquisition"),
         new("acq-dxj11", "定型机11号采集", "--instance acq-dxj11 --line dxj11 --mode acquisition"),
         new("acq-hongbei", "烘焙机采集", "--instance acq-hongbei --line hongbei --mode acquisition"),
+        new("acq-ra1", "瑞安1号机采集", "--instance acq-ra1 --line ra1 --mode acquisition"),
+        new("acq-ra2", "瑞安2号机采集", "--instance acq-ra2 --line ra2 --mode acquisition"),
         new("acq-s7", "S7采集", "--instance acq-s7 --line s7 --mode acquisition")
     ];
 }

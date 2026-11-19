@@ -51,6 +51,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     [ObservableProperty] bool isRunning;
     [ObservableProperty] bool plcConnected;
     [ObservableProperty] bool mqttConnected;
+    [ObservableProperty] int webClientCount;
     [ObservableProperty] string lastError = string.Empty;
     [ObservableProperty] string toggleText = "启动采集";
     [ObservableProperty] string deviceId = "LINE-01";
@@ -118,7 +119,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     /// <summary>切换回监控页时刷新状态并恢复当前值，不重建点位结构。</summary>
     public void RefreshOnAppear()
     {
-        RefreshStatus();
+        RefreshConnectionStatus();
         ApplyLiveAcquisitionData();
     }
 
@@ -567,7 +568,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
     {
         try
         {
-            await Task.Delay(250, token).ConfigureAwait(false);
+            await Task.Delay(400, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -579,17 +580,16 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
     void ApplySubscriptionUiUpdate()
     {
+        // 设备增减：重建列表/卡片结构。点位值变化：只改已有行的绑定值，不拆页面。
         if (HasDeviceListChanged())
         {
             RefreshRemoteDevices();
             RebuildRemoteView();
-        }
-        else
-        {
-            UpdateRemoteView();
+            ModeText = BuildModeText();
+            return;
         }
 
-        ModeText = BuildModeText();
+        UpdateRemoteView();
     }
 
     void OnServiceConnectionChanged(object? sender, EventArgs e)
@@ -600,7 +600,44 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             return;
         }
 
-        MainThread.BeginInvokeOnMainThread(() => RefreshStatus());
+        MainThread.BeginInvokeOnMainThread(RefreshConnectionStatus);
+    }
+
+    /// <summary>
+    /// 连接、网页在线数变化只改状态文字。重建全部设备卡片会在界面线程上把整页拆掉再排一遍。
+    /// </summary>
+    void RefreshConnectionStatus()
+    {
+        var wantsSubscribe = _settings.Current.OperationMode == AppOperationMode.Subscribe;
+        if (wantsSubscribe != IsSubscribeMode)
+        {
+            RefreshStatus();
+            return;
+        }
+
+        if (IsSubscribeMode)
+        {
+            IsRunning = _subscription.IsRunning;
+            PlcConnected = false;
+            MqttConnected = _subscription.IsConnected;
+            WebClientCount = _subscription.WebClientCount;
+            var topics = SubscribeTopicHelper.NormalizeTopics(_settings.Current.SubscribeTopics);
+            TopicPreview = _subscription.IsRunning && _subscription.ActiveSubscribeTopics.Count > 0
+                ? $"已订阅：{string.Join("，", _subscription.ActiveSubscribeTopics)}"
+                : $"订阅主题：{string.Join("，", topics)}";
+            ModeText = BuildModeText();
+            LastError = _subscription.LastError;
+            ApplyToggleText();
+            return;
+        }
+
+        IsRunning = _acquisition.IsRunning;
+        PlcConnected = _acquisition.PlcConnected;
+        MqttConnected = _acquisition.MqttConnected;
+        WebClientCount = 0;
+        ModeText = BuildModeText();
+        LastError = _acquisition.LastError;
+        ApplyToggleText();
     }
 
     void RebuildTopicFilters()
@@ -823,7 +860,6 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         foreach (var device in devices)
         {
             var panel = RemoteDevicePanels.First(item => item.DeviceKey == device.DeviceKey);
-            panel.StatusText = BuildPanelStatus(device);
             UpdatePanelRows(panel, device);
         }
 
@@ -839,17 +875,20 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
         }
 
         var orderedTags = OrderRemoteTags(device).ToList();
-        var flatRows = panel.TagGroups.SelectMany(group => group.Tags).ToList();
-        if (flatRows.Count == orderedTags.Count &&
-            flatRows.Zip(orderedTags, (row, entry) => row.Name == entry.Name).All(match => match))
+        var byName = lookup.Values
+            .GroupBy(row => row.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        if (SameTagNames(byName.Keys, orderedTags))
         {
-            ApplyRemoteValuesToRows(flatRows, device, orderedTags);
+            ApplyRemoteValuesByName(byName, device, orderedTags);
+            panel.StatusText = BuildPanelStatus(device);
             return;
         }
 
         var rows = BuildRowsForDevice(device);
         PopulatePanelGroups(panel, rows);
         _multiRowLookup[panel.DeviceKey] = rows.ToDictionary(row => row.Id, StringComparer.Ordinal);
+        panel.StatusText = BuildPanelStatus(device);
     }
 
     void PopulatePanelGroups(RemoteDevicePanelViewModel panel, IReadOnlyList<TagRowViewModel> rows)
@@ -964,10 +1003,12 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
 
         var orderedTags = OrderRemoteTags(device).ToList();
         var flatRows = GetFlatRows();
-        if (flatRows.Count == orderedTags.Count &&
-            flatRows.Zip(orderedTags, (row, entry) => row.Name == entry.Name).All(match => match))
+        var byName = flatRows
+            .GroupBy(row => row.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        if (SameTagNames(byName.Keys, orderedTags))
         {
-            ApplyRemoteValuesToRows(flatRows, device, orderedTags);
+            ApplyRemoteValuesByName(byName, device, orderedTags);
             ShowEmptyTagsHint = false;
             return;
         }
@@ -1021,21 +1062,48 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             : null
     };
 
-    void ApplyRemoteValuesToRows(
-        IReadOnlyList<TagRowViewModel> flatRows,
+    static bool SameTagNames(
+        IReadOnlyCollection<string> existingNames,
+        IReadOnlyList<(string Name, object? Value, PlcTag? CatalogTag)> orderedTags)
+    {
+        if (existingNames.Count != orderedTags.Count)
+        {
+            return false;
+        }
+
+        var set = existingNames as HashSet<string> ??
+                  new HashSet<string>(existingNames, StringComparer.Ordinal);
+        for (var i = 0; i < orderedTags.Count; i++)
+        {
+            if (!set.Contains(orderedTags[i].Name))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static void ApplyRemoteValuesByName(
+        IReadOnlyDictionary<string, TagRowViewModel> rowsByName,
         RemoteDeviceState device,
         IReadOnlyList<(string Name, object? Value, PlcTag? CatalogTag)> orderedTags)
     {
-        for (var i = 0; i < orderedTags.Count && i < flatRows.Count; i++)
+        for (var i = 0; i < orderedTags.Count; i++)
         {
-            var (_, value, _) = orderedTags[i];
-            flatRows[i].Apply(new TagSnapshot
+            var (name, value, _) = orderedTags[i];
+            if (!rowsByName.TryGetValue(name, out var row))
             {
-                TagId = flatRows[i].Id,
-                Name = flatRows[i].Name,
+                continue;
+            }
+
+            row.Apply(new TagSnapshot
+            {
+                TagId = row.Id,
+                Name = name,
                 Value = value,
                 Quality = device.Quality,
-                Timestamp = device.Timestamp
+                Timestamp = device.Timestamp == default ? device.ReceivedAt : device.Timestamp
             });
         }
     }
@@ -1152,6 +1220,7 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             IsRunning = _subscription.IsRunning;
             PlcConnected = false;
             MqttConnected = _subscription.IsConnected;
+            WebClientCount = _subscription.WebClientCount;
             var topics = SubscribeTopicHelper.NormalizeTopics(settings.SubscribeTopics);
             TopicPreview = _subscription.IsRunning && _subscription.ActiveSubscribeTopics.Count > 0
                 ? $"已订阅：{string.Join("，", _subscription.ActiveSubscribeTopics)}"
@@ -1174,9 +1243,10 @@ public partial class DashboardViewModel : ObservableObject, IDisposable
             RemoteDevicePanels.Clear();
             _multiRowLookup.Clear();
 
-        IsRunning = _acquisition.IsRunning;
+            IsRunning = _acquisition.IsRunning;
         PlcConnected = _acquisition.PlcConnected;
         MqttConnected = _acquisition.MqttConnected;
+        WebClientCount = 0;
         DeviceId = settings.DeviceId;
             MqttEndpointCatalog.Normalize(settings);
             var publishTopics = MqttEndpointCatalog.GetEnabledPublishEndpoints(settings)

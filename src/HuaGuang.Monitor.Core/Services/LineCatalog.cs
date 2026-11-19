@@ -10,7 +10,8 @@ namespace HuaGuang.Monitor.Services;
 public static class LineCatalog
 {
     public const string ProductSkuTagName = "产品货号";
-    public const int Version = 17;
+    /// <summary>18：瑞安1号机、瑞安2号机。已有产线 Excel 不整本覆盖。</summary>
+    public const int Version = 18;
 
     public const string S7TestLineName = "S7测试产线";
     public const string ZhidahyLineName = "智达火焰复合机";
@@ -27,6 +28,8 @@ public static class LineCatalog
     public const string Dingxing10LineName = "定型机10号";
     public const string Dingxing11LineName = "定型机11号";
     public const string HongbeiLineName = "烘焙机";
+    public const string Ruian1LineName = "瑞安1号机";
+    public const string Ruian2LineName = "瑞安2号机";
 
     public static IReadOnlyList<string> QimaoLineNames { get; } =
     [
@@ -57,6 +60,8 @@ public static class LineCatalog
         Dingxing10LineName,
         Dingxing11LineName,
         HongbeiLineName,
+        Ruian1LineName,
+        Ruian2LineName,
         S7TestLineName,
         SubscribeDashboardLineName
     ];
@@ -72,14 +77,25 @@ public static class LineCatalog
         HongbeiLineName
     ];
 
+    public static IReadOnlyList<string> RuianLineNames { get; } =
+    [
+        Ruian1LineName,
+        Ruian2LineName
+    ];
+
     public static bool IsDingxingLine(string? lineName) =>
         TryResolveLineName(lineName, out var resolved)
         && DingxingLineNames.Contains(resolved);
 
+    public static bool IsRuianLine(string? lineName) =>
+        TryResolveLineName(lineName, out var resolved)
+        && RuianLineNames.Contains(resolved);
+
     public static bool UsesS7Protocol(string? lineName) =>
         string.Equals(lineName, S7TestLineName, StringComparison.Ordinal)
         || IsQimaoLine(lineName)
-        || IsDingxingLine(lineName);
+        || IsDingxingLine(lineName)
+        || IsRuianLine(lineName);
 
     public static IReadOnlyList<string> AcquisitionLineNames { get; } =
         LineNames.Where(name => !IsSubscribeDashboard(name)).ToArray();
@@ -144,7 +160,7 @@ public static class LineCatalog
             return;
         }
 
-        if (IsDingxingLine(lineName))
+        if (IsDingxingLine(lineName) || IsRuianLine(lineName))
         {
             settings.Plc.Protocol = PlcProtocol.S7;
             settings.Plc.Model = "S7-1500";
@@ -207,6 +223,8 @@ public static class LineCatalog
         Dingxing10LineName => Dingxing10,
         Dingxing11LineName => Dingxing11,
         HongbeiLineName => Hongbei,
+        Ruian1LineName => Ruian1,
+        Ruian2LineName => Ruian2,
         S7TestLineName => S7Test,
         SubscribeDashboardLineName => SubscribeDashboard,
         _ => Xianhe
@@ -231,6 +249,8 @@ public static class LineCatalog
         Dingxing10LineName => "dxj10",
         Dingxing11LineName => "dxj11",
         HongbeiLineName => "hongbei",
+        Ruian1LineName => "ra1",
+        Ruian2LineName => "ra2",
         S7TestLineName => "s7test",
         SubscribeDashboardLineName => "subscribe",
         _ => "xianhe"
@@ -397,6 +417,19 @@ public static class LineCatalog
         LineMqttDefaults.HongbeiPublishTopic,
         DingxingHongbeiTags());
 
+    /// <summary>瑞安华光 2022065 地址表。点表页脚 IP 不用，两台机器各用现场地址。</summary>
+    public static LineProfile Ruian1 { get; } = new(
+        Ruian1LineName,
+        "172.15.0.60",
+        LineMqttDefaults.Ruian1PublishTopic,
+        Ruian2022065Tags());
+
+    public static LineProfile Ruian2 { get; } = new(
+        Ruian2LineName,
+        "172.15.0.46",
+        LineMqttDefaults.Ruian2PublishTopic,
+        Ruian2022065Tags());
+
     static List<PlcTag> QimaoMa876aTags() =>
     [
         new PlcTag
@@ -484,6 +517,87 @@ public static class LineCatalog
         S7RangedInt16("J-BOX超喂实际值", "DB55.DBW120", "%", -300, 300, scale: 0.1),
         S7RangedInt16("2#出布超喂实际值", "DB55.DBW122", "%", -300, 300, scale: 0.1)
     ];
+
+    /// <summary>瑞安华光 2022065：DB55 实际值与部分设置，DB56 设定值。超喂实际值 ×0.1，超喂设定值 ×10。</summary>
+    static List<PlcTag> Ruian2022065Tags()
+    {
+        var pairs = new[] { "1+2", "3+4", "5+6", "7+8", "9+10" };
+        var tags = new List<PlcTag>
+        {
+            S7RangedInt16("实际排风速度1", "DB55.DBW0", "%", 30, 100),
+            S7RangedInt16("实际排风速度2", "DB55.DBW2", "%", 30, 100)
+        };
+
+        for (var i = 1; i <= 8; i++)
+        {
+            tags.Add(S7RangedInt16($"#{i}门幅实际值", $"DB55.DBW{2 + i * 2}", "CM", 60, 205));
+        }
+
+        for (var i = 0; i < pairs.Length; i++)
+        {
+            tags.Add(S7RangedInt16($"循环风上风{pairs[i]}实际速度", $"DB55.DBW{30 + i * 2}", "%", 30, 100));
+        }
+
+        for (var i = 0; i < pairs.Length; i++)
+        {
+            tags.Add(S7RangedInt16($"循环风下风{pairs[i]}实际速度", $"DB55.DBW{42 + i * 2}", "%", 30, 100));
+        }
+
+        for (var i = 1; i <= 10; i++)
+        {
+            tags.Add(S7RangedInt16($"烘箱{i}实际温度", $"DB55.DBW{52 + i * 2}", "℃", 0, 250, TagDisplayCategory.Temperature));
+        }
+
+        tags.Add(S7RangedInt16("机器实际速度", "DB55.DBW78", "M/MIN", 0, 100));
+        tags.Add(S7RangedInt16("进布实际张力", "DB55.DBW80", "N", 0, 300));
+        tags.Add(S7RangedInt16("轧车实际张力", "DB55.DBW82", "N", 0, 300));
+        tags.Add(S7RangedInt16("提升辊实际张力", "DB55.DBW84", "N", 0, 300));
+        tags.Add(S7RangedInt16("下超喂实际值", "DB55.DBW86", "%", -300, 300, scale: 0.1));
+        tags.Add(S7RangedInt16("上超喂实际值", "DB55.DBW88", "%", -150, 800, scale: 0.1));
+        tags.Add(S7RangedInt16("出布超喂实际值", "DB55.DBW90", "%", -150, 450, scale: 0.1));
+        tags.Add(S7RangedInt16("摆布超喂实际值", "DB55.DBW92", "%", -300, 300, scale: 0.1));
+
+        for (var i = 1; i <= 10; i++)
+        {
+            tags.Add(S7RangedInt16($"烘箱{i}设置温度", $"DB55.DBW{94 + i * 2}", "℃", 0, 250, TagDisplayCategory.Setting));
+        }
+
+        tags.Add(S7RangedInt16("总门幅设置值", "DB55.DBW116", "CM", 60, 205, TagDisplayCategory.Setting));
+        tags.Add(S7RangedInt16("对中张力设置值", "DB55.DBW118", "N", 0, 300, TagDisplayCategory.Setting));
+        tags.Add(S7RangedInt16("轧车张力设置值", "DB55.DBW120", "N", 0, 300, TagDisplayCategory.Setting));
+        tags.Add(S7RangedInt16("提布辊张力设置值", "DB55.DBW122", "N", 0, 300, TagDisplayCategory.Setting));
+
+        tags.Add(S7RangedInt16("设定排风速度1", "DB56.DBW0", "%", 30, 100, TagDisplayCategory.Setting));
+        tags.Add(S7RangedInt16("设定排风速度2", "DB56.DBW2", "%", 30, 100, TagDisplayCategory.Setting));
+        for (var i = 1; i <= 12; i++)
+        {
+            tags.Add(S7RangedInt16($"#{i}门幅设定值", $"DB56.DBW{2 + i * 2}", "CM", 60, 205, TagDisplayCategory.Setting));
+        }
+
+        for (var i = 0; i < pairs.Length; i++)
+        {
+            tags.Add(S7RangedInt16($"循环风上风{pairs[i]}设定速度", $"DB56.DBW{28 + i * 2}", "%", 30, 100, TagDisplayCategory.Setting));
+        }
+
+        for (var i = 0; i < pairs.Length; i++)
+        {
+            tags.Add(S7RangedInt16($"循环风下风{pairs[i]}设定速度", $"DB56.DBW{38 + i * 2}", "%", 30, 100, TagDisplayCategory.Setting));
+        }
+
+        for (var i = 1; i <= 9; i++)
+        {
+            tags.Add(S7RangedInt16($"烘箱{i}设定温度", $"DB56.DBW{46 + i * 2}", "℃", 0, 250, TagDisplayCategory.Setting));
+        }
+
+        tags.Add(S7RangedInt16("机器设定速度", "DB56.DBW66", "M/MIN", 0, 100, TagDisplayCategory.Setting));
+        tags.Add(S7RangedInt16("进布设定张力", "DB56.DBW68", "N", 0, 300, TagDisplayCategory.Setting));
+        tags.Add(S7RangedInt16("轧车设定张力", "DB56.DBW70", "N", 0, 300, TagDisplayCategory.Setting));
+        tags.Add(S7RangedInt16("下超喂设定值", "DB56.DBW72", "%", -300, 300, TagDisplayCategory.Setting, scale: 10));
+        tags.Add(S7RangedInt16("上超喂设定值", "DB56.DBW74", "%", -150, 800, TagDisplayCategory.Setting, scale: 10));
+        tags.Add(S7RangedInt16("出布超喂设定值", "DB56.DBW76", "%", -150, 450, TagDisplayCategory.Setting, scale: 10));
+        tags.Add(S7RangedInt16("摆布超喂设定值", "DB56.DBW78", "%", -300, 300, TagDisplayCategory.Setting, scale: 10));
+        return tags;
+    }
 
     static PlcTag S7RangedInt16(
         string name,
@@ -726,6 +840,7 @@ public static class LineCatalog
             ValidMin = source.ValidMin,
             ValidMax = source.ValidMax,
             UseScannerInput = source.UseScannerInput,
+            ReadWhenShutdown = source.ReadWhenShutdown,
             Expression = source.Expression,
             Scale = source.Scale,
             Offset = source.Offset,
@@ -766,6 +881,8 @@ public static class LineCatalog
         Dingxing10LineName => "定型10",
         Dingxing11LineName => "定型11",
         HongbeiLineName => "烘焙",
+        Ruian1LineName => "瑞安1",
+        Ruian2LineName => "瑞安2",
         S7TestLineName => "S7测试",
         SubscribeDashboardLineName => "订阅大屏",
         "先河热熔胶复合机" => "先河",
@@ -809,7 +926,9 @@ public static class LineCatalog
             "ZL027C" or "起毛机ZL-027C" or "起毛027C" or "QMZL027C" => QimaoZl027cLineName,
             "定型机10号" or "定型10" or "定型机10" or "DXJ10" or "HGDXJ10" => Dingxing10LineName,
             "定型机11号" or "定型11" or "定型机11" or "DXJ11" or "HGDXJ11" => Dingxing11LineName,
-            "烘焙机" or "烘焙" or "HONGPEI" or "HGHBJ" => HongbeiLineName,
+            "烘焙机" or "烘焙" or "HONGBEI" or "HONGPEI" or "HGHBJ" => HongbeiLineName,
+            "瑞安1号机" or "1号机" or "RA1" or "HGRA1" => Ruian1LineName,
+            "瑞安2号机" or "2号机" or "RA2" or "HGRA2" => Ruian2LineName,
             "S7" or "S7TEST" or "S7测试" => S7TestLineName,
             "订阅" or "订阅大屏" or "SUBSCRIBE" or "SUB" => SubscribeDashboardLineName,
             _ => string.Empty
@@ -842,6 +961,8 @@ public static class LineCatalog
             Dingxing10LineName => "dxj10",
             Dingxing11LineName => "dxj11",
             HongbeiLineName => "hongbei",
+            Ruian1LineName => "ra1",
+            Ruian2LineName => "ra2",
             S7TestLineName => "s7",
             SubscribeDashboardLineName => "subscribe",
             _ => "xianhe"

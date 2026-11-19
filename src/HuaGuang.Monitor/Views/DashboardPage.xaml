@@ -257,6 +257,19 @@
                         </HorizontalStackLayout>
                     </Border>
 
+                    <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8,6"
+                            IsVisible="{Binding IsSubscribeMode}">
+                        <Border.StrokeShape>
+                            <RoundRectangle CornerRadius="8" />
+                        </Border.StrokeShape>
+                        <VerticalStackLayout Spacing="0">
+                            <Label Text="网页" TextColor="#8AA0B5"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                            <Label Text="{Binding WebClientCount, StringFormat='{0} 个在线'}" TextColor="White"
+                                   FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                        </VerticalStackLayout>
+                    </Border>
+
                     <Button Text="{Binding Source={x:Reference ThisPage}, Path=IsFullScreenMode, Converter={StaticResource FullScreenLabelConverter}}"
                             Clicked="OnFullScreenClicked"
                             Padding="12,8"
@@ -335,6 +348,19 @@
                         </VerticalStackLayout>
                                     </HorizontalStackLayout>
                         </Border>
+
+                <Border Stroke="#1F3A52" StrokeThickness="1" BackgroundColor="#152536" Padding="8,6"
+                        IsVisible="{Binding IsSubscribeMode}">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="8" />
+                    </Border.StrokeShape>
+                    <VerticalStackLayout Spacing="0">
+                        <Label Text="网页" TextColor="#8AA0B5"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=SmallFontSize}" />
+                        <Label Text="{Binding WebClientCount, StringFormat='{0} 个在线'}" TextColor="White"
+                               FontSize="{Binding Source={x:Reference ThisPage}, Path=BodyFontSize}" />
+                    </VerticalStackLayout>
+                </Border>
 
                 <Button Text="{Binding Source={x:Reference ThisPage}, Path=IsFullScreenMode, Converter={StaticResource FullScreenLabelConverter}}"
                         Clicked="OnFullScreenClicked"

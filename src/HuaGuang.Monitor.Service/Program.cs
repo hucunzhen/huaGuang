@@ -49,6 +49,7 @@ public static class Program
 
         builder.Services.AddMonitorRuntimeCore(AppPaths.LogDirectory, addInMemoryLogger: false);
         builder.Services.AddHostedService<MonitorIpcServer>();
+        builder.Services.AddHostedService<SubscribeWebHost>();
         if (!MonitorProcessInstance.IsIsolated)
         {
             builder.Services.AddHostedService<UiSupervisorWorker>();

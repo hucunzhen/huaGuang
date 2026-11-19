@@ -158,10 +158,36 @@ static class MonitorIpcTcpTransport
             {
             }
 
+            ObserveAbandonedConnect(connect);
             cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException($"IPC TCP 连接超时 127.0.0.1:{tcpPort}");
         }
 
         await connect.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Close 之后原来的 ConnectAsync 还会以 SocketException 995 结束。
+    /// 不观察的话异常留到终结器，套接字和任务把界面进程的内存抬上去。
+    /// </summary>
+    static void ObserveAbandonedConnect(Task connect)
+    {
+        if (connect.IsCompleted)
+        {
+            return;
+        }
+
+        _ = ObserveAsync(connect);
+
+        static async Task ObserveAsync(Task task)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+        }
     }
 }

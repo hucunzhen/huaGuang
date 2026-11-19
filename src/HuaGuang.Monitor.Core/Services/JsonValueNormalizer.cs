@@ -18,4 +18,22 @@ public static class JsonValueNormalizer
         JsonValueKind.Null => null,
         _ => element.GetRawText()
     };
+
+    public static bool ValuesEqual(object? left, object? right)
+    {
+        left = Normalize(left);
+        right = Normalize(right);
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        if (left.Equals(right))
+        {
+            return true;
+        }
+
+        return left is IFormattable && right is IFormattable &&
+               left.ToString() == right.ToString();
+    }
 }

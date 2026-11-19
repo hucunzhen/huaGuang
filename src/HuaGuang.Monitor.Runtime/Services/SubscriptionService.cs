@@ -35,6 +35,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
     public bool IsConnected => _client?.IsConnected == true;
     public string LastError { get; private set; } = string.Empty;
     public string LastPayload { get; private set; } = string.Empty;
+    public int WebClientCount => SubscribeWebSessions.ActiveCount;
     public IReadOnlyList<string> ActiveSubscribeTopics { get; private set; } = [];
 
     public IReadOnlyDictionary<string, RemoteDeviceState> Devices => _devices;

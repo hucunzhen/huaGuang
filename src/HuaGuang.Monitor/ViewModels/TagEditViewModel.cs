@@ -51,14 +51,18 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
     ];
 
     [ObservableProperty] string title = "新增点位";
-    [ObservableProperty] string name = string.Empty;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowReadWhenShutdown))]
+    string name = string.Empty;
     [ObservableProperty] string unit = string.Empty;
     [ObservableProperty] bool enabled = true;
+    [ObservableProperty] bool readWhenShutdown;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPlcSource))]
     [NotifyPropertyChangedFor(nameof(IsManualSource))]
     [NotifyPropertyChangedFor(nameof(IsComputedSource))]
     [NotifyPropertyChangedFor(nameof(ShowScannerInputOption))]
+    [NotifyPropertyChangedFor(nameof(ShowReadWhenShutdown))]
     string selectedSourceType = "PLC 采集";
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ResolvedHint))]
@@ -99,6 +103,9 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         PlcEndpointCatalog.NormalizeAndNames(_store.Current);
 
     public bool IsPlcSource => SelectedSourceType == "PLC 采集";
+    public bool ShowReadWhenShutdown =>
+        IsPlcSource &&
+        !string.Equals(Name.Trim(), RunStatusFormatting.TagName, StringComparison.Ordinal);
     public bool IsManualSource => SelectedSourceType == "手动输入";
     public bool IsComputedSource => SelectedSourceType == "计算";
     public bool ShowScannerInputOption =>
@@ -243,6 +250,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
                 SwitchStatusLabels = tag.SwitchStatusLabels ?? string.Empty;
                 SyncPresetFromLabels(SwitchStatusLabels);
                 UseScannerInput = tag.UseScannerInput;
+                ReadWhenShutdown = tag.ReadWhenShutdown;
                 SelectedPlcName = PlcEndpointCatalog.Resolve(_store.Current, tag.PlcId).Name;
                 OnPropertyChanged(nameof(PlcNameOptions));
                 return;
@@ -306,6 +314,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
 
         tag.SwitchStatusLabels = SwitchStatusLabelsParser.Normalize(SwitchStatusLabels);
         tag.UseScannerInput = UseScannerInput && IsManualSource && dataType == TagDataType.String;
+        tag.ReadWhenShutdown = IsPlcSource && ReadWhenShutdown;
 
         if (!TryParseOptionalRange(ValidMin, ValidMax, dataType, out var rangeMin, out var rangeMax, out var rangeError))
         {
@@ -460,6 +469,7 @@ public partial class TagEditViewModel : ObservableObject, IQueryAttributable
         SwitchStatusLabels = string.Empty;
         SelectedSwitchStatusPreset = "默认（关/开/待机）";
         UseScannerInput = false;
+        ReadWhenShutdown = false;
         StatusMessage = string.Empty;
         PlcEndpointCatalog.Normalize(_store.Current);
         SelectedPlcName = PlcEndpointCatalog.GetPrimary(_store.Current).Name;

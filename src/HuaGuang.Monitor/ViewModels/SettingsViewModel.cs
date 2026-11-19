@@ -149,6 +149,11 @@ public partial class SettingsViewModel : ObservableObject
     public bool IsSubscribeSettings => SelectedOperationMode == "订阅模式";
     public bool IsAcquisitionSettings => SelectedOperationMode == "采集模式";
 
+    [ObservableProperty] string webLoginUsername = WebLoginAccount.DefaultUsername;
+    [ObservableProperty] string webLoginPassword = WebLoginAccount.DefaultPassword;
+
+    public string WebLoginDefaultPassword => WebLoginAccount.DefaultPassword;
+
     partial void OnSelectedOperationModeChanged(string value)
     {
         OnPropertyChanged(nameof(IsSubscribeSettings));
@@ -576,10 +581,36 @@ public partial class SettingsViewModel : ObservableObject
         settings.TemperaturePublishThresholdC = ParseDouble(TemperaturePublishThresholdC, 0, 0, 100);
         settings.TemperaturePrecision = ParseInt(TemperaturePrecision, AppSettings.DefaultTemperaturePrecision, 0, 4);
         settings.UseSimulator = UseSimulator;
+        if (TryReadWebLogin(out var webUser, out var webPassword, out _))
+        {
+            settings.WebLoginUsername = webUser;
+            settings.WebLoginPassword = webPassword;
+        }
+
         ApplyPlcEndpointsToSettings(settings);
         ApplyMqttEndpointsToSettings(settings);
         ApplySubscribeMqttToSettings(settings);
         return settings;
+    }
+
+    bool TryReadWebLogin(out string username, out string password, out string error)
+    {
+        username = WebLoginUsername.Trim();
+        password = WebLoginPassword ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(username) || password.Length == 0)
+        {
+            error = "请填写网页登录用户名和密码。";
+            return false;
+        }
+
+        if (username.Length > 32 || password.Length > 64)
+        {
+            error = "网页登录用户名或密码过长。";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
     }
 
     bool TryValidateMqttSettings(out string message)
@@ -828,6 +859,12 @@ public partial class SettingsViewModel : ObservableObject
                 return;
             }
 
+            if (!TryReadWebLogin(out var webUser, out var webPassword, out var webLoginError))
+            {
+                StatusMessage = webLoginError;
+                return;
+            }
+
             var running = IsServiceRunning();
 
             var settings = _store.Current;
@@ -872,6 +909,9 @@ public partial class SettingsViewModel : ObservableObject
             }
 
             settings.HistoryDirectory = historyDir;
+            settings.WebLoginUsername = webUser;
+            settings.WebLoginPassword = webPassword;
+            WebLoginUsername = webUser;
             ApplyMqttEndpointsToSettings(settings);
             ApplySubscribeMqttToSettings(settings);
 
@@ -948,6 +988,23 @@ public partial class SettingsViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    async Task ResetWebLoginPasswordAsync()
+    {
+        WebLoginPassword = WebLoginAccount.DefaultPassword;
+        if (string.IsNullOrWhiteSpace(WebLoginUsername))
+        {
+            WebLoginUsername = WebLoginAccount.DefaultUsername;
+        }
+
+        await SaveAsync();
+        if (StatusMessage.StartsWith("设置已保存。", StringComparison.Ordinal)
+            || StatusMessage.StartsWith("本窗口设置已保存", StringComparison.Ordinal))
+        {
+            StatusMessage = $"密码已重置为默认密码 {WebLoginAccount.DefaultPassword}。";
+        }
+    }
+
     void LoadFrom(AppSettings settings)
     {
         _isLoadingSettings = true;
@@ -990,6 +1047,9 @@ public partial class SettingsViewModel : ObservableObject
         HistoryRetentionDays = settings.HistoryRetentionDays.ToString();
         LogExportDirectory = settings.LogExportDirectory ?? string.Empty;
         HistoryDirectory = settings.HistoryDirectory ?? string.Empty;
+        WebLoginAccount.Ensure(settings);
+        WebLoginUsername = settings.WebLoginUsername;
+        WebLoginPassword = settings.WebLoginPassword;
         PlcEndpointCatalog.Normalize(settings);
         PlcEndpoints.Clear();
         foreach (var endpoint in settings.PlcEndpoints)

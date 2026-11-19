@@ -71,17 +71,23 @@ $publishDirDefine = $publishDir.Trim().TrimEnd('\', '/')
 $setup = Join-Path $outputDir "IndustrialMonitor-$($appVer.FileSuffix)-Setup.exe"
 $signScript = Join-Path $PSScriptRoot "sign-with-signtool.ps1"
 & $signScript -PublishDir $publishDirDefine -Iscc $iscc -Iss $iss -Version $appVer.Version -Revision $appVer.Revision -SetupPath $setup -SkipIfMissing
-if ($LASTEXITCODE -ne 0) { throw "签名或安装包编译失败。" }
+if ($LASTEXITCODE -ne 0) { throw "Signing or installer compile failed." }
 
-if (-not (Test-Path -LiteralPath $setup)) {
+$setupItem = $null
+if (Test-Path -LiteralPath $setup) {
+    $setupItem = Get-Item -LiteralPath $setup
+}
+if (-not $setupItem -or $setupItem.Length -lt 1MB) {
     $newest = Get-ChildItem -LiteralPath $outputDir -Filter "IndustrialMonitor-*-Setup.exe" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Length -ge 1MB } |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
     if ($newest) {
         Write-Host "Warning: expected $setup but using newest output: $($newest.FullName)" -ForegroundColor Yellow
         $setup = $newest.FullName
+        $setupItem = $newest
     }
-    else {
+    elseif (-not $setupItem) {
         throw "Inno Setup finished but Setup.exe was not found. Expected: $setup. Check installer\output and ISCC log for 'Successful compile'."
     }
 }

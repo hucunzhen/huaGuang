@@ -76,6 +76,17 @@
                    TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
                    IsVisible="{Binding IsPlcSource}" />
 
+            <HorizontalStackLayout Spacing="10" IsVisible="{Binding ShowReadWhenShutdown}">
+                <CheckBox IsChecked="{Binding ReadWhenShutdown}" Color="#2EC4B6" VerticalOptions="Center" />
+                <Label Text="关机时也采集"
+                       TextColor="White"
+                       VerticalOptions="Center"
+                       LineBreakMode="WordWrap" />
+            </HorizontalStackLayout>
+            <Label Text="默认不勾选：运行状态为关时不读此点。待机和开机仍采集。运行状态点始终读取。"
+                   TextColor="#8AA0B5" FontSize="12" LineBreakMode="WordWrap"
+                   IsVisible="{Binding ShowReadWhenShutdown}" />
+
             <Label Text="{Binding PlcAddressLabel}" TextColor="#8AA0B5" FontSize="12" IsVisible="{Binding IsPlcSource}" />
             <Entry Text="{Binding XinjeAddress}" Placeholder="{Binding PlcAddressPlaceholder}" IsVisible="{Binding IsPlcSource}" />
             <Label Text="{Binding ResolvedHint}" TextColor="#2EC4B6" FontSize="12" LineBreakMode="WordWrap"

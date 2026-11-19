@@ -229,13 +229,16 @@ public static class MauiProgram
 		if (MonitorProcessInstance.IsIsolated)
 		{
 			MonitorProcessInstance.RemoveIsolatedLoginStartup();
-			if (IsolatedWantsBackgroundAutoStart())
+			if (MonitorProcessInstance.IsSubscribeDashboardHost || IsolatedWantsBackgroundAutoStart())
 			{
 				_ = Task.Run(() =>
 				{
 					try
 					{
-						Platforms.Windows.WindowsInstanceBackgroundHost.EnsureRunning(TimeSpan.FromSeconds(8));
+						var wait = MonitorProcessInstance.IsSubscribeDashboardHost
+							? TimeSpan.FromSeconds(2)
+							: TimeSpan.FromSeconds(8);
+						Platforms.Windows.WindowsInstanceBackgroundHost.EnsureRunning(wait);
 					}
 					catch (Exception ex)
 					{

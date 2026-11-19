@@ -12,6 +12,7 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
     readonly object _gate = new();
     readonly Dictionary<string, TagSnapshot> _snapshots = new(StringComparer.Ordinal);
     readonly System.Timers.Timer _pollTimer;
+    readonly SemaphoreSlim _pollGate = new(1, 1);
     MonitorRuntimeState? _state;
 
     public RemoteMonitorAcquisition(SettingsStore settings, ILogger<RemoteMonitorAcquisition> logger)
@@ -61,6 +62,11 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
 
     async Task PollAsync()
     {
+        if (!await _pollGate.WaitAsync(0).ConfigureAwait(false))
+        {
+            return;
+        }
+
         try
         {
             var response = await _client.SendAsync(new MonitorIpcRequest { Command = MonitorIpcCommand.GetStatus })
@@ -110,6 +116,10 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
         {
             _logger.LogDebug(ex, "IPC 轮询失败");
         }
+        finally
+        {
+            _pollGate.Release();
+        }
     }
 
     async Task SendAsync(MonitorIpcRequest request, TimeSpan? timeout = null)
@@ -128,7 +138,11 @@ public sealed class RemoteMonitorAcquisition : IMonitorAcquisition, IDisposable
         }
     }
 
-    public void Dispose() => _pollTimer.Dispose();
+    public void Dispose()
+    {
+        _pollTimer.Dispose();
+        _pollGate.Dispose();
+    }
 }
 
 public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposable
@@ -138,6 +152,7 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
     readonly ILogger<RemoteMonitorSubscription> _logger;
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
     readonly System.Timers.Timer _pollTimer;
+    readonly SemaphoreSlim _pollGate = new(1, 1);
     readonly CoalescedEvent _devicesUpdatedCoalescer;
     string? _topicFilter;
     MonitorRuntimeState? _state;
@@ -146,8 +161,9 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
     {
         _settings = settings;
         _logger = logger;
+        // 值变化合并后再通知 UI；页面结构仍由 Dashboard 侧按设备列表变化单独重建。
         _devicesUpdatedCoalescer = new CoalescedEvent(
-            TimeSpan.FromMilliseconds(300),
+            TimeSpan.FromMilliseconds(500),
             () => DevicesUpdated?.Invoke(this, EventArgs.Empty));
         _pollTimer = new System.Timers.Timer(1200) { AutoReset = true };
         _pollTimer.Elapsed += (_, _) => _ = PollAsync();
@@ -159,6 +175,7 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
     public bool IsConnected => _state?.MqttConnected ?? false;
     public string LastError => _state?.LastError ?? string.Empty;
     public string LastPayload => _state?.LastPayload ?? string.Empty;
+    public int WebClientCount => _state?.WebClientCount ?? 0;
     public IReadOnlyList<string> ActiveSubscribeTopics => _state?.ActiveSubscribeTopics ?? [];
     public IReadOnlyDictionary<string, RemoteDeviceState> Devices => _devices;
 
@@ -202,6 +219,11 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
 
     async Task PollAsync()
     {
+        if (!await _pollGate.WaitAsync(0).ConfigureAwait(false))
+        {
+            return;
+        }
+
         try
         {
             var response = await _client.SendAsync(new MonitorIpcRequest
@@ -217,6 +239,7 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
 
             var previousRunning = _state?.IsRunning;
             var previousConnected = _state?.MqttConnected;
+            var previousClients = _state?.WebClientCount;
             _state = response.State;
             var changed = false;
 
@@ -233,6 +256,8 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
                 {
                     if (RemoteDeviceStateHelper.HasSameContent(existing, dto))
                     {
+                        // 只有到达时间在变：同步时间，不通知 UI 整页刷新。
+                        RemoteDeviceStateHelper.ApplyArrivalOnly(existing, dto);
                         continue;
                     }
 
@@ -245,7 +270,9 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
                 changed = true;
             }
 
-            if (previousRunning != _state.IsRunning || previousConnected != _state.MqttConnected)
+            if (previousRunning != _state.IsRunning
+                || previousConnected != _state.MqttConnected
+                || previousClients != _state.WebClientCount)
             {
                 ConnectionChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -258,6 +285,10 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "IPC 轮询失败");
+        }
+        finally
+        {
+            _pollGate.Release();
         }
     }
 
@@ -280,6 +311,7 @@ public sealed class RemoteMonitorSubscription : IMonitorSubscription, IDisposabl
     public void Dispose()
     {
         _pollTimer.Dispose();
+        _pollGate.Dispose();
         _devicesUpdatedCoalescer.Dispose();
     }
 

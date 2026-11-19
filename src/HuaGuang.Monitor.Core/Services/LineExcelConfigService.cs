@@ -22,7 +22,8 @@ public static class LineExcelConfigService
     static readonly string[] TagHeaders =
     [
         "名称", "来源", "地址", "数据类型", "单位", "字节序", "启用", "手动默认值", "精度", "倍率", "偏移", "二次",
-        "有效下限", "有效上限", "显示分组", "开关状态文案", "扫码输入", "表达式", "所属PLC"
+        "有效下限", "有效上限", "显示分组", "开关状态文案", "扫码输入", "表达式", "所属PLC",
+        TagShutdownAcquire.ExcelColumn
     ];
 
     static readonly (string Key, string Label, string Hint)[] MqttPayloadRows =
@@ -81,6 +82,8 @@ public static class LineExcelConfigService
         ("HistoryRetentionDays", "历史保留天数"),
         ("HistoryDirectory", "历史数据目录"),
         ("LogExportDirectory", "日志打包目录"),
+        ("WebLoginUsername", "网页登录用户名"),
+        ("WebLoginPassword", "网页登录密码"),
     ];
 
     public static void Export(AppSettings settings, string filePath)
@@ -681,7 +684,8 @@ public static class LineExcelConfigService
                 SwitchStatusLabels = catalogTag.SwitchStatusLabels,
                 ValidMin = catalogTag.ValidMin,
                 ValidMax = catalogTag.ValidMax,
-                Enabled = catalogTag.Enabled
+                Enabled = catalogTag.Enabled,
+                ReadWhenShutdown = catalogTag.ReadWhenShutdown
             };
             PlcTagIdentity.AssignStableId(added, settings.LineName);
             settings.Tags.Add(added);
@@ -806,7 +810,8 @@ public static class LineExcelConfigService
             tag.SwitchStatusLabels,
             tag.UseScannerInput,
             tag.Expression,
-            tag.MqttField);
+            tag.MqttField,
+            tag.ReadWhenShutdown);
 
     static void ValidateWorkbookFormat(XLWorkbook workbook)
     {
@@ -1196,6 +1201,12 @@ public static class LineExcelConfigService
         ["HistoryRetentionDays"] = settings.HistoryRetentionDays.ToString(),
         ["HistoryDirectory"] = settings.HistoryDirectory ?? string.Empty,
         ["LogExportDirectory"] = settings.LogExportDirectory ?? string.Empty,
+        ["WebLoginUsername"] = string.IsNullOrWhiteSpace(settings.WebLoginUsername)
+            ? WebLoginAccount.DefaultUsername
+            : settings.WebLoginUsername.Trim(),
+        ["WebLoginPassword"] = string.IsNullOrEmpty(settings.WebLoginPassword)
+            ? WebLoginAccount.DefaultPassword
+            : settings.WebLoginPassword,
     };
 
     static void WriteTagsSheet(XLWorkbook workbook, AppSettings settings)
@@ -1233,6 +1244,7 @@ public static class LineExcelConfigService
             sheet.Cell(row, 19).Value = tag.IsPlc
                 ? PlcEndpointCatalog.Resolve(settings, tag.PlcId).Name
                 : string.Empty;
+            sheet.Cell(row, 20).Value = tag.ReadWhenShutdown ? "是" : "否";
             row++;
         }
 
@@ -1351,6 +1363,9 @@ public static class LineExcelConfigService
         settings.HistoryRetentionDays = GetInt(map, "历史保留天数", settings.HistoryRetentionDays);
         settings.HistoryDirectory = GetString(map, "历史数据目录", settings.HistoryDirectory);
         settings.LogExportDirectory = GetString(map, "日志打包目录", settings.LogExportDirectory);
+        settings.WebLoginUsername = GetString(map, "网页登录用户名", WebLoginAccount.DefaultUsername);
+        settings.WebLoginPassword = GetString(map, "网页登录密码", WebLoginAccount.DefaultPassword);
+        WebLoginAccount.Ensure(settings);
 
         ApplySubscribeTopics(settings, map);
     }
@@ -1635,6 +1650,12 @@ public static class LineExcelConfigService
             else if (string.Equals(name, LineCatalog.ProductSkuTagName, StringComparison.Ordinal))
             {
                 tag.UseScannerInput = true;
+            }
+
+            var readWhenShutdownColumn = FindTagColumn(sheet, TagShutdownAcquire.ExcelColumn);
+            if (readWhenShutdownColumn > 0)
+            {
+                tag.ReadWhenShutdown = ParseBoolCell(sheet.Cell(row, readWhenShutdownColumn), false);
             }
 
             if (tag.IsPlc)
