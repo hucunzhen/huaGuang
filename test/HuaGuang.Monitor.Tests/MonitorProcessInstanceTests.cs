@@ -40,7 +40,7 @@ public sealed class MonitorProcessInstanceTests
         Assert.Equal("C型火焰复合机", MonitorProcessInstance.ParseLine(["--line=C型火焰"]));
         Assert.Equal("智达火焰复合机", MonitorProcessInstance.ParseLine(["--line", "zhidahy"]));
         Assert.Equal("上海火焰复合机", MonitorProcessInstance.ParseLine(["--line=进口机-上海机"]));
-        Assert.Equal("MES火焰复合机", MonitorProcessInstance.ParseLine(["--line", "meshy"]));
+        Assert.Equal("进口许米特火焰复合机", MonitorProcessInstance.ParseLine(["--line", "meshy"]));
         Assert.Equal("S7测试产线", MonitorProcessInstance.ParseLine(["--line", "s7"]));
         Assert.Equal("订阅大屏", MonitorProcessInstance.ParseLine(["--line", "subscribe"]));
         Assert.Equal("订阅大屏", MonitorProcessInstance.ParseLine(["--line=订阅"]));

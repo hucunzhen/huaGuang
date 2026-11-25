@@ -33,7 +33,7 @@
 		<ApplicationId>com.industrial.monitor</ApplicationId>
 
 		<!-- Versions: DisplayVersion=版本号, ApplicationVersion=修订号(Android versionCode) -->
-		<ApplicationDisplayVersion>1.1.17</ApplicationDisplayVersion>
+		<ApplicationDisplayVersion>1.1.18</ApplicationDisplayVersion>
 		<ApplicationVersion>1</ApplicationVersion>
 
 		<!-- 解包运行，方便 Win10 工控机直接拷贝 exe，不必走 Microsoft Store。 -->
@@ -194,7 +194,7 @@
 		<MauiAsset Include="..\..\config\lines\上海火焰复合机.xlsx"
 		           Link="Resources\Raw\lines\shanghaihy.xlsx"
 		           LogicalName="lines/shanghaihy.xlsx" />
-		<MauiAsset Include="..\..\config\lines\MES火焰复合机.xlsx"
+		<MauiAsset Include="..\..\config\lines\进口许米特火焰复合机.xlsx"
 		           Link="Resources\Raw\lines\meshy.xlsx"
 		           LogicalName="lines/meshy.xlsx" />
 		<MauiAsset Include="..\..\config\lines\起毛机ZL-028A.xlsx"
@@ -215,19 +215,19 @@
 		<MauiAsset Include="..\..\config\lines\起毛机ZL-027C.xlsx"
 		           Link="Resources\Raw\lines\zl027c.xlsx"
 		           LogicalName="lines/zl027c.xlsx" />
-		<MauiAsset Include="..\..\config\lines\定型机10号.xlsx"
+		<MauiAsset Include="..\..\config\lines\定型机DX-013.xlsx"
 		           Link="Resources\Raw\lines\dxj10.xlsx"
 		           LogicalName="lines/dxj10.xlsx" />
-		<MauiAsset Include="..\..\config\lines\定型机11号.xlsx"
+		<MauiAsset Include="..\..\config\lines\定型机DX-015.xlsx"
 		           Link="Resources\Raw\lines\dxj11.xlsx"
 		           LogicalName="lines/dxj11.xlsx" />
-		<MauiAsset Include="..\..\config\lines\烘焙机.xlsx"
+		<MauiAsset Include="..\..\config\lines\烘焙机HB-001.xlsx"
 		           Link="Resources\Raw\lines\hongbei.xlsx"
 		           LogicalName="lines/hongbei.xlsx" />
-		<MauiAsset Include="..\..\config\lines\瑞安1号机.xlsx"
+		<MauiAsset Include="..\..\config\lines\定型机DX-009.xlsx"
 		           Link="Resources\Raw\lines\ra1.xlsx"
 		           LogicalName="lines/ra1.xlsx" />
-		<MauiAsset Include="..\..\config\lines\瑞安2号机.xlsx"
+		<MauiAsset Include="..\..\config\lines\定型机DX-010.xlsx"
 		           Link="Resources\Raw\lines\ra2.xlsx"
 		           LogicalName="lines/ra2.xlsx" />
 		<MauiAsset Include="..\..\config\lines\S7测试产线.xlsx"

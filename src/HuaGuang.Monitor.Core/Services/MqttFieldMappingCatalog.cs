@@ -77,7 +77,7 @@ public static class MqttFieldMappingCatalog
             ["锡林微调"] = "xlwt",
             ["扩幅转速"] = "kfzs",
             ["设备运行时间"] = "sbyxsj",
-            // 定型机10号、定型机11号、烘焙机（同一套点）
+            // 定型机DX-013/DX-015、烘焙机HB-001（同一套点）
             ["1#排风实际速度"] = "pf1sd",
             ["2#排风实际速度"] = "pf2sd",
             ["1#门幅实际值"] = "mf1sz",
@@ -120,7 +120,7 @@ public static class MqttFieldMappingCatalog
             ["冷水棍超喂实际值"] = "lsgcwsjz",
             ["J-BOX超喂实际值"] = "jboxcwsjz",
             ["2#出布超喂实际值"] = "cb2cwsjz",
-            // 瑞安1号机、瑞安2号机（2022065，与定型机点名不同的项）
+            // 定型机DX-009/DX-010（2022065，与定型机点名不同的项）
             ["实际排风速度1"] = "rapf1",
             ["实际排风速度2"] = "rapf2",
             ["#1门幅实际值"] = "ramf1",

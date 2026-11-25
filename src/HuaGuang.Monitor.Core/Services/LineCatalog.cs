@@ -10,13 +10,13 @@ namespace HuaGuang.Monitor.Services;
 public static class LineCatalog
 {
     public const string ProductSkuTagName = "产品货号";
-    /// <summary>18：瑞安1号机、瑞安2号机。已有产线 Excel 不整本覆盖。</summary>
-    public const int Version = 18;
+    /// <summary>19：六条产线改设备编号名；旧中文名仍可作别名解析。已有产线 Excel 不整本覆盖。</summary>
+    public const int Version = 19;
 
     public const string S7TestLineName = "S7测试产线";
     public const string ZhidahyLineName = "智达火焰复合机";
     public const string ShanghaihyLineName = "上海火焰复合机";
-    public const string MeshyLineName = "MES火焰复合机";
+    public const string MeshyLineName = "进口许米特火焰复合机";
     public const string SubscribeDashboardLineName = "订阅大屏";
 
     public const string QimaoZl028aLineName = "起毛机ZL-028A";
@@ -25,11 +25,11 @@ public static class LineCatalog
     public const string QimaoZl027aLineName = "起毛机ZL-027A";
     public const string QimaoZl027bLineName = "起毛机ZL-027B";
     public const string QimaoZl027cLineName = "起毛机ZL-027C";
-    public const string Dingxing10LineName = "定型机10号";
-    public const string Dingxing11LineName = "定型机11号";
-    public const string HongbeiLineName = "烘焙机";
-    public const string Ruian1LineName = "瑞安1号机";
-    public const string Ruian2LineName = "瑞安2号机";
+    public const string Dingxing10LineName = "定型机DX-013";
+    public const string Dingxing11LineName = "定型机DX-015";
+    public const string HongbeiLineName = "烘焙机HB-001";
+    public const string Ruian1LineName = "定型机DX-009";
+    public const string Ruian2LineName = "定型机DX-010";
 
     public static IReadOnlyList<string> QimaoLineNames { get; } =
     [
@@ -871,18 +871,18 @@ public static class LineCatalog
         "C型火焰复合机" => "C型火焰",
         ZhidahyLineName => "智达",
         ShanghaihyLineName => "上海",
-        MeshyLineName => "MES",
+        MeshyLineName => "许米特",
         QimaoZl028aLineName => "ZL028A",
         QimaoZl028bLineName => "ZL028B",
         QimaoZl028cLineName => "ZL028C",
         QimaoZl027aLineName => "ZL027A",
         QimaoZl027bLineName => "ZL027B",
         QimaoZl027cLineName => "ZL027C",
-        Dingxing10LineName => "定型10",
-        Dingxing11LineName => "定型11",
-        HongbeiLineName => "烘焙",
-        Ruian1LineName => "瑞安1",
-        Ruian2LineName => "瑞安2",
+        Dingxing10LineName => "DX-013",
+        Dingxing11LineName => "DX-015",
+        HongbeiLineName => "HB-001",
+        Ruian1LineName => "DX-009",
+        Ruian2LineName => "DX-010",
         S7TestLineName => "S7测试",
         SubscribeDashboardLineName => "订阅大屏",
         "先河热熔胶复合机" => "先河",
@@ -917,18 +917,18 @@ public static class LineCatalog
             "C型" or "C型火焰" or "CYHY" or "CYHYFJ" => "C型火焰复合机",
             "智达" or "智达机" or "智达火焰" or "ZHIDAHY" or "ZDHYFJ" => ZhidahyLineName,
             "上海" or "上海机" or "进口机" or "进口机-上海机" or "上海火焰" or "SHANGHAIHY" or "SHHYFJ" => ShanghaihyLineName,
-            "MES" or "复合机MES" or "MES火焰" or "MESHY" or "MESHYFJ" => MeshyLineName,
+            "MES" or "复合机MES" or "MES火焰" or "MES火焰复合机" or "许米特" or "进口许米特" or "MESHY" or "MESHYFJ" or "XMTFJ" => MeshyLineName,
             "ZL028A" or "起毛机ZL-028A" or "起毛028A" or "QMZL028A" => QimaoZl028aLineName,
             "ZL028B" or "起毛机ZL-028B" or "起毛028B" or "QMZL028B" => QimaoZl028bLineName,
             "ZL028C" or "起毛机ZL-028C" or "起毛028C" or "QMZL028C" => QimaoZl028cLineName,
             "ZL027A" or "起毛机ZL-027A" or "起毛027A" or "QMZL027A" => QimaoZl027aLineName,
             "ZL027B" or "起毛机ZL-027B" or "起毛027B" or "QMZL027B" => QimaoZl027bLineName,
             "ZL027C" or "起毛机ZL-027C" or "起毛027C" or "QMZL027C" => QimaoZl027cLineName,
-            "定型机10号" or "定型10" or "定型机10" or "DXJ10" or "HGDXJ10" => Dingxing10LineName,
-            "定型机11号" or "定型11" or "定型机11" or "DXJ11" or "HGDXJ11" => Dingxing11LineName,
-            "烘焙机" or "烘焙" or "HONGBEI" or "HONGPEI" or "HGHBJ" => HongbeiLineName,
-            "瑞安1号机" or "1号机" or "RA1" or "HGRA1" => Ruian1LineName,
-            "瑞安2号机" or "2号机" or "RA2" or "HGRA2" => Ruian2LineName,
+            "定型机10号" or "定型10" or "定型机10" or "DX-013" or "DX013" or "DXJ10" or "HGDXJ10" => Dingxing10LineName,
+            "定型机11号" or "定型11" or "定型机11" or "DX-015" or "DX015" or "DXJ11" or "HGDXJ11" => Dingxing11LineName,
+            "烘焙机" or "烘焙" or "HB-001" or "HB001" or "HONGBEI" or "HONGPEI" or "HGHBJ" => HongbeiLineName,
+            "瑞安1号机" or "1号机" or "DX-009" or "DX009" or "RA1" or "HGRA1" => Ruian1LineName,
+            "瑞安2号机" or "2号机" or "DX-010" or "DX010" or "RA2" or "HGRA2" => Ruian2LineName,
             "S7" or "S7TEST" or "S7测试" => S7TestLineName,
             "订阅" or "订阅大屏" or "SUBSCRIBE" or "SUB" => SubscribeDashboardLineName,
             _ => string.Empty

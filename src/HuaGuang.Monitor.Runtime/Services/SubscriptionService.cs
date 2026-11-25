@@ -13,14 +13,26 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
     const int MaxTrackedDevices = 64;
     static readonly TimeSpan DeviceRetention = TimeSpan.FromMinutes(30);
     const int MaxPayloadLength = 4096;
+    static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMinutes(5);
+    static readonly TimeSpan ReconnectInitialDelay = TimeSpan.FromSeconds(2);
+    static readonly TimeSpan ReconnectMaxDelay = TimeSpan.FromSeconds(60);
 
     readonly SettingsStore _settingsStore;
     readonly ILogger<SubscriptionService> _logger;
     readonly MqttClientFactory _factory = new();
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
     readonly SemaphoreSlim _gate = new(1, 1);
+    readonly SemaphoreSlim _reconnectGate = new(1, 1);
     readonly CoalescedEvent _devicesUpdatedCoalescer;
+    readonly object _sessionGate = new();
     IMqttClient? _client;
+    IReadOnlyList<string> _sessionTopics = [];
+    int _sessionId;
+    bool _ignoreDisconnect;
+    DateTimeOffset? _lastMessageAt;
+    DateTimeOffset? _connectedAt;
+    CancellationTokenSource? _heartbeatCts;
+    Task? _heartbeatTask;
 
     public SubscriptionService(SettingsStore settingsStore, ILogger<SubscriptionService> logger)
     {
@@ -74,10 +86,11 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
                 throw new InvalidOperationException("请至少添加一个订阅主题，例如 monitor/+/telemetry。");
             }
 
-            await ConnectAsync(settings, topics).ConfigureAwait(false);
+            await ConnectAsync(settings, topics, clearDevices: true, bumpSession: true).ConfigureAwait(false);
             IsRunning = true;
             LastError = string.Empty;
             MonitorRuntimeOperatorControl.SetPausedByOperator(false);
+            StartHeartbeat();
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation(
                 "启动订阅 line={LineName} topics={Topics} mqtt={Mqtt}",
@@ -107,10 +120,12 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         {
             var wasRunning = IsRunning;
             IsRunning = false;
+            Interlocked.Increment(ref _sessionId);
+            StopHeartbeat();
             ActiveSubscribeTopics = [];
             _devices.Clear();
             _devicesUpdatedCoalescer.Flush();
-            await DisconnectAsync().ConfigureAwait(false);
+            await DisconnectAsync(intentional: true).ConfigureAwait(false);
             if (wasRunning)
             {
                 MonitorRuntimeOperatorControl.SetPausedByOperator(true);
@@ -142,7 +157,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
                 throw new InvalidOperationException("请至少保留一个订阅主题。");
             }
 
-            await ConnectAsync(settings, topics).ConfigureAwait(false);
+            await ConnectAsync(settings, topics, clearDevices: true, bumpSession: true).ConfigureAwait(false);
             LastError = string.Empty;
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             _logger.LogInformation(
@@ -155,20 +170,40 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         }
     }
 
-    async Task ConnectAsync(AppSettings settings, IReadOnlyList<string> topics)
+    async Task ConnectAsync(
+        AppSettings settings,
+        IReadOnlyList<string> topics,
+        bool clearDevices,
+        bool bumpSession)
     {
-        await DisconnectAsync().ConfigureAwait(false);
-        _devices.Clear();
+        await DisconnectAsync(intentional: true).ConfigureAwait(false);
+        if (clearDevices)
+        {
+            _devices.Clear();
+        }
+
+        // 自动重连复用同一 session，避免把进行中的重连循环误判为过期而停掉。
+        var sessionId = bumpSession
+            ? Interlocked.Increment(ref _sessionId)
+            : Volatile.Read(ref _sessionId);
+        if (sessionId == 0)
+        {
+            sessionId = Interlocked.Increment(ref _sessionId);
+        }
+
+        _sessionTopics = topics.ToList();
 
         var client = _factory.CreateMqttClient();
         client.ConnectedAsync += _ =>
         {
+            _connectedAt = DateTimeOffset.Now;
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
             return Task.CompletedTask;
         };
-        client.DisconnectedAsync += _ =>
+        client.DisconnectedAsync += args =>
         {
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
+            OnUnexpectedDisconnect(args, sessionId);
             return Task.CompletedTask;
         };
         client.ApplicationMessageReceivedAsync += args =>
@@ -204,10 +239,176 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
 
         _client = client;
         ActiveSubscribeTopics = topics;
+        _connectedAt = DateTimeOffset.Now;
         _logger.LogInformation(
             "MQTT 订阅已连接 topics={Topics} mqtt={Mqtt}",
             string.Join(", ", topics),
             LogFormatting.DescribeMqtt(settings.SubscribeMqtt, settings.LineName));
+    }
+
+    void OnUnexpectedDisconnect(MqttClientDisconnectedEventArgs args, int sessionId)
+    {
+        bool ignore;
+        lock (_sessionGate)
+        {
+            ignore = _ignoreDisconnect || !IsRunning || sessionId != _sessionId;
+        }
+
+        if (ignore)
+        {
+            return;
+        }
+
+        _logger.LogWarning(
+            args.Exception,
+            "MQTT 订阅意外断开 reason={Reason} wasConnected={WasConnected}，将自动重连",
+            args.Reason,
+            args.ClientWasConnected);
+
+        _ = RecoverConnectionAsync(sessionId);
+    }
+
+    async Task RecoverConnectionAsync(int sessionId)
+    {
+        if (!await _reconnectGate.WaitAsync(0).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var delay = ReconnectInitialDelay;
+        try
+        {
+            while (IsRunning && sessionId == Volatile.Read(ref _sessionId))
+            {
+                try
+                {
+                    await Task.Delay(delay).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                if (!IsRunning || sessionId != Volatile.Read(ref _sessionId))
+                {
+                    return;
+                }
+
+                if (_client?.IsConnected == true)
+                {
+                    return;
+                }
+
+                await _gate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    if (!IsRunning || sessionId != Volatile.Read(ref _sessionId))
+                    {
+                        return;
+                    }
+
+                    if (_client?.IsConnected == true)
+                    {
+                        return;
+                    }
+
+                    var settings = _settingsStore.Current;
+                    var topics = _sessionTopics.Count > 0
+                        ? _sessionTopics
+                        : SubscribeTopicHelper.NormalizeTopics(settings.SubscribeTopics);
+                    if (topics.Count == 0)
+                    {
+                        LastError = "自动重连失败：没有订阅主题。";
+                        _logger.LogWarning("{Error}", LastError);
+                        ConnectionChanged?.Invoke(this, EventArgs.Empty);
+                        return;
+                    }
+
+                    await ConnectAsync(settings, topics, clearDevices: false, bumpSession: false)
+                        .ConfigureAwait(false);
+                    LastError = string.Empty;
+                    ConnectionChanged?.Invoke(this, EventArgs.Empty);
+                    _logger.LogInformation(
+                        "MQTT 订阅已自动重连 topics={Topics}",
+                        string.Join(", ", topics));
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    LastError = $"MQTT 重连失败：{ex.Message}";
+                    ConnectionChanged?.Invoke(this, EventArgs.Empty);
+                    _logger.LogWarning(ex, "MQTT 订阅自动重连失败，{Delay}s 后重试", delay.TotalSeconds);
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+
+                delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, ReconnectMaxDelay.TotalSeconds));
+            }
+        }
+        finally
+        {
+            _reconnectGate.Release();
+        }
+    }
+
+    void StartHeartbeat()
+    {
+        StopHeartbeat();
+        _heartbeatCts = new CancellationTokenSource();
+        var token = _heartbeatCts.Token;
+        _heartbeatTask = Task.Run(() => HeartbeatLoopAsync(token), token);
+    }
+
+    void StopHeartbeat()
+    {
+        try
+        {
+            _heartbeatCts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        _heartbeatCts?.Dispose();
+        _heartbeatCts = null;
+        _heartbeatTask = null;
+    }
+
+    async Task HeartbeatLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(HeartbeatInterval, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (!IsRunning)
+            {
+                continue;
+            }
+
+            var lastAge = _lastMessageAt is { } at
+                ? (DateTimeOffset.Now - at).TotalSeconds
+                : (double?)null;
+            var connectedAge = _connectedAt is { } connected
+                ? (DateTimeOffset.Now - connected).TotalSeconds
+                : (double?)null;
+            _logger.LogInformation(
+                "订阅心跳 connected={Connected} devices={Devices} topics={Topics} lastMessageAgeSec={LastAge} connectedAgeSec={ConnectedAge} lastError={LastError}",
+                IsConnected,
+                _devices.Count,
+                ActiveSubscribeTopics.Count,
+                lastAge is null ? "—" : lastAge.Value.ToString("0"),
+                connectedAge is null ? "—" : connectedAge.Value.ToString("0"),
+                string.IsNullOrWhiteSpace(LastError) ? "—" : LastError);
+        }
     }
 
     /// <summary>Diagnostics only: inject telemetry without a live MQTT broker.</summary>
@@ -278,6 +479,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             }
 
             _devices[deviceKey] = state;
+            _lastMessageAt = state.ReceivedAt;
             PruneDevices();
             LastPayload = TruncatePayload(payload);
             LastError = string.Empty;
@@ -350,11 +552,16 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         }
     }
 
-    async Task DisconnectAsync()
+    async Task DisconnectAsync(bool intentional)
     {
         if (_client is null)
         {
             return;
+        }
+
+        lock (_sessionGate)
+        {
+            _ignoreDisconnect = intentional;
         }
 
         try
@@ -371,6 +578,12 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         {
             _client.Dispose();
             _client = null;
+            _connectedAt = null;
+            lock (_sessionGate)
+            {
+                _ignoreDisconnect = false;
+            }
+
             ConnectionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -379,6 +592,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
     {
         await StopAsync().ConfigureAwait(false);
         _devicesUpdatedCoalescer.Dispose();
+        _reconnectGate.Dispose();
         _gate.Dispose();
     }
 }

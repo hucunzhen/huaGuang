@@ -27,7 +27,7 @@ public static class MonitorCoreTests
         Run("S7 测试产线种子", TestS7TestLineCatalog),
         Run("起毛机 MA876A 产线", TestQimaoMa876aLines),
         Run("定型机与烘焙机产线", TestDingxingHongbeiLines),
-        Run("瑞安1号机与2号机", TestRuianLines),
+        Run("定型机DX-009与DX-010", TestRuianLines),
         Run("关机默认不采集", TestTagShutdownAcquire),
         Run("订阅大屏独立产线", TestSubscribeDashboardLine),
         Run("计算点位表达式", TestTagComputedExpression),
@@ -651,15 +651,26 @@ public static class MonitorCoreTests
     {
         AssertTrue(LineCatalog.DingxingLineNames.Count == 3);
         AssertTrue(LineCatalog.IsDingxingLine("定型机10号"));
+        AssertTrue(LineCatalog.IsDingxingLine("定型机DX-013"));
         AssertTrue(LineCatalog.ToCommandAlias("定型机10号") == "dxj10");
+        AssertTrue(LineCatalog.ToCommandAlias("定型机DX-013") == "dxj10");
         AssertTrue(LineCatalog.ToCommandAlias("定型机11号") == "dxj11");
         AssertTrue(LineCatalog.ToCommandAlias("烘焙机") == "hongbei");
-        AssertTrue(LineCatalog.TryResolveLineName("HGDXJ10", out var resolved10)
+        AssertTrue(LineCatalog.ToCommandAlias("烘焙机HB-001") == "hongbei");
+        AssertTrue(LineCatalog.TryResolveLineName("DX-013", out var resolved10)
                    && resolved10 == LineCatalog.Dingxing10LineName);
-        AssertTrue(LineCatalog.TryResolveLineName("HGDXJ11", out var resolved11)
+        AssertTrue(LineCatalog.TryResolveLineName("HGDXJ10", out var resolved10Legacy)
+                   && resolved10Legacy == LineCatalog.Dingxing10LineName);
+        AssertTrue(LineCatalog.TryResolveLineName("DX-015", out var resolved11)
                    && resolved11 == LineCatalog.Dingxing11LineName);
-        AssertTrue(LineCatalog.TryResolveLineName("HGHBJ", out var resolvedBake)
+        AssertTrue(LineCatalog.TryResolveLineName("HB-001", out var resolvedBake)
                    && resolvedBake == LineCatalog.HongbeiLineName);
+        AssertTrue(LineCatalog.TryResolveLineName("HGHBJ", out var resolvedBakeLegacy)
+                   && resolvedBakeLegacy == LineCatalog.HongbeiLineName);
+        AssertTrue(LineMqttDefaults.Dingxing10PublishTopic.Contains("/DX-013/", StringComparison.Ordinal));
+        AssertTrue(LineMqttDefaults.HongbeiPublishTopic.Contains("/HB-001/", StringComparison.Ordinal));
+        AssertTrue(LineMqttDefaults.ResolveLineNameFromClientId("HGDXJ10") == LineCatalog.Dingxing10LineName);
+        AssertTrue(LineMqttDefaults.ResolveLineNameFromClientId("DX-013") == LineCatalog.Dingxing10LineName);
         AssertTrue(LineCatalog.TryResolveLineName("hongbei", out var fromShortcut)
                    && fromShortcut == LineCatalog.HongbeiLineName);
         AssertTrue(!LineCatalog.TryResolveLineName("HGDXHB", out _));
@@ -704,9 +715,12 @@ public static class MonitorCoreTests
         AssertTrue(LineCatalog.IsRuianLine("1号机"));
         AssertTrue(LineCatalog.IsRuianLine("2号机"));
         AssertTrue(LineCatalog.ToCommandAlias("瑞安1号机") == "ra1");
+        AssertTrue(LineCatalog.ToCommandAlias("定型机DX-009") == "ra1");
         AssertTrue(LineCatalog.ToCommandAlias("瑞安2号机") == "ra2");
         AssertTrue(LineCatalog.TryResolveLineName("RA1", out var fromAlias)
                    && fromAlias == LineCatalog.Ruian1LineName);
+        AssertTrue(LineCatalog.TryResolveLineName("MES火焰复合机", out var fromMeshyOld)
+                   && fromMeshyOld == LineCatalog.MeshyLineName);
         AssertTrue(LineCatalog.TryResolveLineName("HGRA2", out var fromClient)
                    && fromClient == LineCatalog.Ruian2LineName);
         AssertTrue(LineCatalog.UsesS7Protocol(LineCatalog.Ruian1LineName));

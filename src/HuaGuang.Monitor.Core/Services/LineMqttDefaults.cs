@@ -16,7 +16,8 @@ public static class LineMqttDefaults
     public const string CyhyClientId = "CYHYFJ";
     public const string ZhidahyClientId = "ZDHYFJ";
     public const string ShanghaihyClientId = "SHHYFJ";
-    public const string MeshyClientId = "MESHYFJ";
+    public const string MeshyClientId = "XMTFJ";
+    public const string MeshyClientIdLegacy = "MESHYFJ";
     public const string S7TestClientId = "S7TEST";
     public const string QimaoZl028aClientId = "QMZL028A";
     public const string QimaoZl028bClientId = "QMZL028B";
@@ -24,11 +25,16 @@ public static class LineMqttDefaults
     public const string QimaoZl027aClientId = "QMZL027A";
     public const string QimaoZl027bClientId = "QMZL027B";
     public const string QimaoZl027cClientId = "QMZL027C";
-    public const string Dingxing10ClientId = "HGDXJ10";
-    public const string Dingxing11ClientId = "HGDXJ11";
-    public const string HongbeiClientId = "HGHBJ";
-    public const string Ruian1ClientId = "HGRA1";
-    public const string Ruian2ClientId = "HGRA2";
+    public const string Dingxing10ClientId = "DX-013";
+    public const string Dingxing10ClientIdLegacy = "HGDXJ10";
+    public const string Dingxing11ClientId = "DX-015";
+    public const string Dingxing11ClientIdLegacy = "HGDXJ11";
+    public const string HongbeiClientId = "HB-001";
+    public const string HongbeiClientIdLegacy = "HGHBJ";
+    public const string Ruian1ClientId = "DX-009";
+    public const string Ruian1ClientIdLegacy = "HGRA1";
+    public const string Ruian2ClientId = "DX-010";
+    public const string Ruian2ClientIdLegacy = "HGRA2";
 
     public const string XianhePublishTopic = "/RRJFHJ/XHRRJFHJ/properties/report";
     public const string HuadiPublishTopic = "/RRJFHJ/HDRRJFHJ/properties/report";
@@ -37,7 +43,8 @@ public static class LineMqttDefaults
     public const string CyhyPublishTopic = "/RRJFHJ/CYHYFJ/properties/report";
     public const string ZhidahyPublishTopic = "/RRJFHJ/ZDHYFJ/properties/report";
     public const string ShanghaihyPublishTopic = "/RRJFHJ/SHHYFJ/properties/report";
-    public const string MeshyPublishTopic = "/RRJFHJ/MESHYFJ/properties/report";
+    public const string MeshyPublishTopic = "/RRJFHJ/XMTFJ/properties/report";
+    public const string MeshyPublishTopicLegacy = "/RRJFHJ/MESHYFJ/properties/report";
     public const string S7TestPublishTopic = "/RRJFHJ/S7TEST/properties/report";
     public const string QimaoZl028aPublishTopic = "/RRJFHJ/QMZL028A/properties/report";
     public const string QimaoZl028bPublishTopic = "/RRJFHJ/QMZL028B/properties/report";
@@ -45,11 +52,16 @@ public static class LineMqttDefaults
     public const string QimaoZl027aPublishTopic = "/RRJFHJ/QMZL027A/properties/report";
     public const string QimaoZl027bPublishTopic = "/RRJFHJ/QMZL027B/properties/report";
     public const string QimaoZl027cPublishTopic = "/RRJFHJ/QMZL027C/properties/report";
-    public const string Dingxing10PublishTopic = "/RRJFHJ/HGDXJ10/properties/report";
-    public const string Dingxing11PublishTopic = "/RRJFHJ/HGDXJ11/properties/report";
-    public const string HongbeiPublishTopic = "/RRJFHJ/HGHBJ/properties/report";
-    public const string Ruian1PublishTopic = "/RRJFHJ/HGRA1/properties/report";
-    public const string Ruian2PublishTopic = "/RRJFHJ/HGRA2/properties/report";
+    public const string Dingxing10PublishTopic = "/RRJFHJ/DX-013/properties/report";
+    public const string Dingxing10PublishTopicLegacy = "/RRJFHJ/HGDXJ10/properties/report";
+    public const string Dingxing11PublishTopic = "/RRJFHJ/DX-015/properties/report";
+    public const string Dingxing11PublishTopicLegacy = "/RRJFHJ/HGDXJ11/properties/report";
+    public const string HongbeiPublishTopic = "/RRJFHJ/HB-001/properties/report";
+    public const string HongbeiPublishTopicLegacy = "/RRJFHJ/HGHBJ/properties/report";
+    public const string Ruian1PublishTopic = "/RRJFHJ/DX-009/properties/report";
+    public const string Ruian1PublishTopicLegacy = "/RRJFHJ/HGRA1/properties/report";
+    public const string Ruian2PublishTopic = "/RRJFHJ/DX-010/properties/report";
+    public const string Ruian2PublishTopicLegacy = "/RRJFHJ/HGRA2/properties/report";
 
     public static IReadOnlyList<string> SubscribeTopics { get; } =
     [
@@ -61,6 +73,7 @@ public static class LineMqttDefaults
         ZhidahyPublishTopic,
         ShanghaihyPublishTopic,
         MeshyPublishTopic,
+        MeshyPublishTopicLegacy,
         QimaoZl028aPublishTopic,
         QimaoZl028bPublishTopic,
         QimaoZl028cPublishTopic,
@@ -68,10 +81,15 @@ public static class LineMqttDefaults
         QimaoZl027bPublishTopic,
         QimaoZl027cPublishTopic,
         Dingxing10PublishTopic,
+        Dingxing10PublishTopicLegacy,
         Dingxing11PublishTopic,
+        Dingxing11PublishTopicLegacy,
         HongbeiPublishTopic,
+        HongbeiPublishTopicLegacy,
         Ruian1PublishTopic,
+        Ruian1PublishTopicLegacy,
         Ruian2PublishTopic,
+        Ruian2PublishTopicLegacy,
         S7TestPublishTopic
     ];
 
@@ -171,18 +189,18 @@ public static class LineMqttDefaults
         CyhyClientId => "C型火焰复合机",
         ZhidahyClientId => LineCatalog.ZhidahyLineName,
         ShanghaihyClientId => LineCatalog.ShanghaihyLineName,
-        MeshyClientId => LineCatalog.MeshyLineName,
+        MeshyClientId or MeshyClientIdLegacy => LineCatalog.MeshyLineName,
         QimaoZl028aClientId => LineCatalog.QimaoZl028aLineName,
         QimaoZl028bClientId => LineCatalog.QimaoZl028bLineName,
         QimaoZl028cClientId => LineCatalog.QimaoZl028cLineName,
         QimaoZl027aClientId => LineCatalog.QimaoZl027aLineName,
         QimaoZl027bClientId => LineCatalog.QimaoZl027bLineName,
         QimaoZl027cClientId => LineCatalog.QimaoZl027cLineName,
-        Dingxing10ClientId => LineCatalog.Dingxing10LineName,
-        Dingxing11ClientId => LineCatalog.Dingxing11LineName,
-        HongbeiClientId => LineCatalog.HongbeiLineName,
-        Ruian1ClientId => LineCatalog.Ruian1LineName,
-        Ruian2ClientId => LineCatalog.Ruian2LineName,
+        Dingxing10ClientId or Dingxing10ClientIdLegacy => LineCatalog.Dingxing10LineName,
+        Dingxing11ClientId or Dingxing11ClientIdLegacy => LineCatalog.Dingxing11LineName,
+        HongbeiClientId or HongbeiClientIdLegacy => LineCatalog.HongbeiLineName,
+        Ruian1ClientId or Ruian1ClientIdLegacy => LineCatalog.Ruian1LineName,
+        Ruian2ClientId or Ruian2ClientIdLegacy => LineCatalog.Ruian2LineName,
         S7TestClientId => LineCatalog.S7TestLineName,
         _ => null
     };
