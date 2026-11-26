@@ -17,6 +17,7 @@ public sealed class SubscribeWebHost : BackgroundService
     readonly HistoryStore _history;
     readonly ILogger<SubscribeWebHost> _logger;
     readonly SemaphoreSlim _exportGate = new(1, 1);
+    readonly SemaphoreSlim _requestGate = new(8, 8);
 
     public SubscribeWebHost(
         SettingsStore settings,
@@ -89,19 +90,61 @@ public sealed class SubscribeWebHost : BackgroundService
             }
 
             var model = CreateModel();
-            _ = Task.Run(() => SubscribeWebHttp.HandleAsync(context, model, _exportGate, stoppingToken), CancellationToken.None);
+            _ = Task.Run(async () =>
+            {
+                var acquired = false;
+                try
+                {
+                    acquired = await _requestGate.WaitAsync(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
+                    if (!acquired)
+                    {
+                        try
+                        {
+                            context.Response.StatusCode = 503;
+                            context.Response.Close();
+                        }
+                        catch
+                        {
+                        }
+
+                        return;
+                    }
+
+                    await SubscribeWebHttp.HandleAsync(context, model, _exportGate, stoppingToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "订阅网页请求处理失败");
+                    try
+                    {
+                        context.Response.Abort();
+                    }
+                    catch
+                    {
+                    }
+                }
+                finally
+                {
+                    if (acquired)
+                    {
+                        _requestGate.Release();
+                    }
+                }
+            }, CancellationToken.None);
         }
     }
 
     SubscribeWebReadModel CreateModel() =>
         new()
         {
-            Status = () => SubscribeWebSnapshot.Create(
+            Status = detailDeviceId => SubscribeWebSnapshot.Create(
                 _settings.Current,
                 _subscription.IsRunning,
                 _subscription.IsConnected,
                 _subscription.LastError,
-                _subscription.GetDevices(null)),
+                _subscription.GetDevicesForWeb(detailDeviceId),
+                detailDeviceId),
             Settings = () => _settings.Current,
             ReloadSettings = () =>
             {

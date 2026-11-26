@@ -26,18 +26,26 @@ public static class SubscribeLineCatalog
         string? sourceTopic,
         IReadOnlyList<PlcTag> fallbackTags)
     {
-        if (!TryResolveLineName(deviceId, sourceTopic, out var lineName))
+        try
         {
+            if (!TryResolveLineName(deviceId, sourceTopic, out var lineName))
+            {
+                return fallbackTags;
+            }
+
+            var loaded = LoadTags?.Invoke(lineName);
+            if (loaded is { Count: > 0 })
+            {
+                return loaded;
+            }
+
+            var seed = LineExcelConfigService.CreateSeedSettings(lineName).Tags;
+            return seed.Count > 0 ? seed : fallbackTags;
+        }
+        catch
+        {
+            // 某产线点表缺失/损坏时，仍用订阅窗点表展示遥测，避免整机点不进详情。
             return fallbackTags;
         }
-
-        var loaded = LoadTags?.Invoke(lineName);
-        if (loaded is { Count: > 0 })
-        {
-            return loaded;
-        }
-
-        var seed = LineExcelConfigService.CreateSeedSettings(lineName).Tags;
-        return seed.Count > 0 ? seed : fallbackTags;
     }
 }

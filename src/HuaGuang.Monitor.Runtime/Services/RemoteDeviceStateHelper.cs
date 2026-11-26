@@ -45,6 +45,54 @@ static class RemoteDeviceStateHelper
         Tags = CopyTags(dto.Tags)
     };
 
+    /// <summary>给网页/IPC 用的只读快照，避免与遥测写线程争用同一 Dictionary。</summary>
+    public static RemoteDeviceState Clone(RemoteDeviceState source) => new()
+    {
+        DeviceKey = source.DeviceKey,
+        DeviceId = source.DeviceId,
+        SourceTopic = source.SourceTopic,
+        Timestamp = source.Timestamp,
+        Quality = source.Quality,
+        PlcHost = source.PlcHost,
+        Simulator = source.Simulator,
+        ReceivedAt = source.ReceivedAt,
+        TagCountHint = source.Tags.Count,
+        Tags = CopyTags(source.Tags)
+    };
+
+    /// <summary>机台汇总：只带运行状态相关键，避免每次网页轮询拷贝全部点位。</summary>
+    public static RemoteDeviceState CloneForFleetCard(RemoteDeviceState source)
+    {
+        var tags = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var pair in source.Tags)
+        {
+            if (!IsRunStatusKey(pair.Key))
+            {
+                continue;
+            }
+
+            tags[pair.Key] = JsonValueNormalizer.Normalize(pair.Value);
+        }
+
+        return new RemoteDeviceState
+        {
+            DeviceKey = source.DeviceKey,
+            DeviceId = source.DeviceId,
+            SourceTopic = source.SourceTopic,
+            Timestamp = source.Timestamp,
+            Quality = source.Quality,
+            PlcHost = source.PlcHost,
+            Simulator = source.Simulator,
+            ReceivedAt = source.ReceivedAt,
+            TagCountHint = source.Tags.Count,
+            Tags = tags
+        };
+    }
+
+    static bool IsRunStatusKey(string key) =>
+        key.Equals(RunStatusFormatting.TagName, StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("run_status", StringComparison.OrdinalIgnoreCase);
+
     static void ApplyTags(Dictionary<string, object?> target, IReadOnlyDictionary<string, object?> source)
     {
         target.Clear();

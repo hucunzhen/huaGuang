@@ -16,6 +16,7 @@ public static class MonitorCoreTests
         Run("MQTT 主题匹配 #", TestTopicHashMatch),
         Run("订阅主题去重", TestSubscribeTopicNormalize),
         Run("点位显示顺序", TestTagDisplayOrder),
+        Run("温度组保留点表顺序", TestTemperatureDisplayOrderPreservesExcelOrder),
         Run("当前工作温度订阅映射", TestCurrentInjectionRemoteTags),
         Run("平台字段跨产线映射", TestPlatformFieldMappingWithoutCatalogTag),
         Run("华迪订阅字段映射", TestHuadiSubscribeFieldMapping),
@@ -138,6 +139,48 @@ public static class MonitorCoreTests
             .Select(entry => entry.Name)
             .ToList();
         AssertTrue(orderedMapped.SequenceEqual(["车速", "门幅"]));
+    }
+
+    static void TestTemperatureDisplayOrderPreservesExcelOrder()
+    {
+        // 产线文件顺序：烘箱1…烘箱10；字典序会把「烘箱10」排到「烘箱1」前面
+        var excelOrder = new[]
+        {
+            "烘箱1实际温度",
+            "烘箱2实际温度",
+            "烘箱9实际温度",
+            "烘箱10实际温度",
+            "当前注胶机编号",
+            "当前工作胶盘温度"
+        };
+
+        var ordered = CurrentInjectionFormatting.OrderByDisplay(
+                TagDisplayCategory.Temperature,
+                excelOrder,
+                name => name)
+            .ToList();
+
+        AssertTrue(ordered.SequenceEqual([
+            "当前注胶机编号",
+            "当前工作胶盘温度",
+            "烘箱1实际温度",
+            "烘箱2实际温度",
+            "烘箱9实际温度",
+            "烘箱10实际温度"
+        ]));
+
+        // 无注胶相关点时，完整保留传入顺序（含 1…10）
+        var ovensOnly = new[]
+        {
+            "烘箱1实际温度",
+            "烘箱2实际温度",
+            "烘箱10实际温度"
+        };
+        AssertTrue(CurrentInjectionFormatting.OrderByDisplay(
+                TagDisplayCategory.Temperature,
+                ovensOnly,
+                name => name)
+            .SequenceEqual(ovensOnly));
     }
 
     static void TestCurrentInjectionRemoteTags()
@@ -1397,11 +1440,13 @@ public static class MonitorCoreTests
             DisplayCategory = TagDisplayCategory.Switch,
             SwitchStatusLabels = "0=待机;1=运行;2=故障"
         };
-        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, 0) == SwitchStatusFormatting.GetAccentColor(0));
-        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "待机") == SwitchStatusFormatting.GetAccentColor(0));
-        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "运行") == SwitchStatusFormatting.GetAccentColor(1));
-        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "故障") == SwitchStatusFormatting.GetAccentColor(2));
-        AssertTrue(SwitchStatusFormatting.GetBackgroundColor(qimao, "故障") == SwitchStatusFormatting.GetBackgroundColor(2));
+        // 按文案语义：待机橙、运行绿、故障红（不因编码 0/1/2 与运行状态点位错位）
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, 0) == SwitchStatusFormatting.GetAccentColor(2));
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "待机") == "#FFB347");
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "运行") == "#3DDC97");
+        AssertTrue(SwitchStatusFormatting.GetAccentColor(qimao, "故障") == "#FF6B6B");
+        AssertTrue(SwitchStatusFormatting.GetBackgroundColor(qimao, "故障") == "#331E24");
+        AssertTrue(SwitchStatusFormatting.GetBackgroundColor(qimao, "待机") == "#332A14");
     }
 
     static void TestTagValueRange()

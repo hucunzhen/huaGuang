@@ -8,7 +8,8 @@ namespace HuaGuang.Monitor.Services;
 
 internal sealed class SubscribeWebReadModel
 {
-    public required Func<SubscribeWebStatus> Status { get; init; }
+    /// <summary>参数为详情设备 Id；空则只返回机台汇总（不含全量点位）。</summary>
+    public required Func<string?, SubscribeWebStatus> Status { get; init; }
     public required Func<AppSettings> Settings { get; init; }
     public Func<AppSettings>? ReloadSettings { get; init; }
     public required HistoryStore History { get; init; }
@@ -24,7 +25,7 @@ internal static class SubscribeWebHttp
     };
 
     internal static SubscribeWebReadModel CreateReadModel(
-        Func<SubscribeWebStatus> status,
+        Func<string?, SubscribeWebStatus> status,
         Func<AppSettings> settings,
         HistoryStore history) =>
         new()
@@ -92,8 +93,18 @@ internal static class SubscribeWebHttp
 
             if (string.Equals(path, "/api/status", StringComparison.OrdinalIgnoreCase))
             {
-                var json = JsonSerializer.Serialize(model.Status(), JsonOptions);
-                WriteText(context, 200, "application/json; charset=utf-8", json);
+                try
+                {
+                    var detailDevice = ReadQueryValue(request, "device");
+                    var json = JsonSerializer.Serialize(model.Status(detailDevice), JsonOptions);
+                    WriteText(context, 200, "application/json; charset=utf-8", json);
+                }
+                catch (Exception ex)
+                {
+                    model.Logger.LogWarning(ex, "订阅网页 /api/status 生成失败");
+                    WriteText(context, 500, "text/plain; charset=utf-8", "状态生成失败，请稍后重试。");
+                }
+
                 return;
             }
 
@@ -268,6 +279,31 @@ internal static class SubscribeWebHttp
         return $"attachment; filename=\"{ascii}\"; filename*=UTF-8''{Uri.EscapeDataString(fileName)}";
     }
 
+    /// <summary>自解析 query，避免 HttpListener 对中文 device 参数解码不一致。</summary>
+    static string? ReadQueryValue(HttpListenerRequest request, string name)
+    {
+        var query = request.Url?.Query;
+        if (string.IsNullOrEmpty(query))
+        {
+            return null;
+        }
+
+        foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = part.IndexOf('=');
+            var key = Uri.UnescapeDataString((eq < 0 ? part : part[..eq]).Replace('+', ' '));
+            if (!key.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = eq < 0 ? string.Empty : Uri.UnescapeDataString(part[(eq + 1)..].Replace('+', ' '));
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        return null;
+    }
+
     static void WriteText(HttpListenerContext context, int statusCode, string contentType, string body)
     {
         var bytes = Encoding.UTF8.GetBytes(body);
@@ -332,9 +368,27 @@ internal static class SubscribeWebHttp
   button:disabled { opacity: 0.5; cursor: default; }
   .hint { padding: 0 16px 8px; color: #8aa0b5; font-size: 12px; }
   main { padding: 0 16px 24px; display: flex; flex-direction: column; gap: 16px; }
-  .device-head { background: #101C28; border: 1px solid #1F3A52; border-radius: 8px; padding: 10px 12px; }
+  .device-head { background: #101C28; border: 1px solid #1F3A52; border-radius: 8px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
   .device-head h2 { margin: 0; font-size: 16px; color: #fff; }
   .topic { color: #8aa0b5; font-size: 12px; margin-top: 2px; word-break: break-all; }
+  .fleet { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .fleet-card { border: 1px solid #1F3A52; border-radius: 8px; background: #152536; padding: 12px 14px; cursor: pointer; display: grid; grid-template-columns: 4px minmax(0, 1fr); gap: 12px; min-height: 118px; }
+  .fleet-card:hover { border-color: #2EC4B6; }
+  .fleet-card.stale { border-color: #5A2A2A; }
+  .fleet-rail { border-radius: 2px; }
+  .fleet-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .fleet-id { color: #fff; font-weight: 700; font-size: 16px; }
+  .fleet-run { font-weight: 700; font-size: 13px; white-space: nowrap; }
+  .fleet-line { color: #8aa0b5; font-size: 12px; margin-top: 2px; }
+  .fleet-fresh { display: flex; align-items: center; gap: 6px; font-weight: 700; margin-top: 8px; }
+  .fleet-status { color: #C9D6E2; font-size: 12px; margin-top: 6px; }
+  .fleet-detail { color: #6E8499; font-size: 12px; margin-top: 4px; word-break: break-all; }
+  .fleet-switches { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .fleet-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid; border-radius: 6px; padding: 4px 8px; font-size: 12px; max-width: 100%; }
+  .fleet-chip .chip-dot { width: 8px; height: 8px; border-radius: 4px; flex: none; }
+  .fleet-chip .chip-name { color: #8AA0B5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 7em; }
+  .fleet-chip .chip-value { font-weight: 700; white-space: nowrap; }
+  .back-btn { white-space: nowrap; }
   .group-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; }
   .group-bar { width: 4px; height: 18px; border-radius: 2px; }
   .group-title { font-weight: 700; font-size: 15px; }
@@ -368,7 +422,7 @@ internal static class SubscribeWebHttp
   <div>
     <h1>订阅大屏</h1>
     <nav>
-      <button type="button" id="tab-live" class="on">当前</button>
+      <button type="button" id="tab-live" class="on">汇总</button>
       <button type="button" id="tab-history">历史</button>
       <button type="button" id="logout">退出</button>
     </nav>
@@ -377,10 +431,12 @@ internal static class SubscribeWebHttp
 </header>
 <div class="banner" id="banner"></div>
 <section id="live">
-  <div class="toolbar">
+  <div class="toolbar" id="live-toolbar" hidden>
+    <button type="button" id="live-back" class="back-btn">← 返回汇总</button>
     <label>设备<select id="live-device"></select></label>
     <label>点位<input id="live-tag" placeholder="名称包含" /></label>
   </div>
+  <div class="hint" id="fleet-hint">数采机台状态。点击进入该设备点位数据。</div>
   <main id="board"></main>
 </section>
 <section id="history" hidden>
@@ -433,29 +489,72 @@ function text(value) { return value == null || value === "" ? "—" : String(val
 function deviceList(select) {
   return Array.from(select.options).map(option => option.value);
 }
-function fillSelect(select, devices) {
-  const current = select.value;
+const STALE_MS = 120000;
+function isFresh(receivedAt) {
+  if (!receivedAt) return false;
+  const at = new Date(receivedAt).getTime();
+  return Number.isFinite(at) && (Date.now() - at) <= STALE_MS;
+}
+function freshnessText(receivedAt) {
+  if (!receivedAt) return "等待遥测";
+  const at = new Date(receivedAt);
+  if (!Number.isFinite(at.getTime())) return "等待遥测";
+  const stamp = pad(at.getHours()) + ":" + pad(at.getMinutes()) + ":" + pad(at.getSeconds());
+  return isFresh(receivedAt) ? ("在线 · " + stamp) : ("无更新 · " + stamp);
+}
+function fillSelect(select, devices, allLabel, preferred) {
+  if (!select) return;
+  const current = preferred != null ? preferred : select.value;
   const existing = deviceList(select);
-  const next = [""].concat(devices);
+  const next = [""].concat(devices || []);
   const same = existing.length === next.length && existing.every((value, index) => value === next[index]);
   if (!same) {
-    select.replaceChildren();
+    if (typeof select.replaceChildren === "function") select.replaceChildren();
+    else select.innerHTML = "";
     const all = document.createElement("option");
     all.value = "";
-    all.textContent = "全部设备";
+    all.textContent = allLabel || "全部设备";
     select.appendChild(all);
-    for (const id of devices) {
+    for (const id of devices || []) {
+      if (id == null || id === "") continue;
       const option = document.createElement("option");
       option.value = id;
       option.textContent = id;
       select.appendChild(option);
     }
+  } else if (current && next.indexOf(current) < 0) {
+    const option = document.createElement("option");
+    option.value = current;
+    option.textContent = current;
+    select.appendChild(option);
   }
   const values = deviceList(select);
   select.value = values.indexOf(current) >= 0 ? current : "";
 }
+function sameDevice(a, b) {
+  return String(a || "").toLowerCase() === String(b || "").toLowerCase();
+}
+function openDevice(deviceId) {
+  if (!deviceId) return;
+  selectedDeviceId = String(deviceId);
+  const ids = (liveData && liveData.deviceIds && liveData.deviceIds.length)
+    ? liveData.deviceIds.slice()
+    : (liveData && liveData.devices ? liveData.devices.map(d => d.deviceId).filter(Boolean) : []);
+  if (!ids.some(id => sameDevice(id, selectedDeviceId))) ids.push(selectedDeviceId);
+  fillSelect(liveDevice, ids, "机台汇总", selectedDeviceId);
+  liveDevice.value = selectedDeviceId;
+  meta.textContent = "正在加载设备…";
+  tick();
+}
+function backToFleet() {
+  selectedDeviceId = "";
+  liveDevice.value = "";
+  liveTag.value = "";
+  tick();
+}
 
 function renderPoint(tag) {
+  if (!tag) return document.createTextNode("");
   const card = document.createElement("div");
   const color = tag.color || "#8AA0B5";
   if (tag.isSwitch) {
@@ -533,29 +632,149 @@ function renderFoot(tag) {
   return foot;
 }
 
+function renderFleet() {
+  const fleetHint = document.getElementById("fleet-hint");
+  const toolbar = document.getElementById("live-toolbar");
+  if (fleetHint) fleetHint.hidden = false;
+  if (toolbar) toolbar.hidden = true;
+  clearBoard();
+  const devices = (liveData.devices || []).filter(Boolean);
+  if (devices.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "暂无数采机台。确认订阅已启动且采集实例在发布。";
+    board.appendChild(empty);
+    return;
+  }
+  const grid = document.createElement("div");
+  grid.className = "fleet";
+  for (const device of devices) {
+    const fresh = isFresh(device.receivedAt);
+    const color = fresh ? "#3DDC97" : "#FF6B6B";
+    const card = document.createElement("div");
+    card.className = "fleet-card" + (fresh ? "" : " stale");
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.addEventListener("click", () => openDevice(device.deviceId || ""));
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openDevice(device.deviceId || "");
+      }
+    });
+    const rail = document.createElement("div");
+    rail.className = "fleet-rail";
+    rail.style.background = color;
+    const body = document.createElement("div");
+    const top = document.createElement("div");
+    top.className = "fleet-top";
+    const id = document.createElement("div");
+    id.className = "fleet-id";
+    id.textContent = text(device.deviceId);
+    top.appendChild(id);
+    body.appendChild(top);
+    if (device.lineName) {
+      const line = document.createElement("div");
+      line.className = "fleet-line";
+      line.textContent = device.lineName;
+      body.appendChild(line);
+    }
+    const freshRow = document.createElement("div");
+    freshRow.className = "fleet-fresh";
+    freshRow.style.color = color;
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = color;
+    const freshLabel = document.createElement("span");
+    freshLabel.textContent = freshnessText(device.receivedAt);
+    freshRow.appendChild(dot);
+    freshRow.appendChild(freshLabel);
+    body.appendChild(freshRow);
+    const status = document.createElement("div");
+    status.className = "fleet-status";
+    status.textContent = device.status || "";
+    body.appendChild(status);
+    const switches = (device.tags || []).filter(tag => tag.isSwitch);
+    if (switches.length > 0) {
+      const row = document.createElement("div");
+      row.className = "fleet-switches";
+      for (const tag of switches) {
+        const chip = document.createElement("span");
+        chip.className = "fleet-chip";
+        const accent = tag.color || "#8AA0B5";
+        chip.style.borderColor = accent;
+        chip.style.background = tag.background || "#101C28";
+        const chipDot = document.createElement("span");
+        chipDot.className = "chip-dot";
+        chipDot.style.background = accent;
+        const chipName = document.createElement("span");
+        chipName.className = "chip-name";
+        chipName.textContent = text(tag.name);
+        const chipValue = document.createElement("span");
+        chipValue.className = "chip-value";
+        chipValue.style.color = accent;
+        chipValue.textContent = text(tag.value);
+        chip.appendChild(chipDot);
+        chip.appendChild(chipName);
+        chip.appendChild(chipValue);
+        row.appendChild(chip);
+      }
+      body.appendChild(row);
+    }
+    const detail = document.createElement("div");
+    detail.className = "fleet-detail";
+    detail.textContent = (device.tagCount || 0) + " 个点位 · 点击查看全部";
+    body.appendChild(detail);
+    card.appendChild(rail);
+    card.appendChild(body);
+    grid.appendChild(card);
+  }
+  board.appendChild(grid);
+}
+
+function clearBoard() {
+  if (!board) return;
+  if (typeof board.replaceChildren === "function") board.replaceChildren();
+  else board.innerHTML = "";
+}
 function renderLive() {
   if (!liveData) return;
-  const devices = (liveData.devices || []).map(device => text(device.deviceId));
-  fillSelect(liveDevice, devices);
-  const selected = liveDevice.value;
-  const keyword = liveTag.value.trim().toLowerCase();
-  board.replaceChildren();
+  const devices = (liveData.deviceIds && liveData.deviceIds.length)
+    ? liveData.deviceIds.filter(Boolean)
+    : (liveData.devices || []).map(device => device && device.deviceId).filter(Boolean);
+  fillSelect(liveDevice, devices, "机台汇总", selectedDeviceId);
+  const selected = selectedDeviceId || (liveDevice && liveDevice.value) || "";
+  if (liveDevice) liveDevice.value = selected;
+  if (!selected) {
+    renderFleet();
+    return;
+  }
+
+  const fleetHint = document.getElementById("fleet-hint");
+  const toolbar = document.getElementById("live-toolbar");
+  if (fleetHint) fleetHint.hidden = true;
+  if (toolbar) toolbar.hidden = false;
+  const keyword = ((liveTag && liveTag.value) || "").trim().toLowerCase();
+  clearBoard();
   let shown = 0;
   for (const device of liveData.devices || []) {
-    if (selected && text(device.deviceId) !== selected) continue;
-    const tags = (device.tags || []).filter(tag => !keyword || text(tag.name).toLowerCase().indexOf(keyword) >= 0);
+    if (!device || !sameDevice(device.deviceId, selected)) continue;
+    const tags = (device.tags || []).filter(tag =>
+      tag && (!keyword || text(tag.name).toLowerCase().indexOf(keyword) >= 0));
     if (keyword && tags.length === 0) continue;
     shown++;
     const section = document.createElement("section");
     const head = document.createElement("div");
     head.className = "device-head";
+    const left = document.createElement("div");
     const title = document.createElement("h2");
     title.textContent = text(device.deviceId);
     const topic = document.createElement("div");
     topic.className = "topic";
     topic.textContent = device.status || "";
-    head.appendChild(title);
-    head.appendChild(topic);
+    left.appendChild(title);
+    left.appendChild(topic);
+    head.appendChild(left);
     section.appendChild(head);
     let group = null;
     let cards = null;
@@ -565,19 +784,22 @@ function renderLive() {
       if (count) count.textContent = "(" + groupSize + ")";
     }
     for (const tag of tags) {
-      if (!group || group.dataset.name !== (tag.group || "")) {
+      if (!tag) continue;
+      const groupName = tag.group || "";
+      if (!group || group.getAttribute("data-name") !== groupName) {
         closeGroup();
         groupSize = 0;
         const block = document.createElement("div");
         const label = document.createElement("div");
         label.className = "group-head";
+        label.setAttribute("data-name", groupName);
         const bar = document.createElement("span");
         bar.className = "group-bar";
         bar.style.background = tag.groupColor || "#8AA0B5";
         const name = document.createElement("span");
         name.className = "group-title";
         name.style.color = tag.groupColor || "#8AA0B5";
-        name.textContent = tag.group || "";
+        name.textContent = groupName;
         count = document.createElement("span");
         count.className = "group-count";
         label.appendChild(bar);
@@ -589,10 +811,9 @@ function renderLive() {
         block.appendChild(cards);
         section.appendChild(block);
         group = label;
-        group.dataset.name = tag.group || "";
       }
       groupSize++;
-      cards.appendChild(renderPoint(tag));
+      if (cards) cards.appendChild(renderPoint(tag));
     }
     closeGroup();
     board.appendChild(section);
@@ -720,29 +941,75 @@ function showTab(tab) {
   if (tab === "history" && !historyLoaded) loadHistory(1).catch(() => { banner.textContent = "无法连接订阅服务"; });
 }
 
+let selectedDeviceId = "";
+let tickInflight = false;
+let tickAgain = false;
 async function tick() {
+  if (tickInflight) {
+    tickAgain = true;
+    return;
+  }
+  tickInflight = true;
   try {
-    const response = await fetch("/api/status", { cache: "no-store" });
-    if (response.status === 401) { location.href = "/"; return; }
-    if (!response.ok) throw new Error(String(response.status));
-    liveData = await response.json();
-    const when = liveData.generatedAt ? new Date(liveData.generatedAt).toLocaleString() : "";
-    const run = liveData.running ? "订阅运行中" : "订阅未运行";
-    const mqtt = liveData.mqttConnected ? "MQTT 已连接" : "MQTT 未连接";
-    meta.textContent = [liveData.lineName, run, mqtt, when].filter(Boolean).join(" · ");
-    if (document.getElementById("history").hidden) banner.textContent = liveData.lastError || "";
-    renderLive();
-  } catch (error) {
-    meta.textContent = "无法连接订阅服务";
+    do {
+      tickAgain = false;
+      try {
+        // 汇总页不拉全量点位；进入单机后再带 ?device=
+        const selected = selectedDeviceId;
+        const url = selected
+          ? "/api/status?device=" + encodeURIComponent(selected)
+          : "/api/status";
+        const response = await fetch(url, { cache: "no-store" });
+        if (response.status === 401) { location.href = "/"; return; }
+        if (response.status === 503) {
+          meta.textContent = liveData ? "服务繁忙，正在重试…" : "无法连接订阅服务";
+          continue;
+        }
+        if (!response.ok) {
+          const message = (await response.text()) || ("HTTP " + response.status);
+          meta.textContent = liveData ? ("加载失败：" + message) : "无法连接订阅服务";
+          banner.textContent = message;
+          continue;
+        }
+        liveData = await response.json();
+        const when = liveData.generatedAt ? new Date(liveData.generatedAt).toLocaleString() : "";
+        const run = liveData.running ? "订阅运行中" : "订阅未运行";
+        const mqtt = liveData.mqttConnected ? "MQTT 已连接" : "MQTT 未连接";
+        meta.textContent = [liveData.lineName, run, mqtt, when].filter(Boolean).join(" · ");
+        if (document.getElementById("history").hidden) banner.textContent = liveData.lastError || "";
+        // 若等待期间又点了别的机台，丢弃本次渲染，立刻按新目标再拉。
+        if (tickAgain) continue;
+        try {
+          renderLive();
+        } catch (renderError) {
+          meta.textContent = "页面渲染失败，请刷新或返回汇总";
+          banner.textContent = (renderError && renderError.message) ? String(renderError.message) : "渲染异常";
+          try { clearBoard(); } catch (_) {}
+        }
+      } catch (error) {
+        meta.textContent = liveData
+          ? "连接中断，正在重试…"
+          : "无法连接订阅服务";
+      }
+    } while (tickAgain);
+  } finally {
+    tickInflight = false;
   }
 }
 
 const now = new Date();
 histTo.value = localInput(now);
 histFrom.value = localInput(new Date(now.getTime() - 24 * 60 * 60 * 1000));
-document.getElementById("tab-live").addEventListener("click", () => showTab("live"));
+document.getElementById("tab-live").addEventListener("click", () => {
+  backToFleet();
+  showTab("live");
+});
 document.getElementById("tab-history").addEventListener("click", () => showTab("history"));
-liveDevice.addEventListener("change", renderLive);
+document.getElementById("live-back").addEventListener("click", backToFleet);
+liveDevice.addEventListener("change", () => {
+  selectedDeviceId = liveDevice.value || "";
+  tick();
+});
 liveTag.addEventListener("input", renderLive);
 document.getElementById("hist-query").addEventListener("click", () => loadHistory(1).catch(() => { banner.textContent = "无法连接订阅服务"; }));
 document.getElementById("hist-export").addEventListener("click", exportHistory);
@@ -753,7 +1020,7 @@ document.getElementById("logout").addEventListener("click", async () => {
 histPrev.addEventListener("click", () => { if (historyPage > 1) loadHistory(historyPage - 1); });
 histNext.addEventListener("click", () => loadHistory(historyPage + 1));
 tick();
-setInterval(tick, 2000);
+setInterval(tick, 2500);
 </script>
 </body>
 </html>

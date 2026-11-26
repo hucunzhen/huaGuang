@@ -855,8 +855,8 @@ public static class LineCatalog
                 PlcAddressMapper.ApplyTo(tag, PlcProtocol.S7);
             }
             else
-            {
-                XinjeXd5eMapper.ApplyTo(tag);
+        {
+            XinjeXd5eMapper.ApplyTo(tag);
             }
         }
 

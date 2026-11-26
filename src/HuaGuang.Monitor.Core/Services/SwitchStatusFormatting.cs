@@ -53,19 +53,42 @@ public static class SwitchStatusFormatting
         return false;
     }
 
-    public static string GetAccentColor(PlcTag tag, object? value) =>
-        TryResolveColorCode(tag, value, out var code)
-            ? GetAccentColor(code)
-            : value is bool flag
-                ? (flag ? "#3DDC97" : "#FF6B6B")
-                : "#8AA0B5";
+    public static string GetAccentColor(PlcTag tag, object? value)
+    {
+        // 起毛机等点表是 0=待机;1=运行;2=故障，不能按状态码套「0=关」的红绿配色。
+        if (TryFormatDisplayText(tag, value, out var label)
+            && TryGetSemanticAccentColor(label, out var accent))
+        {
+            return accent;
+        }
 
-    public static string GetBackgroundColor(PlcTag tag, object? value) =>
-        TryResolveColorCode(tag, value, out var code)
-            ? GetBackgroundColor(code)
-            : value is bool flag
-                ? (flag ? "#143328" : "#331E24")
-                : "#152536";
+        if (TryResolveColorCode(tag, value, out var code))
+        {
+            return GetAccentColor(code);
+        }
+
+        return value is bool flag
+            ? (flag ? "#3DDC97" : "#FF6B6B")
+            : "#8AA0B5";
+    }
+
+    public static string GetBackgroundColor(PlcTag tag, object? value)
+    {
+        if (TryFormatDisplayText(tag, value, out var label)
+            && TryGetSemanticBackgroundColor(label, out var background))
+        {
+            return background;
+        }
+
+        if (TryResolveColorCode(tag, value, out var code))
+        {
+            return GetBackgroundColor(code);
+        }
+
+        return value is bool flag
+            ? (flag ? "#143328" : "#331E24")
+            : "#152536";
+    }
 
     /// <summary>
     /// 采集值是状态码；订阅收到的是产线点表里的中文文案。文案先按点表反查码，再上色。
@@ -85,6 +108,31 @@ public static class SwitchStatusFormatting
 
         code = 0;
         return false;
+    }
+
+    /// <summary>按中文状态含义上色，避免不同点表把「待机」编在 0 时被涂成关/故障红。</summary>
+    static bool TryGetSemanticAccentColor(string label, out string color)
+    {
+        color = label switch
+        {
+            "关" or "故障" or "停机" or "报警" => "#FF6B6B",
+            "开" or "运行" => "#3DDC97",
+            "待机" => "#FFB347",
+            _ => string.Empty
+        };
+        return color.Length > 0;
+    }
+
+    static bool TryGetSemanticBackgroundColor(string label, out string color)
+    {
+        color = label switch
+        {
+            "关" or "故障" or "停机" or "报警" => "#331E24",
+            "开" or "运行" => "#143328",
+            "待机" => "#332A14",
+            _ => string.Empty
+        };
+        return color.Length > 0;
     }
 
     static bool TryResolveLabelCode(PlcTag tag, string text, out int code)

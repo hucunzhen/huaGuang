@@ -60,8 +60,13 @@ public static class ValueFormatting
                 number = 0;
                 return false;
             case JsonElement element when element.ValueKind == JsonValueKind.Number:
-                number = element.GetDouble();
-                return true;
+                if (element.TryGetDouble(out number))
+                {
+                    return true;
+                }
+
+                number = 0;
+                return false;
             case JsonElement textElement when textElement.ValueKind == JsonValueKind.String &&
                                               double.TryParse(textElement.GetString(), out number):
                 return true;

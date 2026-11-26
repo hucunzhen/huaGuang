@@ -12,5 +12,8 @@ public sealed class RemoteDeviceState
     public Dictionary<string, object?> Tags { get; set; } = new(StringComparer.Ordinal);
     public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.Now;
 
+    /// <summary>网页机台卡用：稀疏克隆时保留真实点位数。</summary>
+    public int TagCountHint { get; set; }
+
     public string DisplayLabel => DeviceId;
 }

@@ -21,6 +21,7 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
     readonly ILogger<SubscriptionService> _logger;
     readonly MqttClientFactory _factory = new();
     readonly Dictionary<string, RemoteDeviceState> _devices = new(StringComparer.Ordinal);
+    readonly object _devicesGate = new();
     readonly SemaphoreSlim _gate = new(1, 1);
     readonly SemaphoreSlim _reconnectGate = new(1, 1);
     readonly CoalescedEvent _devicesUpdatedCoalescer;
@@ -50,7 +51,19 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
     public int WebClientCount => SubscribeWebSessions.ActiveCount;
     public IReadOnlyList<string> ActiveSubscribeTopics { get; private set; } = [];
 
-    public IReadOnlyDictionary<string, RemoteDeviceState> Devices => _devices;
+    public IReadOnlyDictionary<string, RemoteDeviceState> Devices
+    {
+        get
+        {
+            lock (_devicesGate)
+            {
+                return _devices.ToDictionary(
+                    pair => pair.Key,
+                    pair => RemoteDeviceStateHelper.Clone(pair.Value),
+                    StringComparer.Ordinal);
+            }
+        }
+    }
 
     public event EventHandler? DevicesUpdated;
     public event EventHandler<RemoteTelemetryEventArgs>? TelemetryReceived;
@@ -58,15 +71,57 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
 
     public IEnumerable<RemoteDeviceState> GetDevices(string? topicFilter)
     {
-        var devices = _devices.Values;
-        if (string.IsNullOrWhiteSpace(topicFilter) || topicFilter == SubscribeTopicHelper.AllTopicsLabel)
+        lock (_devicesGate)
         {
-            return devices.OrderBy(device => device.DeviceId, StringComparer.Ordinal);
-        }
+            IEnumerable<RemoteDeviceState> query = _devices.Values;
+            if (!string.IsNullOrWhiteSpace(topicFilter) &&
+                topicFilter != SubscribeTopicHelper.AllTopicsLabel)
+            {
+                query = query.Where(device => MqttTopicMatcher.IsMatch(device.SourceTopic, topicFilter));
+            }
 
-        return devices
-            .Where(device => MqttTopicMatcher.IsMatch(device.SourceTopic, topicFilter))
-            .OrderBy(device => device.DeviceId, StringComparer.Ordinal);
+            // 必须在锁内物化并克隆，避免 MQTT 写 Tags/字典时网页枚举抛错。
+            return query
+                .OrderBy(device => device.DeviceId, StringComparer.Ordinal)
+                .Select(RemoteDeviceStateHelper.Clone)
+                .ToList();
+        }
+    }
+
+    /// <summary>
+    /// 网页轮询快照。汇总拷贝全量点位供筛开关类；详情仅全量拷贝当前机台，其余只保留 Id。
+    /// </summary>
+    public IEnumerable<RemoteDeviceState> GetDevicesForWeb(string? detailDeviceId)
+    {
+        lock (_devicesGate)
+        {
+            var ordered = SubscribeDeviceOrder
+                .Order(
+                    _devices.Values,
+                    device => device.DeviceId,
+                    device => device.SourceTopic)
+                .ToList();
+            if (string.IsNullOrWhiteSpace(detailDeviceId))
+            {
+                return ordered.Select(RemoteDeviceStateHelper.Clone).ToList();
+            }
+
+            return ordered
+                .Select(device =>
+                    device.DeviceId.Equals(detailDeviceId, StringComparison.OrdinalIgnoreCase)
+                        ? RemoteDeviceStateHelper.Clone(device)
+                        : new RemoteDeviceState
+                        {
+                            DeviceKey = device.DeviceKey,
+                            DeviceId = device.DeviceId,
+                            SourceTopic = device.SourceTopic,
+                            ReceivedAt = device.ReceivedAt,
+                            Quality = device.Quality,
+                            TagCountHint = device.Tags.Count,
+                            Tags = new Dictionary<string, object?>(StringComparer.Ordinal)
+                        })
+                .ToList();
+        }
     }
 
     public async Task StartAsync()
@@ -123,7 +178,11 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             Interlocked.Increment(ref _sessionId);
             StopHeartbeat();
             ActiveSubscribeTopics = [];
-            _devices.Clear();
+            lock (_devicesGate)
+            {
+                _devices.Clear();
+            }
+
             _devicesUpdatedCoalescer.Flush();
             await DisconnectAsync(intentional: true).ConfigureAwait(false);
             if (wasRunning)
@@ -179,7 +238,10 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
         await DisconnectAsync(intentional: true).ConfigureAwait(false);
         if (clearDevices)
         {
-            _devices.Clear();
+            lock (_devicesGate)
+            {
+                _devices.Clear();
+            }
         }
 
         // 自动重连复用同一 session，避免把进行中的重连循环误判为过期而停掉。
@@ -400,10 +462,16 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             var connectedAge = _connectedAt is { } connected
                 ? (DateTimeOffset.Now - connected).TotalSeconds
                 : (double?)null;
+            int deviceCount;
+            lock (_devicesGate)
+            {
+                deviceCount = _devices.Count;
+            }
+
             _logger.LogInformation(
                 "订阅心跳 connected={Connected} devices={Devices} topics={Topics} lastMessageAgeSec={LastAge} connectedAgeSec={ConnectedAge} lastError={LastError}",
                 IsConnected,
-                _devices.Count,
+                deviceCount,
                 ActiveSubscribeTopics.Count,
                 lastAge is null ? "—" : lastAge.Value.ToString("0"),
                 connectedAge is null ? "—" : connectedAge.Value.ToString("0"),
@@ -449,25 +517,33 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
             }
 
             var deviceKey = $"{message.Topic}::{deviceId}";
-            var state = _devices.TryGetValue(deviceKey, out var existing)
-                ? existing
-                : new RemoteDeviceState
-                {
-                    DeviceKey = deviceKey,
-                    DeviceId = deviceId,
-                    SourceTopic = message.Topic
-                };
-
-            state.ReceivedAt = DateTimeOffset.Now;
-            state.Quality = parsed.Quality;
-            state.PlcHost = parsed.PlcHost;
-            state.Simulator = parsed.Simulator;
-            state.Timestamp = parsed.Timestamp;
-
-            state.Tags.Clear();
-            foreach (var pair in parsed.Tags)
+            RemoteDeviceState state;
+            lock (_devicesGate)
             {
-                state.Tags[pair.Key] = pair.Value;
+                state = _devices.TryGetValue(deviceKey, out var existing)
+                    ? existing
+                    : new RemoteDeviceState
+                    {
+                        DeviceKey = deviceKey,
+                        DeviceId = deviceId,
+                        SourceTopic = message.Topic
+                    };
+
+                state.ReceivedAt = DateTimeOffset.Now;
+                state.Quality = parsed.Quality;
+                state.PlcHost = parsed.PlcHost;
+                state.Simulator = parsed.Simulator;
+                state.Timestamp = parsed.Timestamp;
+
+                state.Tags.Clear();
+                foreach (var pair in parsed.Tags)
+                {
+                    state.Tags[pair.Key] = pair.Value;
+                }
+
+                _devices[deviceKey] = state;
+                _lastMessageAt = state.ReceivedAt;
+                PruneDevices();
             }
 
             if (state.Tags.Count == 0)
@@ -478,15 +554,12 @@ public sealed class SubscriptionService : IMonitorSubscription, IAsyncDisposable
                     profile.TagsPath);
             }
 
-            _devices[deviceKey] = state;
-            _lastMessageAt = state.ReceivedAt;
-            PruneDevices();
             LastPayload = TruncatePayload(payload);
             LastError = string.Empty;
             RequestDevicesUpdated();
             TelemetryReceived?.Invoke(this, new RemoteTelemetryEventArgs
             {
-                Device = state,
+                Device = RemoteDeviceStateHelper.Clone(state),
                 PayloadJson = LastPayload
             });
         }

@@ -113,7 +113,7 @@ public sealed class WebLoginAccountTests
             WebLoginPassword = WebLoginAccount.DefaultPassword
         };
         var model = SubscribeWebHttp.CreateReadModel(
-            () => new SubscribeWebStatus { Running = true, MqttConnected = true, LineName = "订阅大屏" },
+            _ => new SubscribeWebStatus { Running = true, MqttConnected = true, LineName = "订阅大屏" },
             () => settings,
             store);
         using var listener = new HttpListener();

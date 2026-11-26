@@ -7,17 +7,36 @@ public static class JsonValueNormalizer
     public static object? Normalize(object? value) =>
         value is JsonElement element ? FromJsonElement(element) : value;
 
-    public static object? FromJsonElement(JsonElement element) => element.ValueKind switch
+    public static object? FromJsonElement(JsonElement element)
     {
-        JsonValueKind.String => element.GetString(),
-        JsonValueKind.Number => element.TryGetInt64(out var integer) && !element.GetRawText().Contains('.')
-            ? integer
-            : element.GetDouble(),
-        JsonValueKind.True => true,
-        JsonValueKind.False => false,
-        JsonValueKind.Null => null,
-        _ => element.GetRawText()
-    };
+        try
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Number => element.TryGetInt64(out var integer) && !element.GetRawText().Contains('.')
+                    ? integer
+                    : element.TryGetDouble(out var number)
+                        ? number
+                        : element.GetRawText(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Null => null,
+                _ => element.GetRawText()
+            };
+        }
+        catch
+        {
+            try
+            {
+                return element.GetRawText();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
 
     public static bool ValuesEqual(object? left, object? right)
     {
